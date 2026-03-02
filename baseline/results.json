@@ -1,0 +1,206 @@
+[
+  {
+    "timestamp": "2026-03-02 11:02:53",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 74.315,
+      "parents_per_sec": 1.3456,
+      "per_parent_mean_ms": 743.106,
+      "per_parent_median_ms": 751.039,
+      "per_parent_p5_ms": 408.297,
+      "per_parent_p95_ms": 1100.398,
+      "per_parent_max_ms": 1501.277,
+      "children_per_parent_mean": 295605.1,
+      "children_per_parent_median": 294912.0,
+      "survivor_rate": 0.0
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 1900.2,
+        "projected_days": 79.17
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 633.4,
+        "projected_days": 26.39
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 316.7,
+        "projected_days": 13.2
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 155.12,
+        "projected_days": 6.46
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-02 11:15:18",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 125.461,
+      "parents_per_sec": 0.7971,
+      "per_parent_mean_ms": 1254.541,
+      "per_parent_median_ms": 1196.911,
+      "per_parent_p5_ms": 701.179,
+      "per_parent_p95_ms": 2080.904,
+      "per_parent_max_ms": 2619.562,
+      "children_per_parent_mean": 295605.1,
+      "children_per_parent_median": 294912.0,
+      "survivor_rate": 0.0
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 3207.95,
+        "projected_days": 133.66
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 1069.32,
+        "projected_days": 44.55
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 534.66,
+        "projected_days": 22.28
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 261.87,
+        "projected_days": 10.91
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-02 14:10:53",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 12.276,
+      "parents_per_sec": 8.1459,
+      "per_parent_mean_ms": 122.751,
+      "per_parent_median_ms": 119.263,
+      "per_parent_p5_ms": 63.024,
+      "per_parent_p95_ms": 193.161,
+      "per_parent_max_ms": 262.4,
+      "children_per_parent_mean": 295605.1,
+      "children_per_parent_median": 294912.0,
+      "survivor_rate": 0.0
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 313.89,
+        "projected_days": 13.08
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 104.63,
+        "projected_days": 4.36
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 52.32,
+        "projected_days": 2.18
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 25.62,
+        "projected_days": 1.07
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-02 14:44:24",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 14.836,
+      "parents_per_sec": 6.7405,
+      "per_parent_mean_ms": 148.336,
+      "per_parent_median_ms": 140.981,
+      "per_parent_p5_ms": 79.405,
+      "per_parent_p95_ms": 237.384,
+      "per_parent_max_ms": 340.407,
+      "children_per_parent_mean": 295605.1,
+      "children_per_parent_median": 294912.0,
+      "survivor_rate": 0.0
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 379.34,
+        "projected_days": 15.81
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 126.45,
+        "projected_days": 5.27
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 63.22,
+        "projected_days": 2.63
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 30.97,
+        "projected_days": 1.29
+      }
+    }
+  }
+]
