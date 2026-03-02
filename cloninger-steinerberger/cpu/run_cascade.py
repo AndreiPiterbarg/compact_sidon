@@ -4,6 +4,14 @@ Runs L0 (composition generation + pruning) then cascades through
 refinement levels until all survivors are eliminated or a max
 dimension is reached.
 
+Optimizations (integrated from parallel agent work):
+  - Fused generate+prune kernel: generates children on-the-fly and prunes
+    inline, avoiding 50M+ row intermediate arrays (10-18x speedup on L1-L3)
+  - _prune_dynamic with int32/int64 dispatch, pre-computed per-ell constants
+  - Numba-parallel canonicalization (replaces Python tuple comparison)
+  - Sort-based deduplication (replaces set-of-tuples)
+  - JIT warmup at module load
+
 Usage:
     python -m cloninger-steinerberger.cpu.run_cascade
     python -m cloninger-steinerberger.cpu.run_cascade --n_half 2 --m 20 --c_target 1.30
@@ -11,7 +19,9 @@ Usage:
 """
 import argparse
 import json
+import math
 import multiprocessing as mp
+import tempfile
 import os
 import sys
 import time
@@ -21,11 +31,9 @@ import numpy as np
 import numba
 from numba import njit, prange
 
-# Path setup — import from archive/cpu
+# Path setup — import from parent cloninger-steinerberger/
 _this_dir = os.path.dirname(os.path.abspath(__file__))
 _cs_dir = os.path.dirname(_this_dir)
-_archive_cpu = os.path.join(_cs_dir, 'archive', 'cpu')
-sys.path.insert(0, _archive_cpu)
 sys.path.insert(0, _cs_dir)
 
 from compositions import (generate_canonical_compositions_batched,
@@ -36,19 +44,16 @@ from test_values import compute_test_values_batch
 
 
 # =====================================================================
-# Dynamic per-window threshold (matches GPU integer-space logic exactly)
+# Dynamic per-window threshold — int32 path (m <= 200)
 # =====================================================================
 
 @njit(parallel=True, cache=True)
-def _prune_dynamic(batch_int, n_half, m, c_target):
-    """Per-window dynamic threshold matching GPU refinement kernel exactly.
+def _prune_dynamic_int32(batch_int, n_half, m, c_target):
+    """int32 path: halves memory bandwidth in autoconvolution inner loop.
 
-    Works in integer convolution space.  For each window (ell, s_lo),
-    computes W_int and the dynamic integer threshold:
-        dyn_it = floor((dyn_base + 2*W_int) * ell / (4*n) * (1 - 4*eps))
-    where dyn_base = c_target*m^2 + 1 + 1e-9*m^2.
-
-    Returns boolean mask: True = survived (not pruned).
+    Safe when m <= 200 because max prefix sum of conv = m^2 = 40000,
+    which fits comfortably in int32 (max 2,147,483,647).
+    Values are widened to int64 only at the threshold comparison point.
     """
     B = batch_int.shape[0]
     d = batch_int.shape[1]
@@ -59,27 +64,536 @@ def _prune_dynamic(batch_int, n_half, m, c_target):
     dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
     inv_4n = 1.0 / (4.0 * np.float64(n_half))
     DBL_EPS = 2.220446049250313e-16
+    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
+    d_minus_1 = d - 1
+
+    # Pre-compute per-ell constants ONCE (shared read-only across threads)
+    max_ell = 2 * d
+    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
+    for ell in range(2, max_ell + 1):
+        ell_f = np.float64(ell)
+        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
+        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
 
     for b in prange(B):
-        # Integer autoconvolution (same as GPU: conv[k] = sum_{i+j=k} c_i*c_j)
+        conv = np.zeros(conv_len, dtype=np.int32)
+        for i in range(d):
+            ci = np.int32(batch_int[b, i])
+            conv[2 * i] += ci * ci
+            for j in range(i + 1, d):
+                conv[i + j] += np.int32(2) * ci * np.int32(batch_int[b, j])
+        for k in range(1, conv_len):
+            conv[k] += conv[k - 1]
+
+        prefix_c = np.zeros(d + 1, dtype=np.int32)
+        for i in range(d):
+            prefix_c[i + 1] = prefix_c[i] + np.int32(batch_int[b, i])
+
+        pruned = False
+        for ell in range(2, max_ell + 1):
+            if pruned:
+                break
+            n_cv = ell - 1
+            dyn_base_ell = dyn_base_ell_arr[ell]
+            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
+            n_windows = conv_len - n_cv + 1
+            for s_lo in range(n_windows):
+                s_hi = s_lo + n_cv - 1
+                # Widen to int64 for the threshold comparison only
+                ws = np.int64(conv[s_hi])
+                if s_lo > 0:
+                    ws -= np.int64(conv[s_lo - 1])
+                lo_bin = s_lo - d_minus_1
+                if lo_bin < 0:
+                    lo_bin = 0
+                hi_bin = s_lo + ell - 2
+                if hi_bin > d_minus_1:
+                    hi_bin = d_minus_1
+                W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
+                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
+                dyn_it = np.int64(dyn_x * one_minus_4eps)
+                if ws > dyn_it:
+                    pruned = True
+                    break
+
+        if pruned:
+            survived[b] = False
+
+    return survived
+
+
+# =====================================================================
+# Dynamic per-window threshold — int64 path (m > 200)
+# =====================================================================
+
+@njit(parallel=True, cache=True)
+def _prune_dynamic_int64(batch_int, n_half, m, c_target):
+    """int64 path for large m values where int32 conv may overflow."""
+    B = batch_int.shape[0]
+    d = batch_int.shape[1]
+    conv_len = 2 * d - 1
+    survived = np.ones(B, dtype=numba.boolean)
+
+    m_d = np.float64(m)
+    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
+    inv_4n = 1.0 / (4.0 * np.float64(n_half))
+    DBL_EPS = 2.220446049250313e-16
+    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
+    d_minus_1 = d - 1
+
+    max_ell = 2 * d
+    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
+    for ell in range(2, max_ell + 1):
+        ell_f = np.float64(ell)
+        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
+        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
+
+    for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
         for i in range(d):
             ci = np.int64(batch_int[b, i])
             conv[2 * i] += ci * ci
             for j in range(i + 1, d):
                 conv[i + j] += np.int64(2) * ci * np.int64(batch_int[b, j])
-        # Prefix sum
         for k in range(1, conv_len):
             conv[k] += conv[k - 1]
 
-        # Prefix sum of c (for W_int)
         prefix_c = np.zeros(d + 1, dtype=np.int64)
         for i in range(d):
             prefix_c[i + 1] = prefix_c[i] + np.int64(batch_int[b, i])
 
-        # Window scan with per-window dynamic thresholds
         pruned = False
-        for ell in range(2, 2 * d + 1):
+        for ell in range(2, max_ell + 1):
+            if pruned:
+                break
+            n_cv = ell - 1
+            dyn_base_ell = dyn_base_ell_arr[ell]
+            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
+            n_windows = conv_len - n_cv + 1
+            for s_lo in range(n_windows):
+                s_hi = s_lo + n_cv - 1
+                ws = conv[s_hi]
+                if s_lo > 0:
+                    ws -= conv[s_lo - 1]
+                lo_bin = s_lo - d_minus_1
+                if lo_bin < 0:
+                    lo_bin = 0
+                hi_bin = s_lo + ell - 2
+                if hi_bin > d_minus_1:
+                    hi_bin = d_minus_1
+                W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
+                dyn_it = np.int64(dyn_x * one_minus_4eps)
+                if ws > dyn_it:
+                    pruned = True
+                    break
+
+        if pruned:
+            survived[b] = False
+
+    return survived
+
+
+def _prune_dynamic(batch_int, n_half, m, c_target):
+    """Per-window dynamic threshold — dispatches int32/int64 based on m.
+
+    Works in integer convolution space.  For each window (ell, s_lo),
+    computes W_int and the dynamic integer threshold:
+        dyn_it = floor((dyn_base + 2*W_int) * ell / (4*n) * (1 - 4*eps))
+    where dyn_base = c_target*m^2 + 1 + 1e-9*m^2.
+
+    Returns boolean mask: True = survived (not pruned).
+    """
+    if m <= 200:
+        return _prune_dynamic_int32(batch_int, n_half, m, c_target)
+    else:
+        return _prune_dynamic_int64(batch_int, n_half, m, c_target)
+
+
+# =====================================================================
+# Numba-parallel canonicalization
+# =====================================================================
+
+@njit(parallel=True, cache=True)
+def _canonicalize_inplace(arr):
+    """Replace each row with min(row, rev(row)) lexicographically, in-place.
+
+    Much faster than Python-level tuple comparisons: uses Numba prange
+    over survivors and an early-exit lexicographic comparison.
+    """
+    B = arr.shape[0]
+    d = arr.shape[1]
+    half = d // 2
+    for b in prange(B):
+        swap = False
+        for i in range(half):
+            j = d - 1 - i
+            if arr[b, j] < arr[b, i]:
+                swap = True
+                break
+            elif arr[b, j] > arr[b, i]:
+                break
+        if swap:
+            for i in range(half):
+                j = d - 1 - i
+                tmp = arr[b, i]
+                arr[b, i] = arr[b, j]
+                arr[b, j] = tmp
+
+
+# =====================================================================
+# Sort-based deduplication (Numba)
+# =====================================================================
+
+@njit(cache=True)
+def _dedup_sorted(arr, sort_idx):
+    """Given a sorted array (via sort_idx), return indices of unique rows."""
+    n = len(sort_idx)
+    d = arr.shape[1]
+    if n == 0:
+        return np.empty(0, dtype=np.int64)
+    keep = np.empty(n, dtype=np.int64)
+    keep[0] = sort_idx[0]
+    count = 1
+    for i in range(1, n):
+        curr = sort_idx[i]
+        prev = sort_idx[i - 1]
+        is_same = True
+        for j in range(d):
+            if arr[curr, j] != arr[prev, j]:
+                is_same = False
+                break
+        if not is_same:
+            keep[count] = curr
+            count += 1
+    return keep[:count]
+
+
+def _fast_dedup(arr):
+    """Deduplicate rows using lexsort + Numba scan.
+
+    Much faster than set-of-tuples for large arrays because it avoids
+    creating Python tuple objects for each row.
+    """
+    if len(arr) == 0:
+        return arr
+    d = arr.shape[1]
+    keys = tuple(arr[:, d - 1 - i] for i in range(d))
+    sort_idx = np.lexsort(keys).astype(np.int64)
+    unique_idx = _dedup_sorted(arr, sort_idx)
+    return arr[unique_idx]
+
+
+# =====================================================================
+# Sorted merge for large shards (avoids 3x RAM of load+lexsort+dedup)
+# =====================================================================
+
+@njit(cache=True)
+def _sorted_merge_dedup_kernel(a, b, out):
+    """Two-pointer merge of two sorted, deduped 2D int32 arrays.
+
+    Both inputs must be in lexicographic order with no duplicate rows
+    (as produced by _fast_dedup).  Output is sorted and deduplicated
+    (cross-shard duplicates removed).
+
+    Uses memory-mapped inputs so peak RAM is only the output buffer,
+    not 3x total like load+vstack+lexsort.
+
+    Returns number of rows written to out.
+    """
+    na = a.shape[0]
+    nb = b.shape[0]
+    d = a.shape[1]
+    i = 0
+    j = 0
+    k = 0
+
+    while i < na and j < nb:
+        # Lexicographic compare a[i] vs b[j]
+        cmp = 0
+        for c in range(d):
+            if a[i, c] < b[j, c]:
+                cmp = -1
+                break
+            elif a[i, c] > b[j, c]:
+                cmp = 1
+                break
+
+        if cmp < 0:
+            for c in range(d):
+                out[k, c] = a[i, c]
+            k += 1
+            i += 1
+        elif cmp > 0:
+            for c in range(d):
+                out[k, c] = b[j, c]
+            k += 1
+            j += 1
+        else:
+            # Equal row — take one copy, advance both
+            for c in range(d):
+                out[k, c] = a[i, c]
+            k += 1
+            i += 1
+            j += 1
+
+    while i < na:
+        for c in range(d):
+            out[k, c] = a[i, c]
+        k += 1
+        i += 1
+
+    while j < nb:
+        for c in range(d):
+            out[k, c] = b[j, c]
+        k += 1
+        j += 1
+
+    return k
+
+
+def _merge_dedup_shards(shard_paths, d, verbose=False):
+    """Merge and deduplicate disk shards using pairwise reduction.
+
+    Uses a tournament-style merge: pairs of shards are merged and
+    deduped, results written back to disk.  Peak memory is ~3x the
+    size of the two shards being merged.
+
+    Returns (array_or_None, remaining_shard_paths).
+    - If everything merges into one shard that fits in RAM:
+      returns (array, [])
+    - If shards are too large to merge in RAM:
+      returns (None, [list of shard file paths])
+    """
+    if not shard_paths:
+        return np.empty((0, d), dtype=np.int32), []
+
+    if len(shard_paths) == 1:
+        arr = np.load(shard_paths[0])
+        try:
+            os.remove(shard_paths[0])
+        except OSError:
+            pass
+        return arr, []
+
+    current = list(shard_paths)
+    merge_round = 0
+
+    while len(current) > 1:
+        merge_round += 1
+        next_round = []
+        hit_mem_limit = False
+        if verbose:
+            _log(f"       Merge round {merge_round}: {len(current)} shards")
+
+        for i in range(0, len(current), 2):
+            if i + 1 < len(current):
+                if hit_mem_limit:
+                    # Can't merge any more — carry remaining shards forward
+                    next_round.append(current[i])
+                    next_round.append(current[i + 1])
+                    continue
+
+                # Check RAM before attempting merge
+                a_size = os.path.getsize(current[i])
+                b_size = os.path.getsize(current[i + 1])
+                need_bytes = (a_size + b_size) * 3
+                try:
+                    import psutil
+                    avail = psutil.virtual_memory().available
+                except ImportError:
+                    avail = int(50e9)
+                if need_bytes > avail * 0.80:
+                    # 3x RAM too expensive — try sorted merge (1x RAM).
+                    # Shards are already lexicographically sorted by
+                    # _fast_dedup, so a two-pointer merge works.
+                    out_max_bytes = a_size + b_size
+                    if out_max_bytes <= avail * 0.85:
+                        a_mm = np.load(current[i], mmap_mode='r')
+                        b_mm = np.load(current[i + 1], mmap_mode='r')
+                        out = np.empty((len(a_mm) + len(b_mm), d),
+                                       dtype=np.int32)
+                        n_out = _sorted_merge_dedup_kernel(a_mm, b_mm, out)
+                        del a_mm, b_mm
+                        out_path = current[i] + f'.m{merge_round}.npy'
+                        np.save(out_path, out[:n_out])
+                        if verbose:
+                            _log(f"         Sorted merge ({i},{i+1}): "
+                                 f"{n_out:,} unique rows "
+                                 f"({n_out * d * 4 / 1e9:.2f} GB)")
+                        del out
+                        next_round.append(out_path)
+                        for p in [current[i], current[i + 1]]:
+                            try:
+                                os.remove(p)
+                            except OSError:
+                                pass
+                        continue
+
+                    if verbose:
+                        _log(f"       Memory limit: merge needs "
+                             f"{need_bytes/1e9:.1f} GB, "
+                             f"available {avail/1e9:.1f} GB")
+                    hit_mem_limit = True
+                    next_round.append(current[i])
+                    next_round.append(current[i + 1])
+                    continue
+
+                a = np.load(current[i])
+                b = np.load(current[i + 1])
+                combined = np.vstack([a, b])
+                del a, b
+                merged = _fast_dedup(combined)
+                del combined
+                out_path = current[i] + f'.m{merge_round}.npy'
+                np.save(out_path, merged)
+                if verbose:
+                    _log(f"         Pair ({i},{i+1}): "
+                         f"{len(merged):,} unique rows "
+                         f"({merged.nbytes/1e9:.2f} GB)")
+                del merged
+                next_round.append(out_path)
+                for p in [current[i], current[i + 1]]:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            else:
+                next_round.append(current[i])
+
+        # If no progress was made (all pairs hit mem limit), stop
+        if len(next_round) >= len(current):
+            if verbose:
+                _log(f"       Cannot reduce further — "
+                     f"{len(current)} shards remain on disk")
+            break
+        current = next_round
+
+    if len(current) == 1:
+        result = np.load(current[0])
+        try:
+            os.remove(current[0])
+        except OSError:
+            pass
+        return result, []
+    else:
+        # Multiple shards remain — too large for RAM
+        # Count total rows across shards
+        total = 0
+        for p in current:
+            # Quick row count from file size: file has 128-byte npy header
+            # then rows * d * 4 bytes
+            sz = os.path.getsize(p) - 128
+            total += sz // (d * 4)
+        if verbose:
+            _log(f"       {len(current)} unmerged shards, ~{total:,} rows total")
+        return None, current
+
+
+# =====================================================================
+# Fused generate + prune kernel (highest-impact optimization)
+# =====================================================================
+
+@njit(cache=True)
+def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
+                               lo_arr, hi_arr, out_buf):
+    """Generate children of one parent and immediately prune each one.
+
+    Replaces the pipeline of generate_children_uniform() + test_children()
+    by never materializing the full children array.  Each child is built
+    on-the-fly via a stack-based Cartesian-product iterator, subjected to
+    asymmetry + autoconvolution pruning, and only stored if it survives.
+
+    Optimization: maintains the autoconvolution incrementally.  Consecutive
+    children in the odometer differ in only 2 bins (~67% of steps), so we
+    update raw_conv in O(d) instead of recomputing in O(d^2).
+
+    Parameters
+    ----------
+    parent_int : (d_parent,) int32 array
+    n_half_child : int  (= 2 * n_half_parent = d_parent in the cascade)
+    m : int
+    c_target : float
+    lo_arr : (d_parent,) int32 — per-bin cursor lower bounds
+    hi_arr : (d_parent,) int32 — per-bin cursor upper bounds
+    out_buf : (max_survivors, d_child) int32 array (pre-allocated)
+
+    Returns
+    -------
+    n_survivors : int  (number of rows written to out_buf)
+    """
+    d_parent = parent_int.shape[0]
+    d_child = 2 * d_parent
+
+    # --- Asymmetry filter constants ---
+    m_d = np.float64(m)
+    threshold_asym = math.sqrt(c_target / 2.0)
+    margin_asym = 1.0 / (4.0 * m_d)
+    safe_threshold = threshold_asym + margin_asym
+
+    # --- Hoisted asymmetry check (constant across all children) ---
+    # sum(child[0:n_half_child]) = sum(parent_int[0:d_parent//2])
+    # because child[2k]+child[2k+1] = parent_int[k] and n_half_child = d_parent
+    left_sum_parent = np.int64(0)
+    for i in range(d_parent // 2):
+        left_sum_parent += np.int64(parent_int[i])
+    left_frac = np.float64(left_sum_parent) / m_d
+    if left_frac >= safe_threshold or left_frac <= 1.0 - safe_threshold:
+        return 0
+
+    # --- Dynamic pruning constants ---
+    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
+    inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
+    DBL_EPS = 2.220446049250313e-16
+    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
+
+    max_survivors = out_buf.shape[0]
+    n_surv = 0
+    conv_len = 2 * d_child - 1
+    carry_threshold = d_parent // 4
+
+    # --- Allocate arrays ---
+    cursor = np.empty(d_parent, dtype=np.int32)
+    for i in range(d_parent):
+        cursor[i] = lo_arr[i]
+
+    child = np.empty(d_child, dtype=np.int32)
+    prev_child = np.empty(d_child, dtype=np.int32)
+    raw_conv = np.empty(conv_len, dtype=np.int64)
+    conv = np.empty(conv_len, dtype=np.int64)
+    prefix_c = np.empty(d_child + 1, dtype=np.int64)
+
+    # --- Build initial child ---
+    for i in range(d_parent):
+        child[2 * i] = cursor[i]
+        child[2 * i + 1] = parent_int[i] - cursor[i]
+
+    # --- Compute full raw_conv for initial child ---
+    for k in range(conv_len):
+        raw_conv[k] = 0
+    for i in range(d_child):
+        ci = np.int64(child[i])
+        raw_conv[2 * i] += ci * ci
+        for j in range(i + 1, d_child):
+            raw_conv[i + j] += np.int64(2) * ci * np.int64(child[j])
+
+    while True:
+        # --- Copy raw_conv to conv and prefix-sum ---
+        for k in range(conv_len):
+            conv[k] = raw_conv[k]
+        for k in range(1, conv_len):
+            conv[k] += conv[k - 1]
+
+        # --- Compute prefix_c ---
+        prefix_c[0] = 0
+        for i in range(d_child):
+            prefix_c[i + 1] = prefix_c[i] + np.int64(child[i])
+
+        # --- Window scan (dynamic pruning) ---
+        pruned = False
+        for ell in range(2, 2 * d_child + 1):
             if pruned:
                 break
             n_cv = ell - 1
@@ -91,24 +605,323 @@ def _prune_dynamic(batch_int, n_half, m, c_target):
                 ws = conv[s_hi]
                 if s_lo > 0:
                     ws -= conv[s_lo - 1]
-                # W_int: sum of c in support bins [lo_bin, hi_bin]
-                lo_bin = s_lo - (d - 1)
+                lo_bin = s_lo - (d_child - 1)
                 if lo_bin < 0:
                     lo_bin = 0
                 hi_bin = s_lo + ell - 2
-                if hi_bin > d - 1:
-                    hi_bin = d - 1
+                if hi_bin > d_child - 1:
+                    hi_bin = d_child - 1
                 W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
                 dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
-                dyn_it = np.int64(dyn_x * (1.0 - 4.0 * DBL_EPS))
+                dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
                     break
 
-        if pruned:
-            survived[b] = False
+        if not pruned:
+            # --- Survivor! Canonicalize: min(child, rev(child)) lex ---
+            use_rev = False
+            for i in range(d_child):
+                j = d_child - 1 - i
+                if child[j] < child[i]:
+                    use_rev = True
+                    break
+                elif child[j] > child[i]:
+                    break
 
-    return survived
+            if n_surv < max_survivors:
+                if use_rev:
+                    for i in range(d_child):
+                        out_buf[n_surv, i] = child[d_child - 1 - i]
+                else:
+                    for i in range(d_child):
+                        out_buf[n_surv, i] = child[i]
+                n_surv += 1
+
+        # --- Advance cursor (odometer increment) ---
+        carry = d_parent - 1
+        while carry >= 0:
+            cursor[carry] += 1
+            if cursor[carry] <= hi_arr[carry]:
+                break
+            cursor[carry] = lo_arr[carry]
+            carry -= 1
+
+        if carry < 0:
+            break
+
+        # --- Build new child for changed positions ---
+        n_changed = d_parent - carry
+
+        if n_changed == 1:
+            # === FAST PATH: only last position changed (~67% of steps) ===
+            pos = d_parent - 1
+            k1 = 2 * pos
+            k2 = k1 + 1
+            old1 = np.int64(child[k1])
+            old2 = np.int64(child[k2])
+            child[k1] = cursor[pos]
+            child[k2] = parent_int[pos] - cursor[pos]
+            new1 = np.int64(child[k1])
+            new2 = np.int64(child[k2])
+            delta1 = new1 - old1
+            delta2 = new2 - old2
+
+            # Self-terms
+            raw_conv[2 * k1] += new1 * new1 - old1 * old1
+            raw_conv[2 * k2] += new2 * new2 - old2 * old2
+            # Mutual term
+            raw_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+            # Cross-terms with all unchanged bins (j < k1)
+            for j in range(k1):
+                cj = np.int64(child[j])
+                raw_conv[k1 + j] += np.int64(2) * delta1 * cj
+                raw_conv[k2 + j] += np.int64(2) * delta2 * cj
+
+        elif n_changed <= carry_threshold:
+            # === SHORT CARRY: incremental update for 2..threshold positions ===
+            first_changed_bin = 2 * carry
+
+            # Save prev_child (only needed for incremental path)
+            for i in range(d_child):
+                prev_child[i] = child[i]
+
+            # Rebuild changed child bins
+            for pos in range(carry, d_parent):
+                child[2 * pos] = cursor[pos]
+                child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+
+            # Self + mutual terms for each changed position pair
+            for pos in range(carry, d_parent):
+                k1 = 2 * pos
+                k2 = k1 + 1
+                old1 = np.int64(prev_child[k1])
+                old2 = np.int64(prev_child[k2])
+                new1 = np.int64(child[k1])
+                new2 = np.int64(child[k2])
+                raw_conv[2 * k1] += new1 * new1 - old1 * old1
+                raw_conv[2 * k2] += new2 * new2 - old2 * old2
+                raw_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+
+            # Cross-terms between different changed position pairs
+            for pa in range(carry, d_parent):
+                a1 = 2 * pa
+                a2 = a1 + 1
+                new_a1 = np.int64(child[a1])
+                new_a2 = np.int64(child[a2])
+                old_a1 = np.int64(prev_child[a1])
+                old_a2 = np.int64(prev_child[a2])
+                for pb in range(pa + 1, d_parent):
+                    b1 = 2 * pb
+                    b2 = b1 + 1
+                    new_b1 = np.int64(child[b1])
+                    new_b2 = np.int64(child[b2])
+                    old_b1 = np.int64(prev_child[b1])
+                    old_b2 = np.int64(prev_child[b2])
+                    raw_conv[a1 + b1] += np.int64(2) * (new_a1 * new_b1 - old_a1 * old_b1)
+                    raw_conv[a1 + b2] += np.int64(2) * (new_a1 * new_b2 - old_a1 * old_b2)
+                    raw_conv[a2 + b1] += np.int64(2) * (new_a2 * new_b1 - old_a2 * old_b1)
+                    raw_conv[a2 + b2] += np.int64(2) * (new_a2 * new_b2 - old_a2 * old_b2)
+
+            # Cross-terms between changed bins and unchanged bins
+            for pos in range(carry, d_parent):
+                k1 = 2 * pos
+                k2 = k1 + 1
+                delta1 = np.int64(child[k1]) - np.int64(prev_child[k1])
+                delta2 = np.int64(child[k2]) - np.int64(prev_child[k2])
+                for j in range(first_changed_bin):
+                    cj = np.int64(child[j])
+                    raw_conv[k1 + j] += np.int64(2) * delta1 * cj
+                    raw_conv[k2 + j] += np.int64(2) * delta2 * cj
+
+        else:
+            # === DEEP CARRY: full recompute (8+ positions changed) ===
+            for pos in range(carry, d_parent):
+                child[2 * pos] = cursor[pos]
+                child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+
+            for k in range(conv_len):
+                raw_conv[k] = 0
+            for i in range(d_child):
+                ci = np.int64(child[i])
+                raw_conv[2 * i] += ci * ci
+                for j in range(i + 1, d_child):
+                    raw_conv[i + j] += np.int64(2) * ci * np.int64(child[j])
+
+    return n_surv
+
+
+def _compute_bin_ranges(parent_int, m, c_target, d_child):
+    """Compute per-bin lo/hi cursor ranges and total children count.
+
+    Returns (lo_arr, hi_arr, total_children) or None if any bin has empty range.
+    """
+    d_parent = len(parent_int)
+    corr = 2.0 / m + 1.0 / (m * m)
+    thresh = c_target + corr + 1e-9
+    x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
+    x_cap = min(x_cap, m)
+    x_cap = max(x_cap, 0)
+
+    lo_arr = np.empty(d_parent, dtype=np.int32)
+    hi_arr = np.empty(d_parent, dtype=np.int32)
+    total_children = 1
+    for i in range(d_parent):
+        b_i = int(parent_int[i])
+        lo = max(0, b_i - x_cap)
+        hi = min(b_i, x_cap)
+        if lo > hi:
+            return None
+        lo_arr[i] = lo
+        hi_arr[i] = hi
+        total_children *= (hi - lo + 1)
+
+    return lo_arr, hi_arr, total_children
+
+
+def process_parent_fused(parent_int, m, c_target, n_half_child):
+    """Wrapper: compute x_cap, allocate buffer, call fused kernel.
+
+    Returns
+    -------
+    survivors : (K, d_child) int32 array
+    total_children : int  (total Cartesian product size, for stats)
+    """
+    d_parent = len(parent_int)
+    d_child = 2 * d_parent
+
+    result = _compute_bin_ranges(parent_int, m, c_target, d_child)
+    if result is None:
+        return np.empty((0, d_child), dtype=np.int32), 0
+    lo_arr, hi_arr, total_children = result
+
+    if total_children == 0:
+        return np.empty((0, d_child), dtype=np.int32), 0
+
+    # Scale buffer cap with dimension to avoid OOM at higher levels.
+    # At d_child=64, 10M rows = 2.56 GB per worker — too much for many-worker pools.
+    # Survival rate drops sharply at higher dimensions, so 1M rows is ample.
+    if d_child <= 16:
+        buf_cap = 10_000_000
+    elif d_child <= 32:
+        buf_cap = 5_000_000
+    else:
+        buf_cap = 1_000_000
+    max_buf = min(total_children, buf_cap)
+    out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+
+    n_survivors = _fused_generate_and_prune(
+        parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+
+    if n_survivors > max_buf:
+        n_survivors = max_buf
+
+    return out_buf[:n_survivors].copy(), total_children
+
+
+def process_parent_verbose(parent_int, m, c_target, n_half_child,
+                            parent_idx, n_parents):
+    """Like process_parent_fused but logs intra-parent progress.
+
+    Splits the Cartesian product along cursor[0]'s range so we can
+    log between slices.  Falls back to single-shot for small parents.
+
+    Returns
+    -------
+    survivors : (K, d_child) int32 array
+    total_children : int
+    """
+    d_parent = len(parent_int)
+    d_child = 2 * d_parent
+    label = f"parent {parent_idx+1}/{n_parents}"
+
+    result = _compute_bin_ranges(parent_int, m, c_target, d_child)
+    if result is None:
+        _log(f"       {label}: empty range, skipped")
+        return np.empty((0, d_child), dtype=np.int32), 0
+    lo_arr, hi_arr, total_children = result
+
+    if total_children == 0:
+        _log(f"       {label}: 0 children")
+        return np.empty((0, d_child), dtype=np.int32), 0
+
+    n_slices = int(hi_arr[0]) - int(lo_arr[0]) + 1
+
+    # Small parent or only 1 slice → single-shot
+    if total_children < 500_000 or n_slices <= 1:
+        _log(f"       {label}: {total_children:,} children (single pass)...")
+        surv, tc = process_parent_fused(parent_int, m, c_target, n_half_child)
+        _log(f"       {label}: done, {len(surv):,} survivors")
+        return surv, tc
+
+    # Large parent → split by cursor[0] value for progress
+    _log(f"       {label}: {total_children:,} children, "
+         f"{n_slices} slices on bin[0]")
+
+    children_per_slice = total_children // n_slices
+    all_survivors = []
+    total_survived = 0
+    t_start = time.time()
+
+    slice_lo = lo_arr.copy()
+    slice_hi = hi_arr.copy()
+
+    for si, v0 in enumerate(range(int(lo_arr[0]), int(hi_arr[0]) + 1)):
+        slice_lo[0] = np.int32(v0)
+        slice_hi[0] = np.int32(v0)
+
+        max_buf = min(children_per_slice, 10_000_000)
+        out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+
+        n_surv = _fused_generate_and_prune(
+            parent_int, n_half_child, m, c_target,
+            slice_lo, slice_hi, out_buf)
+
+        if n_surv > max_buf:
+            n_surv = max_buf
+        if n_surv > 0:
+            all_survivors.append(out_buf[:n_surv].copy())
+            total_survived += n_surv
+
+        # Log every slice, or at least every 5 seconds
+        done_slices = si + 1
+        elapsed = time.time() - t_start
+        if done_slices == n_slices or done_slices % max(1, n_slices // 20) == 0:
+            rate = done_slices / elapsed if elapsed > 0 else 0
+            eta = (n_slices - done_slices) / rate if rate > 0 else 0
+            pct = done_slices / n_slices * 100
+            _log(f"       {label}: slice {done_slices}/{n_slices} "
+                 f"({pct:.0f}%) {total_survived:,} surv, "
+                 f"ETA {_fmt_time(eta)}")
+
+    if all_survivors:
+        survivors = np.vstack(all_survivors)
+    else:
+        survivors = np.empty((0, d_child), dtype=np.int32)
+
+    elapsed = time.time() - t_start
+    _log(f"       {label}: done in {_fmt_time(elapsed)}, "
+         f"{len(survivors):,} survivors")
+    return survivors, total_children
+
+
+# =====================================================================
+# JIT warmup
+# =====================================================================
+
+def _warmup_jit():
+    """Warm up Numba JIT for common array dimensions at import time."""
+    for d in (4, 8):
+        dummy = np.zeros((1, d), dtype=np.int32)
+        _prune_dynamic_int32(dummy, d // 2, 20, 1.3)
+        _prune_dynamic_int64(dummy, d // 2, 300, 1.3)
+        _canonical_mask(dummy)
+        _canonicalize_inplace(dummy.copy())
+    # Warm up sorted merge kernel
+    _dm = np.zeros((1, 4), dtype=np.int32)
+    _sorted_merge_dedup_kernel(_dm, _dm, np.zeros((2, 4), dtype=np.int32))
+
+_warmup_jit()
 
 
 # =====================================================================
@@ -133,8 +946,8 @@ def run_level0(n_half, m, c_target, verbose=True):
     corr = correction(m)
 
     if verbose:
-        print(f"\n[L0] d={d}, m={m}, compositions={n_total:,}")
-        print(f"     correction={corr:.6f}, threshold={c_target+corr:.6f}")
+        _log(f"\n[L0] d={d}, m={m}, compositions={n_total:,}")
+        _log(f"     correction={corr:.6f}, threshold={c_target+corr:.6f}")
 
     t0 = time.time()
     all_survivors = []
@@ -142,9 +955,12 @@ def run_level0(n_half, m, c_target, verbose=True):
     n_pruned_test = 0
     n_processed = 0
     n_non_canonical = 0
+    n_batches = 0
+    last_report = t0
 
     for batch in generate_compositions_batched(d, S, batch_size=200_000):
         n_processed += len(batch)
+        n_batches += 1
 
         # Canonical filter (match GPU: only c <= rev(c))
         canon = _canonical_mask(batch)
@@ -170,6 +986,19 @@ def run_level0(n_half, m, c_target, verbose=True):
         if len(survivors) > 0:
             all_survivors.append(survivors)
 
+        # Progress: report every 2 seconds or every batch if slow
+        now = time.time()
+        if verbose and (now - last_report >= 2.0):
+            pct = n_processed / n_total * 100 if n_total > 0 else 0
+            n_surv_so_far = sum(len(s) for s in all_survivors)
+            elapsed_so_far = now - t0
+            rate = n_processed / elapsed_so_far if elapsed_so_far > 0 else 0
+            eta = (n_total - n_processed) / rate if rate > 0 else 0
+            _log(f"     [L0] {n_processed:,}/{n_total:,} ({pct:.1f}%) "
+                 f"| {n_surv_so_far:,} survivors | "
+                 f"ETA {_fmt_time(eta)}")
+            last_report = now
+
     elapsed = time.time() - t0
 
     if all_survivors:
@@ -181,12 +1010,12 @@ def run_level0(n_half, m, c_target, verbose=True):
     proven = n_survivors == 0
 
     if verbose:
-        print(f"     {elapsed:.2f}s: {n_processed:,} compositions processed")
-        print(f"     asym pruned: {n_pruned_asym:,}, "
-              f"test pruned: {n_pruned_test:,}, "
-              f"survivors: {n_survivors:,}")
+        _log(f"     {elapsed:.2f}s: {n_processed:,} compositions processed")
+        _log(f"     asym pruned: {n_pruned_asym:,}, "
+             f"test pruned: {n_pruned_test:,}, "
+             f"survivors: {n_survivors:,}")
         if proven:
-            print(f"     PROVEN at L0!")
+            _log(f"     PROVEN at L0!")
 
     return {
         'survivors': all_survivors,
@@ -200,7 +1029,7 @@ def run_level0(n_half, m, c_target, verbose=True):
 
 
 # =====================================================================
-# Refinement: uniform full-bin split (matches GPU semantics)
+# Refinement: uniform full-bin split (legacy — kept as fallback)
 # =====================================================================
 
 def generate_children_uniform(parent_int, m, c_target):
@@ -225,7 +1054,6 @@ def generate_children_uniform(parent_int, m, c_target):
     # x_cap: single-bin energy cap (matches GPU host_refine.cuh)
     corr = 2.0 / m + 1.0 / (m * m)
     thresh = c_target + corr + 1e-9
-    import math
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
@@ -309,33 +1137,23 @@ def test_children(children_int, n_half_child, m, c_target):
 
     N, d_child = children_int.shape
 
-    # NOTE: No canonical filter here. At refinement levels, we only refine
-    # canonical parents P. Children of P include both canonical and
-    # non-canonical compositions. The non-canonical child C has the same
-    # autoconvolution as rev(C), which is a child of rev(P). Since rev(P)
-    # is not in our parent list, we must test C here (equivalently testing
-    # rev(C)). Survivors are canonicalized after testing.
-
     # Asymmetry filter
     needs_check = asymmetry_prune_mask(children_int, n_half_child, m, c_target)
     n_asym = int(np.sum(~needs_check))
-    candidates = children_int[needs_check]
+    candidates = np.ascontiguousarray(children_int[needs_check])
 
     if len(candidates) > 0:
         # Dynamic per-window threshold
         survived_mask = _prune_dynamic(candidates, n_half_child, m, c_target)
-        survivors = candidates[survived_mask]
+        survivors = np.ascontiguousarray(candidates[survived_mask])
         n_test = int(np.sum(~survived_mask))
     else:
         survivors = np.empty((0, d_child), dtype=np.int32)
         n_test = 0
 
-    # Canonicalize survivors: replace each with min(c, rev(c)) lex
+    # Canonicalize survivors using Numba parallel kernel
     if len(survivors) > 0:
-        for i in range(len(survivors)):
-            rev = survivors[i, ::-1].copy()
-            if tuple(rev) < tuple(survivors[i]):
-                survivors[i] = rev
+        _canonicalize_inplace(survivors)
 
     return survivors, {
         'n_tested': N,
@@ -355,8 +1173,37 @@ def _init_worker_threads(n_threads):
     numba.set_num_threads(n_threads)
 
 
-def _process_single_parent(args):
-    """Worker: generate children for one parent, prune, return survivors."""
+def _process_single_parent_fused(args):
+    """Worker: generate + prune children for one parent using fused kernel.
+
+    Avoids materializing the full children array — generates each child
+    on-the-fly and prunes inline.
+    """
+    parent, m, c_target, n_half_child, batch_size = args
+
+    survivors, total_children = process_parent_fused(
+        parent, m, c_target, n_half_child)
+
+    n_survived = len(survivors)
+
+    if n_survived > 0:
+        result = survivors
+    else:
+        result = None
+
+    return result, {
+        'children': total_children,
+        'asym': 0,
+        'test': 0,
+        'survived': n_survived,
+    }
+
+
+def _process_single_parent_legacy(args):
+    """Legacy worker: generate children for one parent, prune, return survivors.
+
+    Kept as fallback — the fused version is the default.
+    """
     parent, m, c_target, n_half_child, batch_size = args
 
     children = generate_children_uniform(parent, m, c_target)
@@ -395,12 +1242,116 @@ def _process_single_parent(args):
     }
 
 
+def _process_single_parent(args):
+    """Worker: generate + prune children for one parent.
+
+    Uses the fused kernel by default.
+    """
+    return _process_single_parent_fused(args)
+
+
+# =====================================================================
+# Shared-memory multiprocessing helpers
+# =====================================================================
+
+def _init_worker_shm(mmap_path, shape, dtype_str, m, c_target, n_half_child,
+                     numba_threads):
+    """Pool initializer: open mmap of parent array and store params in globals."""
+    numba.set_num_threads(numba_threads)
+    global _shared_parents, _shm_m, _shm_c_target, _shm_n_half_child
+    _shared_parents = np.memmap(mmap_path, dtype=np.dtype(dtype_str),
+                                mode='r', shape=shape)
+    _shm_m = m
+    _shm_c_target = c_target
+    _shm_n_half_child = n_half_child
+
+
+def _process_parent_shm(idx):
+    """Worker: process parent at index idx from shared memory array."""
+    parent = _shared_parents[idx].copy()  # local copy from shared mem
+    survivors, total_children = process_parent_fused(
+        parent, _shm_m, _shm_c_target, _shm_n_half_child)
+    n_survived = len(survivors)
+    result = survivors if n_survived > 0 else None
+    return result, {
+        'children': total_children,
+        'asym': 0,
+        'test': 0,
+        'survived': n_survived,
+    }
+
+
+# =====================================================================
+# Checkpoint helpers
+# =====================================================================
+
+def _save_checkpoint(output_dir, level, survivors, meta):
+    """Save survivors array and metadata after a completed level."""
+    os.makedirs(output_dir, exist_ok=True)
+    npy_path = os.path.join(output_dir, f'checkpoint_L{level}_survivors.npy')
+    meta_path = os.path.join(output_dir, 'checkpoint_meta.json')
+
+    np.save(npy_path, survivors)
+
+    def _convert(obj):
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+
+    with open(meta_path, 'w') as f:
+        json.dump(meta, f, indent=2, default=_convert)
+
+    _log(f"     Checkpoint saved: {npy_path} "
+         f"({survivors.nbytes / 1e9:.2f} GB, {len(survivors):,} rows)")
+
+
+def _load_checkpoint(resume_dir, n_half, m, c_target):
+    """Load checkpoint if it exists and parameters match.
+
+    Returns (survivors, level_num, info) or None.
+    """
+    meta_path = os.path.join(resume_dir, 'checkpoint_meta.json')
+    if not os.path.exists(meta_path):
+        return None
+
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    # Validate parameters match
+    if (meta['n_half'] != n_half or meta['m'] != m
+            or meta['c_target'] != c_target):
+        _log(f"     Checkpoint found but parameters don't match:")
+        _log(f"       checkpoint: n_half={meta['n_half']}, m={meta['m']}, "
+             f"c_target={meta['c_target']}")
+        _log(f"       requested:  n_half={n_half}, m={m}, "
+             f"c_target={c_target}")
+        return None
+
+    level = meta['level_completed']
+    npy_path = os.path.join(resume_dir,
+                            f'checkpoint_L{level}_survivors.npy')
+    if not os.path.exists(npy_path):
+        _log(f"     Checkpoint meta found but {npy_path} missing")
+        return None
+
+    survivors = np.load(npy_path)
+    _log(f"     Loaded checkpoint: L{level} complete, "
+         f"{len(survivors):,} survivors (d={survivors.shape[1]})")
+
+    info = meta.get('info', {})
+    return survivors, level, info
+
+
 # =====================================================================
 # Cascade runner
 # =====================================================================
 
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
-                verbose=True):
+                verbose=True, output_dir='data', resume_dir=None):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
@@ -418,6 +1369,10 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         None = auto-detect CPU count.
     verbose : bool
         Print progress.
+    output_dir : str
+        Directory for checkpoints and results.
+    resume_dir : str or None
+        Directory to look for checkpoint files.  If None, uses output_dir.
 
     Returns
     -------
@@ -425,7 +1380,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
     """
     if n_workers is None:
         n_workers = mp.cpu_count()
-    n_workers = max(1, n_workers)
+    # Cap at physical core count (hyperthreads don't help Numba-parallel workloads)
+    n_workers = max(1, min(n_workers, mp.cpu_count()))
 
     # Ensure enough file descriptors for spawn-based multiprocessing
     # (each worker needs ~6 fds for pipes/semaphores)
@@ -443,41 +1399,79 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
     n_total = count_compositions(d0, m)
 
     if verbose:
-        print(f"\n{'='*70}")
-        print(f"CPU CASCADE PROVER")
-        print(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
-        print(f"  correction={corr:.6f}, effective threshold={c_target+corr:.6f}")
-        print(f"  L0 compositions: {n_total:,}")
-        print(f"  workers: {n_workers} (CPUs: {mp.cpu_count()})")
-        print(f"  max refinement levels: {max_levels}")
-        print(f"{'='*70}")
+        _log(f"\n{'='*70}")
+        _log(f"CPU CASCADE PROVER")
+        _log(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
+        _log(f"  correction={corr:.6f}, effective threshold={c_target+corr:.6f}")
+        _log(f"  L0 compositions: {n_total:,}")
+        _log(f"  workers: {n_workers} (CPUs: {mp.cpu_count()})")
+        _log(f"  max refinement levels: {max_levels}")
+        _log(f"{'='*70}")
+
+    if resume_dir is None:
+        resume_dir = output_dir
 
     t_total = time.time()
 
-    # --- Level 0 ---
-    l0 = run_level0(n_half, m, c_target, verbose=verbose)
+    # --- Try to resume from checkpoint ---
+    resume_result = _load_checkpoint(resume_dir, n_half, m, c_target)
+    start_level = 0  # 0 means run L0 fresh
 
-    info = {
-        'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
-        'correction': corr,
-        'l0_time': l0['elapsed'],
-        'l0_survivors': l0['n_survivors'],
-        'l0_pruned_asym': l0['n_pruned_asym'],
-        'l0_pruned_test': l0['n_pruned_test'],
-        'levels': [],
-    }
+    if resume_result is not None:
+        current_configs, last_completed, saved_info = resume_result
+        start_level = last_completed + 1
+        d_parent = current_configs.shape[1]
+        # n_half doubles each level: at level L, n_half_parent = n_half * 2^L
+        n_half_parent = n_half * (2 ** last_completed)
 
-    if l0['proven']:
-        info['proven_at'] = 'L0'
-        info['total_time'] = time.time() - t_total
-        return info
+        info = saved_info if isinstance(saved_info, dict) else {}
+        # Ensure required keys exist
+        info.setdefault('n_half', n_half)
+        info.setdefault('m', m)
+        info.setdefault('d0', d0)
+        info.setdefault('c_target', c_target)
+        info.setdefault('correction', corr)
+        info.setdefault('levels', [])
+
+        if verbose:
+            _log(f"\n  RESUMING from L{last_completed} checkpoint")
+            _log(f"  {len(current_configs):,} survivors at d={d_parent}")
+            _log(f"  Skipping L0 through L{last_completed}")
+
+    if start_level == 0:
+        # --- Level 0 (fresh run) ---
+        l0 = run_level0(n_half, m, c_target, verbose=verbose)
+
+        info = {
+            'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
+            'correction': corr,
+            'l0_time': l0['elapsed'],
+            'l0_survivors': l0['n_survivors'],
+            'l0_pruned_asym': l0['n_pruned_asym'],
+            'l0_pruned_test': l0['n_pruned_test'],
+            'levels': [],
+        }
+
+        if l0['proven']:
+            info['proven_at'] = 'L0'
+            info['total_time'] = time.time() - t_total
+            return info
+
+        current_configs = l0['survivors']
+        d_parent = d0
+        n_half_parent = n_half
+
+        # Checkpoint L0 survivors
+        _save_checkpoint(output_dir, 0, current_configs, {
+            'n_half': n_half, 'm': m, 'c_target': c_target,
+            'level_completed': 0,
+            'd_survivors': d_parent,
+            'n_survived': len(current_configs),
+            'info': info,
+        })
 
     # --- Refinement levels ---
-    current_configs = l0['survivors']
-    d_parent = d0
-    n_half_parent = n_half
-
-    for level_num in range(1, max_levels + 1):
+    for level_num in range(max(1, start_level), max_levels + 1):
         d_child = 2 * d_parent
         n_half_child = 2 * n_half_parent
         n_parents = len(current_configs)
@@ -486,110 +1480,214 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             break
 
         if verbose:
-            print(f"\n[L{level_num}] d_parent={d_parent} -> d_child={d_child}, "
-                  f"{n_parents:,} parents")
+            _log(f"\n[L{level_num}] d_parent={d_parent} -> d_child={d_child}, "
+                 f"{n_parents:,} parents")
 
         t_level = time.time()
-        all_survivors = []
         total_children = 0
-        total_canonical = 0
-        total_asym = 0
-        total_test = 0
         total_survived = 0
+        report_interval = _progress_interval(n_parents)
+
+        # Memory-safe survivor collection: accumulate in RAM up to a
+        # budget, then spill to disk shards.  Final dedup merges shards.
+        bytes_per_row = d_child * 4
+        try:
+            import psutil
+            avail_bytes = psutil.virtual_memory().available
+        except ImportError:
+            avail_bytes = int(64e9 * 0.80)
+        # Reserve memory for shared array + workers + OS.
+        # _fast_dedup needs ~3x the array size (input + sort index + output),
+        # so the safe in-RAM batch is 1/4 of available budget.
+        shm_bytes = 0  # mmap: parent array lives in OS page cache, not process RSS
+        survivor_mem_budget = max(int(1e9),
+            (avail_bytes - shm_bytes - int(10e9)) // 4)
+        shard_threshold = max(100_000, survivor_mem_budget // bytes_per_row)
+        if verbose:
+            _log(f"     Survivor spool: {survivor_mem_budget/1e9:.1f} GB "
+                 f"in-RAM ({shard_threshold:,} rows), then disk shards")
+
+        all_survivors = []
+        all_survivors_rows = 0
+        shard_dir = os.path.join(output_dir, f'_shards_L{level_num}')
+        shard_paths = []
+        n_shards = 0
+
+        def _flush_to_shard():
+            nonlocal all_survivors, all_survivors_rows, n_shards
+            if not all_survivors:
+                return
+            batch = np.vstack(all_survivors)
+            batch = _fast_dedup(batch)
+            os.makedirs(shard_dir, exist_ok=True)
+            path = os.path.join(shard_dir, f'shard_{n_shards:04d}.npy')
+            np.save(path, batch)
+            shard_paths.append(path)
+            n_shards += 1
+            if verbose:
+                _log(f"     Flushed shard {n_shards}: {len(batch):,} unique rows "
+                     f"({batch.nbytes/1e9:.2f} GB)")
+            all_survivors = []
+            all_survivors_rows = 0
 
         if n_workers > 1 and n_parents > n_workers:
-            # --- Parallel path: distribute parents across workers ---
-            numba_threads = max(1, mp.cpu_count() // n_workers)
-            work = [(current_configs[i], m, c_target, n_half_child, 500_000)
-                    for i in range(n_parents)]
-            chunksize = max(1, n_parents // (n_workers * 20))
+            # --- Parallel path: shared memory + index dispatch ---
+
+            # Memory-aware worker cap.
+            # Budget: total - shm - survivor_spool*4 (for dedup) - 6GB OS/Python.
+            # Each worker holds: buf_cap * d_child * 4 bytes output buffer
+            # + ~300MB Python/Numba/stack overhead.
+            if d_child <= 16:
+                _buf_cap = 10_000_000
+            elif d_child <= 32:
+                _buf_cap = 5_000_000
+            else:
+                _buf_cap = 1_000_000
+            per_worker_bytes = _buf_cap * d_child * 4 + 300 * 1024 * 1024
+            # Reserve: shm + 3x survivor budget (dedup needs input+sortidx+output) + 6 GB OS
+            reserved = shm_bytes + survivor_mem_budget * 3 + int(6e9)
+            worker_mem_budget = max(int(1e9), avail_bytes - reserved)
+            max_by_mem = max(1, int(worker_mem_budget / per_worker_bytes))
+            if n_workers > max_by_mem:
+                if verbose:
+                    _log(f"     Memory cap: {n_workers} -> {max_by_mem} workers "
+                         f"(avail={avail_bytes/1e9:.1f}GB, "
+                         f"per_worker={per_worker_bytes/1e9:.2f}GB, "
+                         f"shm={shm_bytes/1e9:.2f}GB)")
+                n_workers_level = max_by_mem
+            else:
+                n_workers_level = n_workers
+
+            numba_threads = max(1, mp.cpu_count() // n_workers_level)
+            chunksize = max(1, min(n_parents // (n_workers_level * 20), 128))
+
+            # Write parent array to a temp file; workers mmap it read-only
+            parents_shape = current_configs.shape
+            parents_dtype_str = current_configs.dtype.str
+            parents_nbytes = current_configs.nbytes
+            fd, mmap_path = tempfile.mkstemp(
+                suffix=f'_L{level_num}_parents.dat', dir=output_dir)
+            os.close(fd)
+            current_configs.tofile(mmap_path)
+            del current_configs  # free RAM; workers mmap from disk
 
             if verbose:
-                print(f"     (parallel: {n_workers} workers, "
-                      f"chunksize={chunksize}, "
-                      f"numba_threads={numba_threads})")
+                mmap_gb = parents_nbytes / 1e9
+                _log(f"     (parallel: {n_workers_level} workers, "
+                     f"chunksize={chunksize}, "
+                     f"numba_threads={numba_threads}, "
+                     f"mmap={mmap_gb:.2f} GB)")
 
             completed = 0
-            # Use "spawn" context — "fork" is unsafe after Numba/OpenMP
-            # initializes threads in the main process.
+            last_report = time.time()
             ctx = mp.get_context("spawn")
-            with ctx.Pool(n_workers, initializer=_init_worker_threads,
-                          initargs=(numba_threads,)) as pool:
-                for surv, stats in pool.imap_unordered(
-                        _process_single_parent, work,
-                        chunksize=chunksize):
-                    total_children += stats['children']
-                    total_asym += stats['asym']
-                    total_test += stats['test']
-                    total_survived += stats['survived']
-                    completed += 1
+            try:
+                with ctx.Pool(
+                        n_workers_level,
+                        initializer=_init_worker_shm,
+                        initargs=(mmap_path, parents_shape,
+                                  parents_dtype_str,
+                                  m, c_target, n_half_child,
+                                  numba_threads)) as pool:
+                    for surv, stats in pool.imap_unordered(
+                            _process_parent_shm, range(n_parents),
+                            chunksize=chunksize):
+                        total_children += stats['children']
+                        total_survived += stats['survived']
+                        completed += 1
 
-                    if surv is not None:
-                        all_survivors.append(surv)
+                        if surv is not None:
+                            all_survivors.append(surv)
+                            all_survivors_rows += len(surv)
 
-                    if verbose and n_parents > 100 and completed % 1000 == 0:
-                        elapsed_so_far = time.time() - t_level
-                        rate = completed / elapsed_so_far
-                        eta = (n_parents - completed) / rate
-                        print(f"     [{completed}/{n_parents}] "
-                              f"{total_survived:,} survivors so far, "
-                              f"ETA {_fmt_time(eta)}")
+                        # Flush to disk when in-RAM budget exceeded
+                        if all_survivors_rows >= shard_threshold:
+                            _flush_to_shard()
+
+                        now = time.time()
+                        if verbose and (completed % report_interval == 0
+                                        or now - last_report >= 5.0):
+                            elapsed_so_far = now - t_level
+                            rate = completed / elapsed_so_far if elapsed_so_far > 0 else 0
+                            eta = (n_parents - completed) / rate if rate > 0 else 0
+                            pct = completed / n_parents * 100
+                            _log(f"     [{completed}/{n_parents}] ({pct:.1f}%) "
+                                 f"{total_survived:,} survivors so far, "
+                                 f"shards={n_shards}, "
+                                 f"ETA {_fmt_time(eta)}")
+                            last_report = now
+            finally:
+                try:
+                    os.remove(mmap_path)
+                except OSError:
+                    pass  # Windows: file may still be held if worker crashed
 
         else:
-            # --- Sequential path (original, for small parent sets) ---
+            # --- Sequential path: use verbose per-parent progress ---
             for p_idx in range(n_parents):
                 parent = current_configs[p_idx]
 
-                children = generate_children_uniform(parent, m, c_target)
-                n_children = len(children)
+                if verbose:
+                    survivors, n_children = process_parent_verbose(
+                        parent, m, c_target, n_half_child,
+                        p_idx, n_parents)
+                else:
+                    survivors, n_children = process_parent_fused(
+                        parent, m, c_target, n_half_child)
                 total_children += n_children
+                n_survived_this = len(survivors)
+                total_survived += n_survived_this
 
-                if n_children == 0:
-                    continue
+                if n_survived_this > 0:
+                    all_survivors.append(survivors)
+                    all_survivors_rows += n_survived_this
 
-                batch_size = 500_000
-                for start in range(0, n_children, batch_size):
-                    end = min(start + batch_size, n_children)
-                    batch = children[start:end]
-
-                    survivors, stats = test_children(
-                        batch, n_half_child, m, c_target)
-
-                    total_canonical += stats.get('n_canonical', 0)
-                    total_asym += stats['n_asym']
-                    total_test += stats['n_test']
-                    total_survived += stats['n_survived']
-
-                    if len(survivors) > 0:
-                        all_survivors.append(survivors)
-
-                if verbose and n_parents > 100 and (p_idx + 1) % 1000 == 0:
-                    elapsed_so_far = time.time() - t_level
-                    rate = (p_idx + 1) / elapsed_so_far
-                    eta = (n_parents - p_idx - 1) / rate
-                    print(f"     [{p_idx+1}/{n_parents}] "
-                          f"{total_survived:,} survivors so far, "
-                          f"ETA {_fmt_time(eta)}")
+                if all_survivors_rows >= shard_threshold:
+                    _flush_to_shard()
 
         elapsed_level = time.time() - t_level
 
+        # --- Merge shards + remaining in-RAM survivors ---
         if all_survivors:
+            # Flush last batch
+            _flush_to_shard()
+
+        remaining_shards = []
+        if shard_paths:
+            # Multi-shard: load and merge-dedup incrementally
+            if verbose:
+                _log(f"     Merging {len(shard_paths)} shards...")
+            merged, remaining_shards = _merge_dedup_shards(
+                shard_paths, d_child, verbose)
+            if merged is not None:
+                all_survivors = merged
+                try:
+                    os.rmdir(shard_dir)
+                except OSError:
+                    pass
+            else:
+                # Survivors too large for RAM — save as sharded checkpoint
+                all_survivors = np.empty((0, d_child), dtype=np.int32)
+        elif all_survivors:
             all_survivors = np.vstack(all_survivors)
-            # Deduplicate — the same canonical survivor can arise from
-            # multiple parents (a child of P and a child of Q may
-            # canonicalize to the same composition)
-            seen = set()
-            unique_idx = []
-            for i in range(len(all_survivors)):
-                key = tuple(all_survivors[i])
-                if key not in seen:
-                    seen.add(key)
-                    unique_idx.append(i)
-            all_survivors = all_survivors[unique_idx]
+            all_survivors = _fast_dedup(all_survivors)
         else:
             all_survivors = np.empty((0, d_child), dtype=np.int32)
 
-        n_survived = len(all_survivors)
+        if remaining_shards:
+            # Count rows across shards (approximate — may have cross-shard dupes)
+            n_survived = 0
+            for sp in remaining_shards:
+                sz = os.path.getsize(sp) - 128
+                n_survived += sz // (d_child * 4)
+            if verbose:
+                total_gb = sum(os.path.getsize(p) for p in remaining_shards) / 1e9
+                _log(f"     Survivors on disk: {n_survived:,} rows in "
+                     f"{len(remaining_shards)} shards ({total_gb:.1f} GB)")
+                _log(f"     TOO LARGE for RAM — cannot continue cascade.")
+                _log(f"     Shards saved in: {shard_dir}")
+        else:
+            n_survived = len(all_survivors)
 
         if n_parents > 0:
             factor = n_survived / n_parents
@@ -603,8 +1701,6 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             'parents_in': n_parents,
             'total_children': total_children,
             'children_per_parent': total_children / max(1, n_parents),
-            'asym_pruned': total_asym,
-            'test_pruned': total_test,
             'survivors_out': n_survived,
             'expansion_factor': factor,
             'elapsed': elapsed_level,
@@ -612,16 +1708,22 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         info['levels'].append(lvl_info)
 
         if verbose:
-            print(f"     {elapsed_level:.2f}s: {total_children:,} children "
-                  f"({total_children/max(1,n_parents):.1f}/parent)")
-            print(f"     asym: {total_asym:,}, "
-                  f"test: {total_test:,}, "
-                  f"survivors: {n_survived:,} (factor={factor:.4f}x)")
+            _log(f"     {elapsed_level:.2f}s: {total_children:,} children "
+                 f"({total_children/max(1,n_parents):.1f}/parent)")
+            _log(f"     survivors: {n_survived:,} (factor={factor:.4f}x)")
             if n_survived == 0:
-                print(f"     PROVEN at L{level_num}!")
+                _log(f"     PROVEN at L{level_num}!")
 
         if n_survived == 0:
             info['proven_at'] = f'L{level_num}'
+            break
+
+        if remaining_shards:
+            # Survivors too large to fit in RAM — stop cascade here.
+            # Shards are already on disk for manual inspection/resume.
+            info['stopped_at'] = f'L{level_num}'
+            info['stopped_reason'] = 'survivors_exceed_ram'
+            info['shard_paths'] = remaining_shards
             break
 
         # Prepare next level
@@ -629,21 +1731,52 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         d_parent = d_child
         n_half_parent = n_half_child
 
+        # Checkpoint survivors after each completed level
+        _save_checkpoint(output_dir, level_num, current_configs, {
+            'n_half': n_half, 'm': m, 'c_target': c_target,
+            'level_completed': level_num,
+            'd_survivors': d_child,
+            'n_survived': n_survived,
+            'info': info,
+        })
+
     info['total_time'] = time.time() - t_total
 
     if verbose:
-        print(f"\n{'='*70}")
+        _log(f"\n{'='*70}")
         if 'proven_at' in info:
-            print(f"PROVEN: c >= {c_target} (cascade converges at "
-                  f"{info['proven_at']})")
+            _log(f"PROVEN: c >= {c_target} (cascade converges at "
+                 f"{info['proven_at']})")
         else:
             n_remain = len(current_configs) if len(current_configs) > 0 else 0
-            print(f"NOT PROVEN: {n_remain:,} survivors remain at "
-                  f"d={d_parent}")
-        print(f"Total time: {_fmt_time(info['total_time'])}")
-        print(f"{'='*70}")
+            _log(f"NOT PROVEN: {n_remain:,} survivors remain at "
+                 f"d={d_parent}")
+        _log(f"Total time: {_fmt_time(info['total_time'])}")
+        _log(f"{'='*70}")
 
     return info
+
+
+# =====================================================================
+# Progress helpers
+# =====================================================================
+
+def _log(msg):
+    """Print with immediate flush so remote/piped output is visible."""
+    print(msg, flush=True)
+
+
+def _progress_interval(n_total):
+    """Choose a sensible progress reporting interval based on total count."""
+    if n_total <= 10:
+        return 1
+    if n_total <= 100:
+        return 10
+    if n_total <= 1000:
+        return 100
+    if n_total <= 10_000:
+        return 500
+    return 1000
 
 
 # =====================================================================
@@ -717,6 +1850,9 @@ def main():
                         help='Parallel workers (default: CPU count)')
     parser.add_argument('--output_dir', type=str, default='data',
                         help='Output directory (default: data)')
+    parser.add_argument('--resume', nargs='?', const='data', default=None,
+                        help='Resume from checkpoint (optionally specify dir, '
+                             'default: data)')
     parser.add_argument('--quiet', action='store_true',
                         help='Minimal output')
     args = parser.parse_args()
@@ -728,6 +1864,8 @@ def main():
         max_levels=args.max_levels,
         n_workers=args.workers,
         verbose=not args.quiet,
+        output_dir=args.output_dir,
+        resume_dir=args.resume,
     )
 
     print_summary(info)
