@@ -20,7 +20,7 @@ import json
 from math import comb
 from datetime import datetime
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cloninger-steinerberger'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cloninger-steinerberger'))
 from core import find_best_bound_direct, correction, count_compositions
 
 
