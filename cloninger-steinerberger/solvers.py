@@ -146,7 +146,7 @@ def _find_min_eff_d4(c0_order, S, n_half, inv_m, margin, corr, init_min_eff):
 
                 best = 0.0
                 done = False
-                for ell in range(2, d + 1):
+                for ell in range(2, 2 * d + 1):
                     if done:
                         break
                     n_cv = ell - 1
@@ -283,7 +283,7 @@ def _find_min_eff_d6(c0_order, S, n_half, inv_m, margin, corr, init_min_eff):
                         best = 0.0
                         early_thresh = local_min + corr
                         done = False
-                        for ell in range(2, d + 1):
+                        for ell in range(2, 2 * d + 1):
                             if done:
                                 break
                             n_cv = ell - 1
@@ -473,7 +473,7 @@ def _find_min_eff_generic(c0_order, S, d, n_half, inv_m, margin, corr, init_min_
                     best = 0.0
                     early_thresh = local_min + corr
                     done = False
-                    for ell in range(2, d + 1):
+                    for ell in range(2, 2 * d + 1):
                         if done:
                             break
                         n_cv = ell - 1
@@ -741,7 +741,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
 
                     best = 0.0
                     pruned = False
-                    for ell in range(2, d + 1):
+                    for ell in range(2, 2 * d + 1):
                         if pruned:
                             break
                         n_cv = ell - 1
@@ -973,7 +973,7 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
 
                 best = 0.0
                 pruned = False
-                for ell in range(2, d + 1):
+                for ell in range(2, 2 * d + 1):
                     if pruned:
                         break
                     n_cv = ell - 1
@@ -1142,7 +1142,7 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
 
                         best = 0.0
                         pruned = False
-                        for ell in range(2, d + 1):
+                        for ell in range(2, 2 * d + 1):
                             if pruned:
                                 break
                             n_cv = ell - 1
