@@ -13,18 +13,18 @@ load_dotenv(PROJECT_ROOT / ".env")
 RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "")
 
 # CPU pod configuration
-# Available CPU3 Compute-Optimized sizes:
-#   cpu3c-4-8    →  4 vCPU,  8 GB, ~$0.12/hr
-#   cpu3c-8-16   →  8 vCPU, 16 GB, ~$0.24/hr
-#   cpu3c-16-32  → 16 vCPU, 32 GB, ~$0.46/hr
-#   cpu3c-32-64  → 32 vCPU, 64 GB, ~$0.92/hr
+# Available CPU3 sizes (all have same vCPU, differ in RAM):
+#   cpu3c (Compute-Optimized, 2x RAM):  cpu3c-32-64   → 32 vCPU,  64 GB
+#   cpu3g (General Purpose,   4x RAM):  cpu3g-32-128  → 32 vCPU, 128 GB
+#   cpu3m (Memory-Optimized,  8x RAM):  cpu3m-32-256  → 32 vCPU, 256 GB
 INSTANCE_ID = "cpu3c-32-64"
 TEMPLATE_ID = "runpod-ubuntu"
 CLOUD_TYPE = "SECURE"  # SECURE = on-demand (not spot)
+CONTAINER_DISK_GB = 320  # GB container disk (RunPod max, ~$0.048/hr)
 
 # Cost tracking
-COST_PER_HOUR = 0.92   # USD/hr for CPU3 Compute-Optimized 32vCPU/64GB
-BUDGET_LIMIT = 25.0    # USD per session
+COST_PER_HOUR = 0.53   # USD/hr for CPU3 Compute-Optimized 32vCPU/64GB
+BUDGET_LIMIT = 106.0   # USD per session (~100 hrs at $1.06/hr)
 BUDGET_WARN_PCT = 0.80
 
 # Paths

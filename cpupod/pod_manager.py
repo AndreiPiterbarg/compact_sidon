@@ -3,7 +3,8 @@ import time
 
 import runpod as runpod_sdk
 
-from .config import RUNPOD_API_KEY, INSTANCE_ID, TEMPLATE_ID, CLOUD_TYPE, SSH_KEY_PATH
+from .config import (RUNPOD_API_KEY, INSTANCE_ID, TEMPLATE_ID, CLOUD_TYPE,
+                     CONTAINER_DISK_GB, SSH_KEY_PATH)
 
 
 def _init_sdk():
@@ -37,7 +38,7 @@ def create_pod(name="sidon-cpu"):
         instance_id=INSTANCE_ID,
         template_id=TEMPLATE_ID,
         cloud_type=CLOUD_TYPE,
-        container_disk_in_gb=20,
+        container_disk_in_gb=CONTAINER_DISK_GB,
         env={"PUBLIC_KEY": pub_key},
         ports="22/tcp",
     )

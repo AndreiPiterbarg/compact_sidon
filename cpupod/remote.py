@@ -141,7 +141,7 @@ def run_script(ssh_host, ssh_port, script=DEFAULT_SCRIPT,
         log_file = os.path.join(log_dir, f"cpu_run_{timestamp}.log")
         print(f"Logging output to: {log_file}")
 
-    cmd = f"cd {REMOTE_WORKDIR} && {PYTHON} {script} {args}"
+    cmd = f"cd {REMOTE_WORKDIR} && {PYTHON} -u {script} {args}"
     rc = ssh_run(ssh_host, ssh_port, cmd, timeout=timeout, stream=True,
                  log_file=log_file)
     if rc != 0:

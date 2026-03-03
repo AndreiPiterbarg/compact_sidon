@@ -779,8 +779,25 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child):
     return lo_arr, hi_arr, total_children
 
 
-def process_parent_fused(parent_int, m, c_target, n_half_child):
+def _default_buf_cap(d_child):
+    """Default survivor buffer capacity, scaled by dimension."""
+    if d_child <= 16:
+        return 10_000_000
+    elif d_child <= 32:
+        return 5_000_000
+    else:
+        return 10_000       # 10K rows ~2.5 MB at d=64; survival rate ≈ 0 at L4+
+
+
+def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
     """Wrapper: compute x_cap, allocate buffer, call fused kernel.
+
+    Parameters
+    ----------
+    buf_cap : int or None
+        Max rows for the output buffer.  *None* → ``_default_buf_cap(d_child)``.
+        If the kernel reports more survivors than fit, the buffer is
+        re-allocated at the exact size and the kernel re-run.
 
     Returns
     -------
@@ -798,15 +815,8 @@ def process_parent_fused(parent_int, m, c_target, n_half_child):
     if total_children == 0:
         return np.empty((0, d_child), dtype=np.int32), 0
 
-    # Scale buffer cap with dimension to avoid OOM at higher levels.
-    # At d_child=64, 10M rows = 2.56 GB per worker — too much for many-worker pools.
-    # Survival rate drops sharply at higher dimensions, so 1M rows is ample.
-    if d_child <= 16:
-        buf_cap = 10_000_000
-    elif d_child <= 32:
-        buf_cap = 5_000_000
-    else:
-        buf_cap = 1_000_000
+    if buf_cap is None:
+        buf_cap = _default_buf_cap(d_child)
     max_buf = min(total_children, buf_cap)
     out_buf = np.empty((max_buf, d_child), dtype=np.int32)
 
@@ -814,7 +824,15 @@ def process_parent_fused(parent_int, m, c_target, n_half_child):
         parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
 
     if n_survivors > max_buf:
-        n_survivors = max_buf
+        # Overflow: re-allocate exact-size buffer and re-run.
+        max_buf = n_survivors
+        out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+        n2 = _fused_generate_and_prune(
+            parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+        assert n2 == n_survivors, (
+            f"Non-deterministic kernel: first run {n_survivors}, "
+            f"retry {n2}")
+        n_survivors = n2
 
     return out_buf[:n_survivors].copy(), total_children
 
@@ -870,7 +888,8 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
         slice_lo[0] = np.int32(v0)
         slice_hi[0] = np.int32(v0)
 
-        max_buf = min(children_per_slice, 10_000_000)
+        slice_buf_cap = _default_buf_cap(d_child)
+        max_buf = min(children_per_slice, slice_buf_cap)
         out_buf = np.empty((max_buf, d_child), dtype=np.int32)
 
         n_surv = _fused_generate_and_prune(
@@ -878,7 +897,15 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
             slice_lo, slice_hi, out_buf)
 
         if n_surv > max_buf:
-            n_surv = max_buf
+            # Overflow: re-allocate and re-run
+            max_buf = n_surv
+            out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+            n2 = _fused_generate_and_prune(
+                parent_int, n_half_child, m, c_target,
+                slice_lo, slice_hi, out_buf)
+            assert n2 == n_surv, (
+                f"Non-deterministic kernel: first run {n_surv}, retry {n2}")
+            n_surv = n2
         if n_surv > 0:
             all_survivors.append(out_buf[:n_surv].copy())
             total_survived += n_surv
@@ -1178,11 +1205,18 @@ def _process_single_parent_fused(args):
 
     Avoids materializing the full children array — generates each child
     on-the-fly and prunes inline.
+
+    Accepts 5-element tuple (parent, m, c_target, n_half_child, batch_size)
+    or 6-element tuple with optional buf_cap as last element.
     """
-    parent, m, c_target, n_half_child, batch_size = args
+    if len(args) >= 6:
+        parent, m, c_target, n_half_child, batch_size, buf_cap = args[:6]
+    else:
+        parent, m, c_target, n_half_child, batch_size = args
+        buf_cap = None
 
     survivors, total_children = process_parent_fused(
-        parent, m, c_target, n_half_child)
+        parent, m, c_target, n_half_child, buf_cap=buf_cap)
 
     n_survived = len(survivors)
 
@@ -1534,18 +1568,13 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             # --- Parallel path: shared memory + index dispatch ---
 
             # Memory-aware worker cap.
-            # Budget: total - shm - survivor_spool*4 (for dedup) - 6GB OS/Python.
-            # Each worker holds: buf_cap * d_child * 4 bytes output buffer
-            # + ~300MB Python/Numba/stack overhead.
-            if d_child <= 16:
-                _buf_cap = 10_000_000
-            elif d_child <= 32:
-                _buf_cap = 5_000_000
-            else:
-                _buf_cap = 1_000_000
-            per_worker_bytes = _buf_cap * d_child * 4 + 300 * 1024 * 1024
-            # Reserve: shm + 3x survivor budget (dedup needs input+sortidx+output) + 6 GB OS
-            reserved = shm_bytes + survivor_mem_budget * 3 + int(6e9)
+            # Workers and dedup don't peak concurrently: dedup runs in the
+            # main process between imap_unordered batches, and the shard
+            # flush frees the accumulator before the next fill cycle.
+            # Reserve: 1x survivor spool (pre-flush peak) + 4 GB OS/main.
+            _buf_cap = _default_buf_cap(d_child)
+            per_worker_bytes = _buf_cap * d_child * 4 + 150 * 1024 * 1024
+            reserved = shm_bytes + survivor_mem_budget + int(4e9)
             worker_mem_budget = max(int(1e9), avail_bytes - reserved)
             max_by_mem = max(1, int(worker_mem_budget / per_worker_bytes))
             if n_workers > max_by_mem:

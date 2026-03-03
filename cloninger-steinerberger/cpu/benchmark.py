@@ -16,11 +16,9 @@ import time
 import numpy as np
 from math import comb
 
-# Path setup
+# Path setup — import from parent cloninger-steinerberger/
 _this_dir = os.path.dirname(os.path.abspath(__file__))
 _cs_dir = os.path.dirname(_this_dir)
-_archive_cpu = os.path.join(_cs_dir, 'archive', 'cpu')
-sys.path.insert(0, _archive_cpu)
 sys.path.insert(0, _cs_dir)
 
 from compositions import generate_canonical_compositions_batched

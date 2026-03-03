@@ -28,7 +28,7 @@ We build on the Cloninger-Steinerberger branch-and-prune algorithm:
    - **Test-value computation**: check all windows; if the best lower bound exceeds the target, the point is pruned.
 5. If ALL grid points are pruned, the lower bound is **rigorously proven**.
 
-The original paper reached $n = 24$ (48 bins), $m = 50$, using ~20,000 CPU hours on Yale HPC with GPU acceleration. Our current work focuses on optimized CUDA kernels for NVIDIA A100 cloud GPUs to push to larger parameter regimes.
+The original paper reached $n = 24$ (48 bins), $m = 50$, using ~20,000 CPU hours on Yale HPC with GPU acceleration. Our current implementation targets $c \geq 1.4$ with $n=2$, $m=20$, running the cascade on cloud CPU (~150 hours for L4).
 
 ## Repository Structure
 

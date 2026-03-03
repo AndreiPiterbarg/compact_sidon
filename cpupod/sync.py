@@ -40,10 +40,14 @@ def sync_code(ssh_host, ssh_port):
     excludes = " ".join(f"--exclude '{p}'" for p in SYNC_EXCLUDES)
     ssh_opts = _ssh_opts_str()
 
+    # Preserve data/ (checkpoints) on the remote — only remove code files,
+    # then overlay the new code on top.
     pipeline = (
         f"tar cf - {excludes} . | "
         f"ssh -p {ssh_port} {ssh_opts} root@{ssh_host} "
-        f"'rm -rf {REMOTE_WORKDIR} && mkdir -p {REMOTE_WORKDIR} && tar xf - --no-same-owner -C {REMOTE_WORKDIR}'"
+        f"'mkdir -p {REMOTE_WORKDIR} && "
+        f"find {REMOTE_WORKDIR} -maxdepth 1 -mindepth 1 ! -name data -exec rm -rf {{}} + && "
+        f"tar xf - --no-same-owner -C {REMOTE_WORKDIR}'"
     )
 
     result = _run_bash(pipeline, cwd=str(PROJECT_ROOT))
