@@ -197,7 +197,7 @@ def warmup_jit():
     buf = np.empty((1, D_CHILD), dtype=np.int32)
     parent = np.zeros(D_PARENT, dtype=np.int32)
     parent[0] = M
-    _fused_generate_and_prune(parent, N_HALF_CHILD, M, C_TARGET, lo, hi, buf)
+    _fused_generate_and_prune(parent, N_HALF_CHILD, M, C_TARGET, lo, hi, buf)  # returns tuple, ignored
     # Also do a second call to ensure all code paths are compiled
     real_parent = np.zeros(D_PARENT, dtype=np.int32)
     real_parent[0] = 3

@@ -522,7 +522,9 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
 
     Returns
     -------
-    n_survivors : int  (number of rows written to out_buf)
+    (n_survivors, n_subtree_pruned) : (int, int)
+        n_survivors: number of rows written to out_buf
+        n_subtree_pruned: number of subtrees skipped by partial-autoconv check
     """
     d_parent = parent_int.shape[0]
     d_child = 2 * d_parent
@@ -546,7 +548,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         left_sum_parent += np.int64(parent_int[i])
     left_frac = np.float64(left_sum_parent) / m_d
     if left_frac >= safe_threshold or left_frac <= 1.0 - safe_threshold:
-        return 0
+        return 0, 0
 
     # --- Dynamic pruning constants ---
     dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
@@ -559,6 +561,12 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     conv_len = 2 * d_child - 1
     carry_threshold = d_parent // 4
 
+    # --- Prefix sum of parent bins (for W_int_max in subtree pruning) ---
+    parent_prefix = np.empty(d_parent + 1, dtype=np.int64)
+    parent_prefix[0] = 0
+    for i in range(d_parent):
+        parent_prefix[i + 1] = parent_prefix[i] + np.int64(parent_int[i])
+
     # --- Allocate arrays ---
     cursor = np.empty(d_parent, dtype=np.int32)
     for i in range(d_parent):
@@ -569,6 +577,14 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     raw_conv = np.empty(conv_len, dtype=np.int32)
     conv = np.empty(conv_len, dtype=np.int32)
     prefix_c = np.empty(d_child + 1, dtype=np.int64)
+    n_subtree_pruned = 0
+
+    # Quick-check state: track the (ell, s_lo) that killed the previous child.
+    # When qc_ell > 0, we try that same window first on the next child,
+    # computing the window sum directly from raw_conv (O(ell) instead of O(conv_len)).
+    qc_ell = np.int32(0)       # 0 = not yet tracking (first child)
+    qc_s = np.int32(0)         # s_lo of tracked window
+    qc_W_int = np.int64(0)     # W_int for tracked window on current child
 
     # --- Build initial child ---
     for i in range(d_parent):
@@ -623,67 +639,83 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             raw_conv[i + j] += np.int32(2) * ci * np.int32(child[j])
 
     while True:
-        # --- Copy raw_conv to conv and prefix-sum ---
-        for k in range(conv_len):
-            conv[k] = raw_conv[k]
-        for k in range(1, conv_len):
-            conv[k] += conv[k - 1]
+        # --- Quick check: re-try previous killing window on raw_conv ---
+        quick_killed = False
+        if qc_ell > 0:
+            n_cv_qc = qc_ell - 1
+            ws_qc = np.int64(0)
+            for k in range(qc_s, qc_s + n_cv_qc):
+                ws_qc += np.int64(raw_conv[k])
+            ell_idx_qc = qc_ell - 2
+            dyn_x_qc = dyn_base_ell_arr[ell_idx_qc] + two_ell_arr[ell_idx_qc] * np.float64(qc_W_int)
+            dyn_it_qc = np.int64(dyn_x_qc * one_minus_4eps)
+            if ws_qc > dyn_it_qc:
+                quick_killed = True
 
-        # --- Compute prefix_c ---
-        prefix_c[0] = 0
-        for i in range(d_child):
-            prefix_c[i + 1] = prefix_c[i] + np.int64(child[i])
+        if not quick_killed:
+            # --- Copy raw_conv to conv and prefix-sum ---
+            for k in range(conv_len):
+                conv[k] = raw_conv[k]
+            for k in range(1, conv_len):
+                conv[k] += conv[k - 1]
 
-        # --- Window scan (dynamic pruning, optimized ell order) ---
-        pruned = False
-        for ell_oi in range(ell_count):
-            if pruned:
-                break
-            ell = ell_order[ell_oi]
-            n_cv = ell - 1
-            ell_idx = ell - 2
-            dyn_base_ell = dyn_base_ell_arr[ell_idx]
-            two_ell_inv_4n = two_ell_arr[ell_idx]
-            n_windows = conv_len - n_cv + 1
-            for s_lo in range(n_windows):
-                s_hi = s_lo + n_cv - 1
-                # Widen to int64 for the comparison to avoid int32 overflow
-                # on the subtraction (conv values can be up to m^2 * d_child)
-                ws = np.int64(conv[s_hi])
-                if s_lo > 0:
-                    ws -= np.int64(conv[s_lo - 1])
-                lo_bin = s_lo - (d_child - 1)
-                if lo_bin < 0:
-                    lo_bin = 0
-                hi_bin = s_lo + ell - 2
-                if hi_bin > d_child - 1:
-                    hi_bin = d_child - 1
-                W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
-                dyn_it = np.int64(dyn_x * one_minus_4eps)
-                if ws > dyn_it:
-                    pruned = True
-                    break
-
-        if not pruned:
-            # --- Survivor! Canonicalize: min(child, rev(child)) lex ---
-            use_rev = False
+            # --- Compute prefix_c ---
+            prefix_c[0] = 0
             for i in range(d_child):
-                j = d_child - 1 - i
-                if child[j] < child[i]:
-                    use_rev = True
-                    break
-                elif child[j] > child[i]:
-                    break
+                prefix_c[i + 1] = prefix_c[i] + np.int64(child[i])
 
-            if n_surv < max_survivors:
-                if use_rev:
-                    for i in range(d_child):
-                        out_buf[n_surv, i] = child[d_child - 1 - i]
-                else:
-                    for i in range(d_child):
-                        out_buf[n_surv, i] = child[i]
-                n_surv += 1
+            # --- Window scan (dynamic pruning, optimized ell order) ---
+            pruned = False
+            for ell_oi in range(ell_count):
+                if pruned:
+                    break
+                ell = ell_order[ell_oi]
+                n_cv = ell - 1
+                ell_idx = ell - 2
+                dyn_base_ell = dyn_base_ell_arr[ell_idx]
+                two_ell_inv_4n = two_ell_arr[ell_idx]
+                n_windows = conv_len - n_cv + 1
+                for s_lo in range(n_windows):
+                    s_hi = s_lo + n_cv - 1
+                    # Widen to int64 for the comparison to avoid int32 overflow
+                    # on the subtraction (conv values can be up to m^2 * d_child)
+                    ws = np.int64(conv[s_hi])
+                    if s_lo > 0:
+                        ws -= np.int64(conv[s_lo - 1])
+                    lo_bin = s_lo - (d_child - 1)
+                    if lo_bin < 0:
+                        lo_bin = 0
+                    hi_bin = s_lo + ell - 2
+                    if hi_bin > d_child - 1:
+                        hi_bin = d_child - 1
+                    W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                    dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
+                    dyn_it = np.int64(dyn_x * one_minus_4eps)
+                    if ws > dyn_it:
+                        pruned = True
+                        qc_ell = np.int32(ell)
+                        qc_s = np.int32(s_lo)
+                        break
+
+            if not pruned:
+                # --- Survivor! Canonicalize: min(child, rev(child)) lex ---
+                use_rev = False
+                for i in range(d_child):
+                    j = d_child - 1 - i
+                    if child[j] < child[i]:
+                        use_rev = True
+                        break
+                    elif child[j] > child[i]:
+                        break
+
+                if n_surv < max_survivors:
+                    if use_rev:
+                        for i in range(d_child):
+                            out_buf[n_surv, i] = child[d_child - 1 - i]
+                    else:
+                        for i in range(d_child):
+                            out_buf[n_surv, i] = child[i]
+                    n_surv += 1
 
         # --- Advance cursor (odometer increment) ---
         carry = d_parent - 1
@@ -724,6 +756,19 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 cj = np.int32(child[j])
                 raw_conv[k1 + j] += np.int32(2) * delta1 * cj
                 raw_conv[k2 + j] += np.int32(2) * delta2 * cj
+
+            # Quick-check: O(1) W_int update (only bins k1, k2 changed)
+            if qc_ell > 0:
+                qc_lo = qc_s - (d_child - 1)
+                if qc_lo < 0:
+                    qc_lo = 0
+                qc_hi = qc_s + qc_ell - 2
+                if qc_hi > d_child - 1:
+                    qc_hi = d_child - 1
+                if qc_lo <= k1 and k1 <= qc_hi:
+                    qc_W_int += np.int64(delta1)
+                if qc_lo <= k2 and k2 <= qc_hi:
+                    qc_W_int += np.int64(delta2)
 
         elif n_changed <= carry_threshold:
             # === SHORT CARRY: incremental update for 2..threshold positions ===
@@ -781,8 +826,141 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     raw_conv[k1 + j] += np.int32(2) * delta1 * cj
                     raw_conv[k2 + j] += np.int32(2) * delta2 * cj
 
+            # Quick-check: recompute W_int (multiple bins changed)
+            if qc_ell > 0:
+                qc_lo = qc_s - (d_child - 1)
+                if qc_lo < 0:
+                    qc_lo = 0
+                qc_hi = qc_s + qc_ell - 2
+                if qc_hi > d_child - 1:
+                    qc_hi = d_child - 1
+                qc_W_int = np.int64(0)
+                for i in range(qc_lo, qc_hi + 1):
+                    qc_W_int += np.int64(child[i])
+
         else:
-            # === DEEP CARRY: full recompute (8+ positions changed) ===
+            # === DEEP CARRY: attempt subtree prune before full recompute ===
+            fixed_len = 2 * carry          # number of fixed child bins
+
+            if fixed_len >= 4:  # need at least 4 bins for a meaningful check
+                # Compute partial autoconvolution (fixed bins only)
+                partial_conv_len = 2 * fixed_len - 1
+                for k in range(partial_conv_len):
+                    conv[k] = np.int32(0)
+                for i in range(fixed_len):
+                    ci = np.int32(child[i])
+                    conv[2 * i] += ci * ci
+                    for j in range(i + 1, fixed_len):
+                        conv[i + j] += np.int32(2) * ci * np.int32(child[j])
+                # Prefix sum
+                for k in range(1, partial_conv_len):
+                    conv[k] += conv[k - 1]
+
+                # Compute fixed-region prefix_c for W_int
+                prefix_c[0] = 0
+                for i in range(fixed_len):
+                    prefix_c[i + 1] = prefix_c[i] + np.int64(child[i])
+
+                # Window scan with W_int_max thresholds
+                subtree_pruned = False
+                first_unfixed_parent = carry
+
+                for ell_oi in range(ell_count):
+                    if subtree_pruned:
+                        break
+                    ell = ell_order[ell_oi]
+                    n_cv = ell - 1
+                    ell_idx = ell - 2
+                    dyn_base_ell = dyn_base_ell_arr[ell_idx]
+                    two_ell_inv_4n = two_ell_arr[ell_idx]
+
+                    # Only check windows fully contained in partial conv
+                    n_windows_partial = partial_conv_len - n_cv + 1
+                    if n_windows_partial <= 0:
+                        continue
+
+                    for s_lo in range(n_windows_partial):
+                        s_hi = s_lo + n_cv - 1
+                        ws = np.int64(conv[s_hi])
+                        if s_lo > 0:
+                            ws -= np.int64(conv[s_lo - 1])
+
+                        # W_int_max: fixed child bins + unfixed parent bins
+                        lo_bin = s_lo - (d_child - 1)
+                        if lo_bin < 0:
+                            lo_bin = 0
+                        hi_bin = s_lo + ell - 2
+                        if hi_bin > d_child - 1:
+                            hi_bin = d_child - 1
+
+                        # Fixed part
+                        fixed_hi = hi_bin
+                        if fixed_hi > fixed_len - 1:
+                            fixed_hi = fixed_len - 1
+                        if fixed_hi >= lo_bin:
+                            lo_clamp = lo_bin
+                            if lo_clamp < 0:
+                                lo_clamp = 0
+                            W_int_fixed = prefix_c[fixed_hi + 1] - prefix_c[lo_clamp]
+                        else:
+                            W_int_fixed = np.int64(0)
+
+                        # Unfixed part
+                        unfixed_lo_bin = lo_bin
+                        if unfixed_lo_bin < fixed_len:
+                            unfixed_lo_bin = fixed_len
+                        if unfixed_lo_bin <= hi_bin:
+                            p_lo = unfixed_lo_bin // 2
+                            p_hi = hi_bin // 2
+                            if p_lo < first_unfixed_parent:
+                                p_lo = first_unfixed_parent
+                            if p_hi >= d_parent:
+                                p_hi = d_parent - 1
+                            if p_lo <= p_hi:
+                                W_int_unfixed = parent_prefix[p_hi + 1] - parent_prefix[p_lo]
+                            else:
+                                W_int_unfixed = np.int64(0)
+                        else:
+                            W_int_unfixed = np.int64(0)
+
+                        W_int_max = W_int_fixed + W_int_unfixed
+                        dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int_max)
+                        dyn_it = np.int64(dyn_x * one_minus_4eps)
+                        if ws > dyn_it:
+                            subtree_pruned = True
+                            break
+
+                if subtree_pruned:
+                    n_subtree_pruned += 1
+                    # Skip entire subtree: fast-forward trailing cursors
+                    for i in range(carry + 1, d_parent):
+                        cursor[i] = hi_arr[i]
+                    # Rebuild child for current cursor
+                    for pos in range(carry, d_parent):
+                        child[2 * pos] = cursor[pos]
+                        child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+                    # Full recompute of raw_conv
+                    for k in range(conv_len):
+                        raw_conv[k] = np.int32(0)
+                    for i in range(d_child):
+                        ci = np.int32(child[i])
+                        raw_conv[2 * i] += ci * ci
+                        for j in range(i + 1, d_child):
+                            raw_conv[i + j] += np.int32(2) * ci * np.int32(child[j])
+                    # Quick-check: recompute W_int after subtree recompute
+                    if qc_ell > 0:
+                        qc_lo = qc_s - (d_child - 1)
+                        if qc_lo < 0:
+                            qc_lo = 0
+                        qc_hi = qc_s + qc_ell - 2
+                        if qc_hi > d_child - 1:
+                            qc_hi = d_child - 1
+                        qc_W_int = np.int64(0)
+                        for i in range(qc_lo, qc_hi + 1):
+                            qc_W_int += np.int64(child[i])
+                    continue
+
+            # === Not subtree-pruned: original full recompute path ===
             for pos in range(carry, d_parent):
                 child[2 * pos] = cursor[pos]
                 child[2 * pos + 1] = parent_int[pos] - cursor[pos]
@@ -795,7 +973,19 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 for j in range(i + 1, d_child):
                     raw_conv[i + j] += np.int32(2) * ci * np.int32(child[j])
 
-    return n_surv
+            # Quick-check: recompute W_int after full recompute
+            if qc_ell > 0:
+                qc_lo = qc_s - (d_child - 1)
+                if qc_lo < 0:
+                    qc_lo = 0
+                qc_hi = qc_s + qc_ell - 2
+                if qc_hi > d_child - 1:
+                    qc_hi = d_child - 1
+                qc_W_int = np.int64(0)
+                for i in range(qc_lo, qc_hi + 1):
+                    qc_W_int += np.int64(child[i])
+
+    return n_surv, n_subtree_pruned
 
 
 def _compute_bin_ranges(parent_int, m, c_target, d_child):
@@ -807,6 +997,10 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child):
     corr = 2.0 / m + 1.0 / (m * m)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
+    # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
+    # doesn't go through test-value, so no correction needed
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
 
@@ -867,14 +1061,14 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
     max_buf = min(total_children, buf_cap)
     out_buf = np.empty((max_buf, d_child), dtype=np.int32)
 
-    n_survivors = _fused_generate_and_prune(
+    n_survivors, _ = _fused_generate_and_prune(
         parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
 
     if n_survivors > max_buf:
         # Overflow: re-allocate exact-size buffer and re-run.
         max_buf = n_survivors
         out_buf = np.empty((max_buf, d_child), dtype=np.int32)
-        n2 = _fused_generate_and_prune(
+        n2, _ = _fused_generate_and_prune(
             parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
         assert n2 == n_survivors, (
             f"Non-deterministic kernel: first run {n_survivors}, "
@@ -939,7 +1133,7 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
         max_buf = min(children_per_slice, slice_buf_cap)
         out_buf = np.empty((max_buf, d_child), dtype=np.int32)
 
-        n_surv = _fused_generate_and_prune(
+        n_surv, _ = _fused_generate_and_prune(
             parent_int, n_half_child, m, c_target,
             slice_lo, slice_hi, out_buf)
 
@@ -947,7 +1141,7 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
             # Overflow: re-allocate and re-run
             max_buf = n_surv
             out_buf = np.empty((max_buf, d_child), dtype=np.int32)
-            n2 = _fused_generate_and_prune(
+            n2, _ = _fused_generate_and_prune(
                 parent_int, n_half_child, m, c_target,
                 slice_lo, slice_hi, out_buf)
             assert n2 == n_surv, (
@@ -1125,10 +1319,13 @@ def generate_children_uniform(parent_int, m, c_target):
     d_parent = len(parent_int)
     d_child = 2 * d_parent
 
-    # x_cap: single-bin energy cap (matches GPU host_refine.cuh)
+    # x_cap: single-bin energy cap
     corr = 2.0 / m + 1.0 / (m * m)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
+    # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
 
@@ -1602,7 +1799,9 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         corr_pf = 2.0 / m + 1.0 / (m * m)
         thresh_pf = c_target + corr_pf + 1e-9
         x_cap_pf = int(math.floor(m * math.sqrt(thresh_pf / d_child)))
-        x_cap_pf = min(x_cap_pf, m)
+        # Cauchy-Schwarz bound: no correction needed
+        x_cap_cs_pf = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_pf = min(x_cap_pf, x_cap_cs_pf, m)
         max_bin_val = 2 * x_cap_pf
         feasible_mask = np.all(current_configs <= max_bin_val, axis=1)
         n_infeasible = n_parents - int(np.sum(feasible_mask))
@@ -1615,6 +1814,15 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
 
         if n_parents == 0:
             break
+
+        # Shuffle parents for unbiased ETA estimation and better load balance.
+        # Lex order from dedup correlates with per-parent cost (bin values
+        # determine child count, varying ~1000x).  Fixed seed for reproducibility.
+        # Ensure writable (checkpoint loads as read-only mmap).
+        if not current_configs.flags.writeable:
+            current_configs = np.array(current_configs)
+        rng = np.random.RandomState(42)
+        rng.shuffle(current_configs)
 
         if verbose:
             _log(f"\n[L{level_num}] d_parent={d_parent} -> d_child={d_child}, "

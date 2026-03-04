@@ -202,7 +202,7 @@ def check_job_status(ssh_host, ssh_port):
     result = ssh_run(ssh_host, ssh_port,
                      f"tmux has-session -t {TMUX_SESSION} 2>/dev/null "
                      f"&& echo RUNNING || echo DONE",
-                     timeout=30)
+                     timeout=60)
     return result.stdout.strip()
 
 
