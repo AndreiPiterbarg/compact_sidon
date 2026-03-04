@@ -527,6 +527,11 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     d_parent = parent_int.shape[0]
     d_child = 2 * d_parent
 
+    # --- Safety check: int32 conv values require m <= 200 ---
+    # Max raw_conv entry: m^2 = 40000 for m=200; max mutual cross-term 2*m*m = 80000.
+    # Incremental deltas bounded by ±2*m^2.  All well within int32 range (2^31-1).
+    assert m <= 200, f"int32 conv requires m <= 200, got m={m}"
+
     # --- Asymmetry filter constants ---
     m_d = np.float64(m)
     threshold_asym = math.sqrt(c_target / 2.0)
@@ -561,8 +566,8 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
 
     child = np.empty(d_child, dtype=np.int32)
     prev_child = np.empty(d_child, dtype=np.int32)
-    raw_conv = np.empty(conv_len, dtype=np.int64)
-    conv = np.empty(conv_len, dtype=np.int64)
+    raw_conv = np.empty(conv_len, dtype=np.int32)
+    conv = np.empty(conv_len, dtype=np.int32)
     prefix_c = np.empty(d_child + 1, dtype=np.int64)
 
     # --- Build initial child ---
@@ -570,14 +575,52 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         child[2 * i] = cursor[i]
         child[2 * i + 1] = parent_int[i] - cursor[i]
 
+    # --- Precompute per-ell constants (constant across all children) ---
+    ell_count = 2 * d_child - 1  # ell ranges 2..2*d_child, count = 2*d_child - 1
+    dyn_base_ell_arr = np.empty(ell_count, dtype=np.float64)
+    two_ell_arr = np.empty(ell_count, dtype=np.float64)
+    for ell in range(2, 2 * d_child + 1):
+        idx = ell - 2
+        dyn_base_ell_arr[idx] = dyn_base * np.float64(ell) * inv_4n
+        two_ell_arr[idx] = 2.0 * np.float64(ell) * inv_4n
+
+    # --- Optimized ell scan order ---
+    # Most children are pruned by narrow windows (ell=2..16) or wide windows
+    # (ell near d_child). Scanning these first reduces the average number of
+    # ell values checked before pruning.
+    # Phase 1: ell=2..min(16, 2*d_child)  (narrow windows catch peaked configs)
+    # Phase 2: ell=d_child, d_child+1, d_child-1, ...  (wide windows catch spread)
+    # Phase 3: remaining values
+    ell_order = np.empty(ell_count, dtype=np.int32)
+    ell_used = np.zeros(ell_count, dtype=np.int32)  # boolean flags
+    oi = 0
+    # Phase 1: narrow (ell=2..16)
+    phase1_end = min(16, 2 * d_child)
+    for ell in range(2, phase1_end + 1):
+        ell_order[oi] = np.int32(ell)
+        ell_used[ell - 2] = np.int32(1)
+        oi += 1
+    # Phase 2: wide windows around d_child
+    for ell in (d_child, d_child + 1, d_child - 1, d_child + 2, d_child - 2,
+                d_child * 2, d_child + d_child // 2, d_child // 2):
+        if 2 <= ell <= 2 * d_child and ell_used[ell - 2] == 0:
+            ell_order[oi] = np.int32(ell)
+            ell_used[ell - 2] = np.int32(1)
+            oi += 1
+    # Phase 3: everything else in order
+    for ell in range(2, 2 * d_child + 1):
+        if ell_used[ell - 2] == 0:
+            ell_order[oi] = np.int32(ell)
+            oi += 1
+
     # --- Compute full raw_conv for initial child ---
     for k in range(conv_len):
-        raw_conv[k] = 0
+        raw_conv[k] = np.int32(0)
     for i in range(d_child):
-        ci = np.int64(child[i])
+        ci = np.int32(child[i])
         raw_conv[2 * i] += ci * ci
         for j in range(i + 1, d_child):
-            raw_conv[i + j] += np.int64(2) * ci * np.int64(child[j])
+            raw_conv[i + j] += np.int32(2) * ci * np.int32(child[j])
 
     while True:
         # --- Copy raw_conv to conv and prefix-sum ---
@@ -591,20 +634,24 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         for i in range(d_child):
             prefix_c[i + 1] = prefix_c[i] + np.int64(child[i])
 
-        # --- Window scan (dynamic pruning) ---
+        # --- Window scan (dynamic pruning, optimized ell order) ---
         pruned = False
-        for ell in range(2, 2 * d_child + 1):
+        for ell_oi in range(ell_count):
             if pruned:
                 break
+            ell = ell_order[ell_oi]
             n_cv = ell - 1
-            dyn_base_ell = dyn_base * np.float64(ell) * inv_4n
-            two_ell_inv_4n = 2.0 * np.float64(ell) * inv_4n
+            ell_idx = ell - 2
+            dyn_base_ell = dyn_base_ell_arr[ell_idx]
+            two_ell_inv_4n = two_ell_arr[ell_idx]
             n_windows = conv_len - n_cv + 1
             for s_lo in range(n_windows):
                 s_hi = s_lo + n_cv - 1
-                ws = conv[s_hi]
+                # Widen to int64 for the comparison to avoid int32 overflow
+                # on the subtraction (conv values can be up to m^2 * d_child)
+                ws = np.int64(conv[s_hi])
                 if s_lo > 0:
-                    ws -= conv[s_lo - 1]
+                    ws -= np.int64(conv[s_lo - 1])
                 lo_bin = s_lo - (d_child - 1)
                 if lo_bin < 0:
                     lo_bin = 0
@@ -658,12 +705,12 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             pos = d_parent - 1
             k1 = 2 * pos
             k2 = k1 + 1
-            old1 = np.int64(child[k1])
-            old2 = np.int64(child[k2])
+            old1 = np.int32(child[k1])
+            old2 = np.int32(child[k2])
             child[k1] = cursor[pos]
             child[k2] = parent_int[pos] - cursor[pos]
-            new1 = np.int64(child[k1])
-            new2 = np.int64(child[k2])
+            new1 = np.int32(child[k1])
+            new2 = np.int32(child[k2])
             delta1 = new1 - old1
             delta2 = new2 - old2
 
@@ -671,12 +718,12 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             raw_conv[2 * k1] += new1 * new1 - old1 * old1
             raw_conv[2 * k2] += new2 * new2 - old2 * old2
             # Mutual term
-            raw_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+            raw_conv[k1 + k2] += np.int32(2) * (new1 * new2 - old1 * old2)
             # Cross-terms with all unchanged bins (j < k1)
             for j in range(k1):
-                cj = np.int64(child[j])
-                raw_conv[k1 + j] += np.int64(2) * delta1 * cj
-                raw_conv[k2 + j] += np.int64(2) * delta2 * cj
+                cj = np.int32(child[j])
+                raw_conv[k1 + j] += np.int32(2) * delta1 * cj
+                raw_conv[k2 + j] += np.int32(2) * delta2 * cj
 
         elif n_changed <= carry_threshold:
             # === SHORT CARRY: incremental update for 2..threshold positions ===
@@ -695,44 +742,44 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             for pos in range(carry, d_parent):
                 k1 = 2 * pos
                 k2 = k1 + 1
-                old1 = np.int64(prev_child[k1])
-                old2 = np.int64(prev_child[k2])
-                new1 = np.int64(child[k1])
-                new2 = np.int64(child[k2])
+                old1 = np.int32(prev_child[k1])
+                old2 = np.int32(prev_child[k2])
+                new1 = np.int32(child[k1])
+                new2 = np.int32(child[k2])
                 raw_conv[2 * k1] += new1 * new1 - old1 * old1
                 raw_conv[2 * k2] += new2 * new2 - old2 * old2
-                raw_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+                raw_conv[k1 + k2] += np.int32(2) * (new1 * new2 - old1 * old2)
 
             # Cross-terms between different changed position pairs
             for pa in range(carry, d_parent):
                 a1 = 2 * pa
                 a2 = a1 + 1
-                new_a1 = np.int64(child[a1])
-                new_a2 = np.int64(child[a2])
-                old_a1 = np.int64(prev_child[a1])
-                old_a2 = np.int64(prev_child[a2])
+                new_a1 = np.int32(child[a1])
+                new_a2 = np.int32(child[a2])
+                old_a1 = np.int32(prev_child[a1])
+                old_a2 = np.int32(prev_child[a2])
                 for pb in range(pa + 1, d_parent):
                     b1 = 2 * pb
                     b2 = b1 + 1
-                    new_b1 = np.int64(child[b1])
-                    new_b2 = np.int64(child[b2])
-                    old_b1 = np.int64(prev_child[b1])
-                    old_b2 = np.int64(prev_child[b2])
-                    raw_conv[a1 + b1] += np.int64(2) * (new_a1 * new_b1 - old_a1 * old_b1)
-                    raw_conv[a1 + b2] += np.int64(2) * (new_a1 * new_b2 - old_a1 * old_b2)
-                    raw_conv[a2 + b1] += np.int64(2) * (new_a2 * new_b1 - old_a2 * old_b1)
-                    raw_conv[a2 + b2] += np.int64(2) * (new_a2 * new_b2 - old_a2 * old_b2)
+                    new_b1 = np.int32(child[b1])
+                    new_b2 = np.int32(child[b2])
+                    old_b1 = np.int32(prev_child[b1])
+                    old_b2 = np.int32(prev_child[b2])
+                    raw_conv[a1 + b1] += np.int32(2) * (new_a1 * new_b1 - old_a1 * old_b1)
+                    raw_conv[a1 + b2] += np.int32(2) * (new_a1 * new_b2 - old_a1 * old_b2)
+                    raw_conv[a2 + b1] += np.int32(2) * (new_a2 * new_b1 - old_a2 * old_b1)
+                    raw_conv[a2 + b2] += np.int32(2) * (new_a2 * new_b2 - old_a2 * old_b2)
 
             # Cross-terms between changed bins and unchanged bins
             for pos in range(carry, d_parent):
                 k1 = 2 * pos
                 k2 = k1 + 1
-                delta1 = np.int64(child[k1]) - np.int64(prev_child[k1])
-                delta2 = np.int64(child[k2]) - np.int64(prev_child[k2])
+                delta1 = np.int32(child[k1]) - np.int32(prev_child[k1])
+                delta2 = np.int32(child[k2]) - np.int32(prev_child[k2])
                 for j in range(first_changed_bin):
-                    cj = np.int64(child[j])
-                    raw_conv[k1 + j] += np.int64(2) * delta1 * cj
-                    raw_conv[k2 + j] += np.int64(2) * delta2 * cj
+                    cj = np.int32(child[j])
+                    raw_conv[k1 + j] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + j] += np.int32(2) * delta2 * cj
 
         else:
             # === DEEP CARRY: full recompute (8+ positions changed) ===
@@ -741,12 +788,12 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 child[2 * pos + 1] = parent_int[pos] - cursor[pos]
 
             for k in range(conv_len):
-                raw_conv[k] = 0
+                raw_conv[k] = np.int32(0)
             for i in range(d_child):
-                ci = np.int64(child[i])
+                ci = np.int32(child[i])
                 raw_conv[2 * i] += ci * ci
                 for j in range(i + 1, d_child):
-                    raw_conv[i + j] += np.int64(2) * ci * np.int64(child[j])
+                    raw_conv[i + j] += np.int32(2) * ci * np.int32(child[j])
 
     return n_surv
 
@@ -786,7 +833,7 @@ def _default_buf_cap(d_child):
     elif d_child <= 32:
         return 5_000_000
     else:
-        return 10_000       # 10K rows ~2.5 MB at d=64; survival rate ≈ 0 at L4+
+        return 100_000      # 100K rows ~25 MB at d=64; survival rate ≈ 0 at L4+
 
 
 def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
@@ -1372,12 +1419,48 @@ def _load_checkpoint(resume_dir, n_half, m, c_target):
         _log(f"     Checkpoint meta found but {npy_path} missing")
         return None
 
-    survivors = np.load(npy_path)
+    survivors = np.load(npy_path, mmap_mode='r')
     _log(f"     Loaded checkpoint: L{level} complete, "
          f"{len(survivors):,} survivors (d={survivors.shape[1]})")
 
     info = meta.get('info', {})
     return survivors, level, info
+
+
+# =====================================================================
+# CPU detection (cgroup-aware for containers)
+# =====================================================================
+
+def _effective_cpu_count():
+    """Detect actual usable CPUs, accounting for cgroup limits in containers.
+
+    On bare metal, returns mp.cpu_count().  In Docker/RunPod containers,
+    mp.cpu_count() returns the host CPU count (e.g. 192) even though the
+    container may be cgroup-limited to 32 vCPUs.  This reads the cgroup
+    quota to return the correct value.
+    """
+    logical = mp.cpu_count()
+    # Try cgroup v1
+    try:
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as f:
+            quota = int(f.read().strip())
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
+            period = int(f.read().strip())
+        if quota > 0:
+            cgroup_cpus = max(1, int(quota / period))
+            return min(logical, cgroup_cpus)
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    # Try cgroup v2
+    try:
+        with open('/sys/fs/cgroup/cpu.max') as f:
+            parts = f.read().strip().split()
+            if parts[0] != 'max':
+                cgroup_cpus = max(1, int(int(parts[0]) / int(parts[1])))
+                return min(logical, cgroup_cpus)
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    return logical
 
 
 # =====================================================================
@@ -1414,8 +1497,7 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
     """
     if n_workers is None:
         n_workers = mp.cpu_count()
-    # Cap at physical core count (hyperthreads don't help Numba-parallel workloads)
-    n_workers = max(1, min(n_workers, mp.cpu_count()))
+    n_workers = max(1, n_workers)
 
     # Ensure enough file descriptors for spawn-based multiprocessing
     # (each worker needs ~6 fds for pipes/semaphores)
@@ -1438,7 +1520,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         _log(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
         _log(f"  correction={corr:.6f}, effective threshold={c_target+corr:.6f}")
         _log(f"  L0 compositions: {n_total:,}")
-        _log(f"  workers: {n_workers} (CPUs: {mp.cpu_count()})")
+        _log(f"  workers: {n_workers} (logical CPUs: {mp.cpu_count()}, "
+             f"effective: {_effective_cpu_count()})")
         _log(f"  max refinement levels: {max_levels}")
         _log(f"{'='*70}")
 
@@ -1509,6 +1592,26 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         d_child = 2 * d_parent
         n_half_child = 2 * n_half_parent
         n_parents = len(current_configs)
+
+        if n_parents == 0:
+            break
+
+        # --- Pre-filter: skip parents where any bin > 2*x_cap ---
+        # Such parents produce zero children (empty cursor range in every
+        # bin exceeding x_cap), but still incur IPC + dispatch overhead.
+        corr_pf = 2.0 / m + 1.0 / (m * m)
+        thresh_pf = c_target + corr_pf + 1e-9
+        x_cap_pf = int(math.floor(m * math.sqrt(thresh_pf / d_child)))
+        x_cap_pf = min(x_cap_pf, m)
+        max_bin_val = 2 * x_cap_pf
+        feasible_mask = np.all(current_configs <= max_bin_val, axis=1)
+        n_infeasible = n_parents - int(np.sum(feasible_mask))
+        if n_infeasible > 0:
+            current_configs = np.ascontiguousarray(current_configs[feasible_mask])
+            n_parents = len(current_configs)
+            if verbose:
+                _log(f"     Pre-filtered {n_infeasible:,} infeasible parents "
+                     f"(bin > {max_bin_val})")
 
         if n_parents == 0:
             break
@@ -1587,7 +1690,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             else:
                 n_workers_level = n_workers
 
-            numba_threads = max(1, mp.cpu_count() // n_workers_level)
+            numba_threads = min(max(1, _effective_cpu_count() // n_workers_level),
+                                numba.config.NUMBA_NUM_THREADS)
             chunksize = max(1, min(n_parents // (n_workers_level * 20), 128))
 
             # Write parent array to a temp file; workers mmap it read-only
@@ -1609,6 +1713,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
 
             completed = 0
             last_report = time.time()
+            last_checkpoint_time = time.time()
+            checkpoint_interval = 1800  # 30 minutes
             ctx = mp.get_context("spawn")
             try:
                 with ctx.Pool(
@@ -1645,6 +1751,32 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                                  f"shards={n_shards}, "
                                  f"ETA {_fmt_time(eta)}")
                             last_report = now
+
+                        # Intra-level checkpoint: save progress every 30 min
+                        if now - last_checkpoint_time >= checkpoint_interval:
+                            progress_path = os.path.join(
+                                output_dir,
+                                f'_progress_L{level_num}.json')
+                            progress = {
+                                'level': level_num,
+                                'completed': completed,
+                                'total_parents': n_parents,
+                                'total_children': total_children,
+                                'total_survived': total_survived,
+                                'elapsed_seconds': now - t_level,
+                                'timestamp': time.strftime(
+                                    '%Y-%m-%d %H:%M:%S'),
+                            }
+                            try:
+                                with open(progress_path, 'w') as pf:
+                                    json.dump(progress, pf, indent=2)
+                                if verbose:
+                                    _log(f"     Checkpoint: {completed:,}/"
+                                         f"{n_parents:,} completed "
+                                         f"({progress_path})")
+                            except OSError:
+                                pass
+                            last_checkpoint_time = now
             finally:
                 try:
                     os.remove(mmap_path)
