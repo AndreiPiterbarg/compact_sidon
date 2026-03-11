@@ -535,10 +535,10 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     assert m <= 200, f"int32 conv requires m <= 200, got m={m}"
 
     # --- Asymmetry filter constants ---
+    # No discretization margin needed: left_frac is exact for step functions
+    # and preserved under refinement. See docs/verification_part1_framework.md §8.
     m_d = np.float64(m)
     threshold_asym = math.sqrt(c_target / 2.0)
-    margin_asym = 1.0 / (4.0 * m_d)
-    safe_threshold = threshold_asym + margin_asym
 
     # --- Hoisted asymmetry check (constant across all children) ---
     # sum(child[0:n_half_child]) = sum(parent_int[0:d_parent//2])
@@ -547,7 +547,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     for i in range(d_parent // 2):
         left_sum_parent += np.int64(parent_int[i])
     left_frac = np.float64(left_sum_parent) / m_d
-    if left_frac >= safe_threshold or left_frac <= 1.0 - safe_threshold:
+    if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
         return 0, 0
 
     # --- Dynamic pruning constants ---
@@ -715,7 +715,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     else:
                         for i in range(d_child):
                             out_buf[n_surv, i] = child[i]
-                    n_surv += 1
+                n_surv += 1
 
         # --- Advance cursor (odometer increment) ---
         carry = d_parent - 1
