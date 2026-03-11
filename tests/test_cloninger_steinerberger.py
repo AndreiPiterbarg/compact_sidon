@@ -202,13 +202,13 @@ class TestAsymmetryPruning(unittest.TestCase):
         mask = asymmetry_prune_mask(configs, n_half, m, c_target=1.28)
         self.assertFalse(mask[0])
 
-    def test_margin_near_threshold(self):
-        """Config at the old threshold must NOT be pruned due to margin.
+    def test_at_threshold_pruned(self):
+        """Config at exact threshold is pruned (no margin needed).
 
-        With n_half=2, m=10, threshold=0.8, margin=1/(4*10)=0.025.
-        safe_threshold = 0.825. A config with left_frac=0.8 is within
-        the margin zone and must be checked (not pruned), because a
-        continuous function rounding to it could have left_frac=0.775.
+        With n_half=2, m=10, threshold = sqrt(1.28/2) = 0.8.
+        left_frac = 8/10 = 0.8 >= threshold, so asymmetry covers it.
+        No discretization margin is needed because left_frac is exact
+        for piecewise-constant functions on the discrete grid.
         """
         n_half = 2
         m = 10
@@ -217,16 +217,16 @@ class TestAsymmetryPruning(unittest.TestCase):
         left_frac = configs[0, :n_half].sum() / m
         self.assertAlmostEqual(left_frac, 0.8)
         mask = asymmetry_prune_mask(configs, n_half, m, c_target=1.28)
-        self.assertTrue(mask[0])  # Needs checking (margin zone)
+        self.assertFalse(mask[0])  # Covered by asymmetry argument
 
-    def test_margin_well_beyond_threshold(self):
-        """Config well beyond safe_threshold should be pruned."""
+    def test_well_beyond_threshold_pruned(self):
+        """Config well beyond threshold should be pruned."""
         n_half = 2
         m = 10
-        # S=m=10: safe_threshold = 0.825. left_frac = 9/10 = 0.9 > 0.825.
+        # threshold = 0.8. left_frac = 9/10 = 0.9 > 0.8.
         configs = np.array([[5, 4, 1, 0]], dtype=np.int32)
         left_frac = configs[0, :n_half].sum() / m
-        self.assertGreater(left_frac, 0.825)
+        self.assertGreater(left_frac, 0.8)
         mask = asymmetry_prune_mask(configs, n_half, m, c_target=1.28)
         self.assertFalse(mask[0])  # Safely pruned
 

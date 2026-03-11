@@ -104,20 +104,21 @@ class TestAsymmetryPruning(unittest.TestCase):
         mask = asymmetry_prune_mask(configs, n_half, m, c_target=1.28)
         self.assertFalse(mask[0])
 
-    def test_margin_near_threshold(self):
+    def test_at_threshold_pruned(self):
         n_half = 2
         m = 10
-        # S=m=10: left=8/10=0.8, right at threshold → margin zone
+        # S=m=10: left=8/10=0.8 = sqrt(1.28/2) = threshold exactly → pruned
+        # No margin needed: left_frac is exact for step functions.
         configs = np.array([[4, 4, 1, 1]], dtype=np.int32)
         left_frac = configs[0, :n_half].sum() / m
         self.assertAlmostEqual(left_frac, 0.8)
         mask = asymmetry_prune_mask(configs, n_half, m, c_target=1.28)
-        self.assertTrue(mask[0])
+        self.assertFalse(mask[0])  # Covered by asymmetry argument
 
-    def test_margin_well_beyond_threshold(self):
+    def test_well_beyond_threshold_pruned(self):
         n_half = 2
         m = 10
-        # S=m=10: left=9/10=0.9 > safe_threshold=0.825
+        # S=m=10: left=9/10=0.9 > threshold=0.8
         configs = np.array([[5, 4, 1, 0]], dtype=np.int32)
         left_frac = configs[0, :n_half].sum() / m
         self.assertGreater(left_frac, 0.825)
