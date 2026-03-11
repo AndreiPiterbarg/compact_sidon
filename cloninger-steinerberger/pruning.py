@@ -38,18 +38,17 @@ def asymmetry_prune_mask(batch_int, n_half, m, c_target):
     total = float(m)  # S=m convention: integer coords sum to m
     threshold = asymmetry_threshold(c_target)
 
-    # Discretization margin: continuous left_frac can differ from discrete
-    # by up to n_half * (1/m) / (4*n_half) = 1/(4m).
-    margin = 1.0 / (4.0 * m)
+    # No discretization margin needed: left_frac = sum(c_i for left bins) / m
+    # is exact for piecewise-constant functions on the discrete grid, and is
+    # preserved exactly under refinement (child bins sum to parent bins).
+    # See docs/verification_part1_framework.md, Verification 8 for full proof.
 
     left = batch_int[:, :n_half].sum(axis=1).astype(np.float64)
     left_frac = left / total
 
-    # Asymmetry safely covers: left_frac >= threshold + margin
-    #                       or left_frac <= (1 - threshold) - margin
-    # Need checking: everything else
-    safe_threshold = threshold + margin
-    needs_check = (left_frac > 1 - safe_threshold) & (left_frac < safe_threshold)
+    # Asymmetry covers: left_frac >= threshold or left_frac <= 1 - threshold
+    # Need checking: everything in between
+    needs_check = (left_frac > 1 - threshold) & (left_frac < threshold)
     return needs_check
 
 

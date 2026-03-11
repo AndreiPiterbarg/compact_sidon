@@ -1209,7 +1209,7 @@ def run_single_level(n_half, m, c_target, batch_size=100000, verbose=True):
     corr = correction(m)
     prune_target = c_target + corr
     asym_thresh = asymmetry_threshold(c_target)
-    margin = 1.0 / (4.0 * m)
+    margin = 0.0  # No margin needed: left_frac exact for step functions
     inv_m = 1.0 / m
     fp_margin = 1e-9
 
@@ -1348,7 +1348,7 @@ def find_best_bound_direct(n_half, m, batch_size=50000, verbose=True):
     S = m  # S=m convention: integer coords sum to m (not 4nm)
     n_total = count_compositions(d, S)
     corr = correction(m)
-    margin = 1.0 / (4.0 * m)
+    margin = 0.0  # No margin needed: left_frac exact for step functions
     total_mass = float(S)
     inv_m = 1.0 / m
 
