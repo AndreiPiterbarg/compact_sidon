@@ -96,7 +96,7 @@ x_cap = floor(m * sqrt(thresh / d_child))   # thresh = c_target + 2/m + 1/m^2 + 
 
 Child layout (a, b_i-a) at positions (2i, 2i+1) matches MATLAB. Edge cases (b_i=0, b_i > 2*x_cap) handled correctly.
 
-## 5. Asymmetry Pruning — SOUND
+## 5. Asymmetry Pruning — SOUND (margin removed)
 
 **Mathematical basis:** For f >= 0 on [-1/4, 1/4] with left-half mass L:
 
@@ -108,10 +108,15 @@ Proved via Fubini's theorem, restricting to the left-left contribution of the au
 
 **Threshold:** `sqrt(c_target / 2)` is the exact cutoff where `2L^2 = c_target`.
 
-**Margin:** `1/(4m)` correctly bounds discrete-to-continuous left mass discrepancy:
-- n_half bins, each off by at most 1/m in paper coordinates
-- Normalized by 4*n_half (total bins times bin width)
-- n_half cancels: margin = 1/(4m), independent of dimension
+**Margin: REMOVED (previously `1/(4m)`, proven unnecessary).** The old margin accounted for a hypothetical discrete-to-continuous left-mass discrepancy. This is unnecessary because:
+
+1. **left_frac is exact for step functions.** Our discrete compositions represent piecewise-constant functions f(x) = c_i / m on each bin. The left-half mass is L = (1/m) Σ_{i < n_half} c_i = left_sum / m, which equals left_frac exactly — no approximation error.
+
+2. **Preserved under refinement.** When parent bin c_k splits into (a, c_k - a), the child's left sum over its first 2·n_half bins equals the parent's left sum over its first n_half bins. So left_frac is identical at every cascade level.
+
+3. **Boundary always on a bin edge.** The midpoint x = 0 always falls on a bin boundary (between bins n_half - 1 and n_half), so no bin straddles the left/right boundary.
+
+Code now prunes at the exact threshold with `margin = 0`. See `docs/verification_part1_framework.md` §8 for the full proof and `tests/test_framework_verification.py::TestAsymmetryMarginUnnecessary` for 6 programmatic tests.
 
 **Soundness:** Compared against c_target directly (not c_target + correction) because the asymmetry bound is a direct L^inf bound that does not go through the test-value framework.
 
@@ -150,7 +155,7 @@ The m=20 grid has dramatically fewer compositions at every level. The correction
 
 1. **`solvers.py` window range:** The fused kernels in `solvers.py` use `ell in range(2, d+1)` (up to d), while `run_cascade.py` and the MATLAB baseline use `ell in range(2, 2*d+1)` (up to 2d). This means `solvers.py` checks fewer windows and is less aggressive at pruning (safe direction). This does NOT affect the cascade prover, which uses `run_cascade.py`.
 
-2. **Asymmetry margin tightness:** The margin `1/(4m)` is a worst-case bound assuming all bin rounding errors align. The actual Lemma 2 rounding procedure constrains the running deficit, so the true maximum discrepancy may be smaller. A tighter margin would prune more compositions, but the current margin is mathematically safe.
+2. **Asymmetry margin removed:** The old `1/(4m)` margin has been proven unnecessary and removed from the code. The discrete left_frac is exact for piecewise-constant functions and invariant under refinement, so no margin is needed. This slightly improves pruning power. See §5 above and `docs/verification_part1_framework.md` §8.
 
 3. **Integer overflow:** At d=64 (level 4), max conv value is bounded by ~256 and prefix sums by ~32,512. Well within int64 range.
 
