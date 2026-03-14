@@ -4,6 +4,8 @@
 
 **Cross-reference:** Each claim maps to one or more proof files in `proof/`. Coverage status is noted.
 
+**Lean 4 progress:** See `docs/proof_progress.md`. All definitions are formalized in `output.lean`. Foundational discretization lemmas (D(0)=0, D(2n)=m, monotonicity, bin_masses_nonneg, telescope sum) are proved. No main claim is fully proved yet. Split prompts for Aristotle are in `docs/aristotle/`.
+
 ---
 
 ## Part 0: The Problem Being Solved
