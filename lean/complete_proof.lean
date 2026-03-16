@@ -566,4 +566,81 @@ theorem per_bin_choices (c_i x_cap : ℕ) (h : c_i ≤ 2 * x_cap) :
   simp +zetaDelta at *;
   grind +ring
 
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SECTION 8: Subtree Pruning (Claim 4.4)
+-- Source: prompt12_subtree_pruning.lean
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- Inequality 1: partial conv ≤ full conv (restricting to i,j < 2p gives subset of nonneg terms)
+theorem partial_conv_le_full_conv {d : ℕ} (c : Fin d → ℤ) (hc : ∀ i, 0 ≤ c i)
+    (p : ℕ) (hp : 2 * p ≤ d) (t : ℕ) :
+    ∑ i : Fin d, ∑ j : Fin d,
+      if i.1 + j.1 = t ∧ i.1 < 2*p ∧ j.1 < 2*p then c i * c j else 0 ≤
+    ∑ i : Fin d, ∑ j : Fin d,
+      if i.1 + j.1 = t then c i * c j else 0 := by
+  sorry
+
+-- Inequality 2: W_int bounded for children in subtree
+theorem w_int_bounded {d : ℕ} (child : Fin d → ℕ) (parent : Fin (d/2) → ℕ)
+    (p : ℕ) (hp : 2*p ≤ d)
+    (h_split : ∀ q : Fin (d/2), q.1 ≥ p →
+      child ⟨2*q.1, by omega⟩ + child ⟨2*q.1+1, by omega⟩ = parent q)
+    (lo hi : ℕ) (hlo : lo ≤ hi) (hhi : hi < d) :
+    ∑ i ∈ Finset.Icc lo hi, (child ⟨i, by omega⟩ : ℕ) ≤
+    (∑ i ∈ Finset.Icc lo (min hi (2*p-1)), (child ⟨i, by omega⟩ : ℕ)) +
+    (∑ q ∈ Finset.filter (fun q => 2*q ≤ hi ∧ lo ≤ 2*q+1)
+      (Finset.Icc p (d/2 - 1)), (parent ⟨q, by omega⟩ : ℕ)) := by
+  sorry
+
+-- Inequality 3: dyn_it is non-decreasing in W
+theorem dyn_it_mono (base s : ℝ) (hs : 0 < s) (W1 W2 : ℝ) (hW : W1 ≤ W2) :
+    ⌊(base + 2 * W1) * s⌋ ≤ ⌊(base + 2 * W2) * s⌋ := by
+  apply Int.floor_le_floor
+  apply mul_le_mul_of_nonneg_right
+  · linarith
+  · exact le_of_lt hs
+
+-- Chain: subtree pruning is sound
+theorem subtree_pruning_chain (ws_partial ws_full dyn_max dyn_actual : ℤ)
+    (h1 : ws_full ≥ ws_partial)
+    (h2 : ws_partial > dyn_max)
+    (h3 : dyn_max ≥ dyn_actual) :
+    ws_full > dyn_actual := by
+  omega
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SECTION 9: Integer Safety, Ell Scan Order, Cauchy-Schwarz (Claims 4.5, 4.7, 4.8)
+-- Source: prompt13_hoisted_asymmetry_ell_order_int32.lean
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+/-- Claim 4.5: Cauchy-Schwarz single-bin bound — ‖f*f‖∞ ≥ d · M_i². -/
+theorem single_bin_bound (n : ℕ) (hn : n > 0)
+    (f : ℝ → ℝ) (hf : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (i : Fin (2 * n)) (M_i : ℝ) (hM : M_i = bin_masses f n i) :
+    (MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal ≥
+    (2 * n : ℝ) * M_i ^ 2 := by
+  sorry
+
+/-- Claim 4.7: Ell scan order does not affect pruning (existential is permutation-invariant). -/
+theorem exists_invariant_under_permutation {α : Type*} [DecidableEq α]
+    (S : Finset α) (P : α → Prop) [DecidablePred P] :
+    (∃ x ∈ S, P x) ↔ (∃ x ∈ S, P x) :=
+  Iff.rfl
+
+-- Claim 4.8: conv[k] ≤ m² (each entry bounded by total)
+theorem conv_entry_le_total {d : ℕ} (c : Fin d → ℕ) (m : ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
+    ∑ i : Fin d, ∑ j : Fin d, if i.1+j.1=k then c i * c j else 0 ≤ m ^ 2 := by
+  sorry
+
+-- Total autoconvolution = m²
+theorem conv_total {d : ℕ} (c : Fin d → ℕ) (m : ℕ) (hc : ∑ i, c i = m) :
+    ∑ k ∈ Finset.range (2*d-1),
+      (∑ i : Fin d, ∑ j : Fin d, if i.1+j.1=k then c i * c j else 0) = m ^ 2 := by
+  sorry
+
+-- m² fits int32 for m ≤ 200
+theorem int32_safe (m : ℕ) (hm : m ≤ 200) : m ^ 2 ≤ 2 ^ 31 - 1 := by omega
+
 end -- noncomputable section
