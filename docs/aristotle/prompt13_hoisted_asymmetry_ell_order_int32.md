@@ -1,6 +1,8 @@
 # Prompt 13: Hoisted Asymmetry, Ell Scan Order, and Integer Overflow Safety
 
-**Claims 4.5 + 4.6 + 4.7 + 4.8.** Simpler claims grouped together. Attach `output.lean` as context.
+**Claims 4.5 + 4.7 + 4.8.** Simpler claims grouped together. Attach `complete_proof.lean` as context.
+
+> **NOTE:** Claim 4.6 (left-half sum invariant under refinement) is **ALREADY PROVED** in `complete_proof.lean` as `left_half_sum_invariant` and `left_half_sum_same_for_all_children`. Skip it.
 
 ---
 
