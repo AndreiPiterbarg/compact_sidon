@@ -1,6 +1,6 @@
 [
   {
-    "timestamp": "2026-03-02 11:02:53",
+    "timestamp": "2026-03-14 15:45:24",
     "parameters": {
       "n_half": 2,
       "m": 20,
@@ -16,434 +16,56 @@
       "total_l3_survivors": 147279894
     },
     "sequential": {
-      "wall_seconds": 74.315,
-      "parents_per_sec": 1.3456,
-      "per_parent_mean_ms": 743.106,
-      "per_parent_median_ms": 751.039,
-      "per_parent_p5_ms": 408.297,
-      "per_parent_p95_ms": 1100.398,
-      "per_parent_max_ms": 1501.277,
-      "children_per_parent_mean": 295605.1,
-      "children_per_parent_median": 294912.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 1900.2,
-        "projected_days": 79.17
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 633.4,
-        "projected_days": 26.39
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 316.7,
-        "projected_days": 13.2
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 155.12,
-        "projected_days": 6.46
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-02 11:15:18",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 125.461,
-      "parents_per_sec": 0.7971,
-      "per_parent_mean_ms": 1254.541,
-      "per_parent_median_ms": 1196.911,
-      "per_parent_p5_ms": 701.179,
-      "per_parent_p95_ms": 2080.904,
-      "per_parent_max_ms": 2619.562,
-      "children_per_parent_mean": 295605.1,
-      "children_per_parent_median": 294912.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 3207.95,
-        "projected_days": 133.66
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 1069.32,
-        "projected_days": 44.55
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 534.66,
-        "projected_days": 22.28
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 261.87,
-        "projected_days": 10.91
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-02 14:10:53",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 12.276,
-      "parents_per_sec": 8.1459,
-      "per_parent_mean_ms": 122.751,
-      "per_parent_median_ms": 119.263,
-      "per_parent_p5_ms": 63.024,
-      "per_parent_p95_ms": 193.161,
-      "per_parent_max_ms": 262.4,
-      "children_per_parent_mean": 295605.1,
-      "children_per_parent_median": 294912.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 313.89,
-        "projected_days": 13.08
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 104.63,
-        "projected_days": 4.36
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 52.32,
-        "projected_days": 2.18
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 25.62,
-        "projected_days": 1.07
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-02 14:44:24",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 14.836,
-      "parents_per_sec": 6.7405,
-      "per_parent_mean_ms": 148.336,
-      "per_parent_median_ms": 140.981,
-      "per_parent_p5_ms": 79.405,
-      "per_parent_p95_ms": 237.384,
-      "per_parent_max_ms": 340.407,
-      "children_per_parent_mean": 295605.1,
-      "children_per_parent_median": 294912.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 379.34,
-        "projected_days": 15.81
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 126.45,
-        "projected_days": 5.27
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 63.22,
-        "projected_days": 2.63
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 30.97,
-        "projected_days": 1.29
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-04 08:23:15",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 13.16,
-      "parents_per_sec": 7.599,
-      "per_parent_mean_ms": 131.586,
-      "per_parent_median_ms": 125.499,
-      "per_parent_p5_ms": 26.612,
-      "per_parent_p95_ms": 235.811,
-      "per_parent_max_ms": 382.359,
+      "wall_seconds": 6.471,
+      "parents_per_sec": 15.4534,
+      "children_per_sec": 3682134.0,
+      "per_parent_mean_ms": 64.705,
+      "per_parent_median_ms": 47.315,
+      "per_parent_p5_ms": 1.099,
+      "per_parent_p95_ms": 200.13,
+      "per_parent_max_ms": 378.638,
       "children_per_parent_mean": 238274.0,
       "children_per_parent_median": 248832.0,
+      "total_children": 23827397,
       "survivor_rate": 0.0
+    },
+    "reliability": {
+      "n_passes": 5,
+      "pass_walls": [
+        6.528,
+        6.67,
+        6.471,
+        5.862,
+        6.161
+      ],
+      "pass_rates": [
+        15.3195,
+        14.9925,
+        15.4534,
+        17.0584,
+        16.2324
+      ],
+      "pass_child_rates": [
+        3650240.0,
+        3572329.0,
+        3682134.0,
+        4064563.0,
+        3867761.0
+      ],
+      "rate_cv_pct": 4.71,
+      "min_rate": 14.9925,
+      "max_rate": 17.0584,
+      "median_rate": 15.4534
     },
     "projections": {
       "local": {
         "cores": 16,
-        "projected_hours": 336.48,
-        "projected_days": 14.02
+        "projected_hours": 165.46,
+        "projected_days": 6.89
       },
       "cloud_48": {
         "cores": 48,
-        "projected_hours": 112.16,
-        "projected_days": 4.67
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 56.08,
-        "projected_days": 2.34
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 27.47,
-        "projected_days": 1.14
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-04 09:15:36",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 8.36,
-      "parents_per_sec": 11.9619,
-      "per_parent_mean_ms": 83.599,
-      "per_parent_median_ms": 69.693,
-      "per_parent_p5_ms": 1.9,
-      "per_parent_p95_ms": 220.59,
-      "per_parent_max_ms": 375.342,
-      "children_per_parent_mean": 238274.0,
-      "children_per_parent_median": 248832.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 213.76,
-        "projected_days": 8.91
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 71.25,
-        "projected_days": 2.97
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 35.63,
-        "projected_days": 1.48
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 17.45,
-        "projected_days": 0.73
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-04 09:26:33",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 7.049,
-      "parents_per_sec": 14.1863,
-      "per_parent_mean_ms": 70.49,
-      "per_parent_median_ms": 58.082,
-      "per_parent_p5_ms": 2.844,
-      "per_parent_p95_ms": 199.692,
-      "per_parent_max_ms": 324.009,
-      "children_per_parent_mean": 238274.0,
-      "children_per_parent_median": 248832.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 180.24,
-        "projected_days": 7.51
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 60.08,
-        "projected_days": 2.5
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 30.04,
-        "projected_days": 1.25
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 14.71,
-        "projected_days": 0.61
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-04 09:32:51",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 10000,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 694.774,
-      "parents_per_sec": 14.3932,
-      "per_parent_mean_ms": 69.47,
-      "per_parent_median_ms": 51.0,
-      "per_parent_p5_ms": 0.0,
-      "per_parent_p95_ms": 204.11,
-      "per_parent_max_ms": 690.353,
-      "children_per_parent_mean": 262309.1,
-      "children_per_parent_median": 248832.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 177.65,
-        "projected_days": 7.4
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 59.22,
-        "projected_days": 2.47
-      },
-      "cloud_96": {
-        "cores": 96,
-        "projected_hours": 29.61,
-        "projected_days": 1.23
-      },
-      "cloud_196": {
-        "cores": 196,
-        "projected_hours": 14.5,
-        "projected_days": 0.6
-      }
-    }
-  },
-  {
-    "timestamp": "2026-03-04 10:02:05",
-    "parameters": {
-      "n_half": 2,
-      "m": 20,
-      "c_target": 1.4,
-      "d_parent": 32,
-      "d_child": 64,
-      "n_half_child": 32,
-      "x_cap": 3
-    },
-    "sample": {
-      "n_sample": 100,
-      "seed": 42,
-      "total_l3_survivors": 147279894
-    },
-    "sequential": {
-      "wall_seconds": 6.472,
-      "parents_per_sec": 15.4505,
-      "per_parent_mean_ms": 64.683,
-      "per_parent_median_ms": 52.056,
-      "per_parent_p5_ms": 1.9,
-      "per_parent_p95_ms": 183.691,
-      "per_parent_max_ms": 319.248,
-      "children_per_parent_mean": 238274.0,
-      "children_per_parent_median": 248832.0,
-      "survivor_rate": 0.0
-    },
-    "projections": {
-      "local": {
-        "cores": 16,
-        "projected_hours": 165.49,
-        "projected_days": 6.9
-      },
-      "cloud_48": {
-        "cores": 48,
-        "projected_hours": 55.16,
+        "projected_hours": 55.15,
         "projected_days": 2.3
       },
       "cloud_96": {
@@ -455,6 +77,334 @@
         "cores": 196,
         "projected_hours": 13.51,
         "projected_days": 0.56
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-14 17:41:32",
+    "variant": "odometer",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 8.854,
+      "parents_per_sec": 11.2948,
+      "children_per_sec": 2691252.0,
+      "per_parent_mean_ms": 88.529,
+      "per_parent_median_ms": 69.179,
+      "per_parent_p5_ms": 2.708,
+      "per_parent_p95_ms": 248.837,
+      "per_parent_max_ms": 411.794,
+      "children_per_parent_mean": 238274.0,
+      "children_per_parent_median": 248832.0,
+      "total_children": 23827397,
+      "survivor_rate": 0.0
+    },
+    "reliability": {
+      "n_passes": 5,
+      "pass_walls": [
+        9.237,
+        8.854,
+        8.73,
+        8.788,
+        8.946
+      ],
+      "pass_rates": [
+        10.8262,
+        11.2948,
+        11.4547,
+        11.3794,
+        11.1778
+      ],
+      "pass_child_rates": [
+        2579611.0,
+        2691252.0,
+        2729353.0,
+        2711412.0,
+        2663381.0
+      ],
+      "rate_cv_pct": 1.96,
+      "min_rate": 10.8262,
+      "max_rate": 11.4547,
+      "median_rate": 11.2948
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 226.38,
+        "projected_days": 9.43
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 75.46,
+        "projected_days": 3.14
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 37.73,
+        "projected_days": 1.57
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 18.48,
+        "projected_days": 0.77
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-14 17:42:24",
+    "variant": "gray",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 3.763,
+      "parents_per_sec": 26.5771,
+      "children_per_sec": 6332622.0,
+      "per_parent_mean_ms": 37.62,
+      "per_parent_median_ms": 37.109,
+      "per_parent_p5_ms": 6.715,
+      "per_parent_p95_ms": 75.205,
+      "per_parent_max_ms": 90.482,
+      "children_per_parent_mean": 238274.0,
+      "children_per_parent_median": 248832.0,
+      "total_children": 23827397,
+      "survivor_rate": 0.0
+    },
+    "reliability": {
+      "n_passes": 5,
+      "pass_walls": [
+        3.572,
+        3.646,
+        3.763,
+        3.962,
+        3.832
+      ],
+      "pass_rates": [
+        27.9985,
+        27.4271,
+        26.5771,
+        25.2408,
+        26.0982
+      ],
+      "pass_child_rates": [
+        6671302.0,
+        6535173.0,
+        6332622.0,
+        6014218.0,
+        6218510.0
+      ],
+      "rate_cv_pct": 3.64,
+      "min_rate": 25.2408,
+      "max_rate": 27.9985,
+      "median_rate": 26.5771
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 96.21,
+        "projected_days": 4.01
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 32.07,
+        "projected_days": 1.34
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 16.03,
+        "projected_days": 0.67
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 7.85,
+        "projected_days": 0.33
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-14 17:45:46",
+    "variant": "odometer",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 3.812,
+      "parents_per_sec": 26.2348,
+      "children_per_sec": 6251071.0,
+      "per_parent_mean_ms": 38.111,
+      "per_parent_median_ms": 37.689,
+      "per_parent_p5_ms": 6.477,
+      "per_parent_p95_ms": 72.928,
+      "per_parent_max_ms": 90.191,
+      "children_per_parent_mean": 238274.0,
+      "children_per_parent_median": 248832.0,
+      "total_children": 23827397,
+      "survivor_rate": 0.0
+    },
+    "reliability": {
+      "n_passes": 5,
+      "pass_walls": [
+        3.684,
+        3.812,
+        3.979,
+        3.902,
+        3.803
+      ],
+      "pass_rates": [
+        27.145,
+        26.2348,
+        25.1339,
+        25.6281,
+        26.2963
+      ],
+      "pass_child_rates": [
+        6467943.0,
+        6251071.0,
+        5988756.0,
+        6106501.0,
+        6265714.0
+      ],
+      "rate_cv_pct": 2.6,
+      "min_rate": 25.1339,
+      "max_rate": 27.145,
+      "median_rate": 26.2348
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 97.46,
+        "projected_days": 4.06
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 32.49,
+        "projected_days": 1.35
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 16.24,
+        "projected_days": 0.68
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 7.96,
+        "projected_days": 0.33
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-14 18:19:30",
+    "variant": "odometer",
+    "parameters": {
+      "n_half": 2,
+      "m": 20,
+      "c_target": 1.4,
+      "d_parent": 32,
+      "d_child": 64,
+      "n_half_child": 32,
+      "x_cap": 3
+    },
+    "sample": {
+      "n_sample": 100,
+      "seed": 42,
+      "total_l3_survivors": 147279894
+    },
+    "sequential": {
+      "wall_seconds": 3.65,
+      "parents_per_sec": 27.3949,
+      "children_per_sec": 6527499.0,
+      "per_parent_mean_ms": 36.497,
+      "per_parent_median_ms": 33.457,
+      "per_parent_p5_ms": 7.566,
+      "per_parent_p95_ms": 70.262,
+      "per_parent_max_ms": 91.389,
+      "children_per_parent_mean": 238274.0,
+      "children_per_parent_median": 248832.0,
+      "total_children": 23827397,
+      "survivor_rate": 0.0
+    },
+    "reliability": {
+      "n_passes": 5,
+      "pass_walls": [
+        3.65,
+        3.672,
+        3.651,
+        3.592,
+        2.921
+      ],
+      "pass_rates": [
+        27.3949,
+        27.2335,
+        27.3888,
+        27.8396,
+        34.23
+      ],
+      "pass_child_rates": [
+        6527499.0,
+        6489035.0,
+        6526047.0,
+        6633450.0,
+        8156122.0
+      ],
+      "rate_cv_pct": 9.42,
+      "min_rate": 27.2335,
+      "max_rate": 34.23,
+      "median_rate": 27.3949
+    },
+    "projections": {
+      "local": {
+        "cores": 16,
+        "projected_hours": 93.34,
+        "projected_days": 3.89
+      },
+      "cloud_48": {
+        "cores": 48,
+        "projected_hours": 31.11,
+        "projected_days": 1.3
+      },
+      "cloud_96": {
+        "cores": 96,
+        "projected_hours": 15.56,
+        "projected_days": 0.65
+      },
+      "cloud_196": {
+        "cores": 196,
+        "projected_hours": 7.62,
+        "projected_days": 0.32
       }
     }
   }

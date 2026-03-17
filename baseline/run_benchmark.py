@@ -7,16 +7,23 @@ kernel (d=32 -> 64), and reports:
   2. Single-core throughput (parents/sec)
   3. Projected wall-clock time at various core counts (local, 48-core, 196-core)
 
-The key metric is single-core throughput — cloud scaling is nearly linear
-because each parent is processed independently with no cross-parent
-communication.
+Reliability features:
+  - CPU pinned to single core + high priority (eliminates migration/scheduling noise)
+  - time.perf_counter() for sub-microsecond resolution (vs 10-16ms for time.time())
+  - Two warmup passes before timed passes to stabilize JIT + caches + branch predictors
+  - 5 timed passes by default, reports median
+  - children/sec as primary metric (stable across parent weight variation)
+  - CV% across passes to quantify reliability
 
 Usage:
-    python -m baseline.run_benchmark                  # default: 100 parents
+    python -m baseline.run_benchmark                  # default: 100 parents, 5 passes
     python -m baseline.run_benchmark --n_sample 500   # more parents for tighter estimate
+    python -m baseline.run_benchmark --passes 7       # more passes for tighter variance
     python -m baseline.run_benchmark --parallel        # also run parallel scaling test
 """
 import argparse
+import ctypes
+import gc
 import json
 import multiprocessing as mp
 import os
@@ -36,11 +43,15 @@ t_load = time.time()
 from cpu.run_cascade import (
     process_parent_fused,
     _fused_generate_and_prune,
+    _fused_generate_and_prune_gray,
     _compute_bin_ranges,
     _prune_dynamic_int32,
     _canonicalize_inplace,
 )
 print(f"  Done in {time.time() - t_load:.1f}s", flush=True)
+
+# Module-level flag: set by --gray CLI arg
+_USE_GRAY = False
 
 # =====================================================================
 # Constants — must match the actual proof parameters
@@ -59,14 +70,53 @@ RESULTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             'results.json')
 
 
-def load_sample(n_sample, seed=42):
-    """Load a stratified sample of L3 parents.
+# =====================================================================
+# OS-level noise reduction
+# =====================================================================
 
-    Samples uniformly across the sorted survivor array to get a
-    representative mix of light parents (few children) and heavy
-    parents (many children). This matters because parent weight
-    varies by 10-100x.
-    """
+def _pin_and_boost():
+    """Pin process to one core + raise priority. Returns cleanup function."""
+    old_affinity = None
+    old_priority = None
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetCurrentProcess()
+
+        # Save and set affinity — pick core 1 (avoid core 0 which handles
+        # most OS interrupts on Windows)
+        mask = ctypes.c_ulonglong(0)
+        ctypes.windll.kernel32.GetProcessAffinityMask(
+            handle, ctypes.byref(mask), ctypes.byref(ctypes.c_ulonglong(0)))
+        old_affinity = mask.value
+        # Pin to core 1 if available, else core 0
+        target_core = 2 if (old_affinity & 2) else 1  # bitmask: core1=0b10
+        kernel32.SetProcessAffinityMask(handle, target_core)
+
+        # Save and set priority to HIGH_PRIORITY_CLASS (0x80)
+        old_priority = kernel32.GetPriorityClass(handle)
+        kernel32.SetPriorityClass(handle, 0x00000080)
+
+        print(f"  Pinned to core {target_core.bit_length()-1 if isinstance(target_core, int) else 1}, "
+              f"priority HIGH", flush=True)
+    except Exception as e:
+        print(f"  (could not pin/boost: {e})", flush=True)
+
+    def _restore():
+        try:
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.GetCurrentProcess()
+            if old_affinity is not None:
+                kernel32.SetProcessAffinityMask(handle, old_affinity)
+            if old_priority is not None:
+                kernel32.SetPriorityClass(handle, old_priority)
+        except Exception:
+            pass
+
+    return _restore
+
+
+def load_sample(n_sample, seed=42):
+    """Load a stratified sample of L3 parents."""
     print(f"Loading L3 survivors from {CHECKPOINT_PATH}...")
     parents = np.load(CHECKPOINT_PATH)
     n_total = len(parents)
@@ -82,55 +132,113 @@ def load_sample(n_sample, seed=42):
     return sample
 
 
-def _warmup_l4():
+def _warmup_jit():
     """Warm up JIT for L4-sized arrays (d_child=64) so first parent isn't slow."""
     dummy = np.zeros((1, D_CHILD), dtype=np.int32)
-    dummy[0, 0] = M  # valid composition summing to m
+    dummy[0, 0] = M
     _prune_dynamic_int32(dummy, N_HALF_CHILD, M, C_TARGET)
     _canonicalize_inplace(dummy.copy())
-    # Also warm the fused kernel at L4 dimensions
     lo = np.zeros(D_PARENT, dtype=np.int32)
     hi = np.zeros(D_PARENT, dtype=np.int32)
     buf = np.empty((1, D_CHILD), dtype=np.int32)
     parent = np.zeros(D_PARENT, dtype=np.int32)
     parent[0] = M
-    _fused_generate_and_prune(parent, N_HALF_CHILD, M, C_TARGET, lo, hi, buf)  # returns tuple, ignored
+    _fused_generate_and_prune(parent, N_HALF_CHILD, M, C_TARGET, lo, hi, buf)
+    _fused_generate_and_prune_gray(parent, N_HALF_CHILD, M, C_TARGET, lo, hi, buf)
 
 
-def benchmark_sequential(sample):
-    """Time each parent individually — gives per-parent distribution."""
+def _process_parent_gray(parent_int, m, c_target, n_half_child):
+    """Like process_parent_fused but uses the Gray code kernel."""
+    d_parent = len(parent_int)
+    d_child = 2 * d_parent
+    result = _compute_bin_ranges(parent_int, m, c_target, d_child)
+    if result is None:
+        return np.empty((0, d_child), dtype=np.int32), 0
+    lo_arr, hi_arr, total_children = result
+    if total_children == 0:
+        return np.empty((0, d_child), dtype=np.int32), 0
+    max_buf = min(total_children, 500_000)
+    out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+    n_survivors, _ = _fused_generate_and_prune_gray(
+        parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+    if n_survivors > max_buf:
+        max_buf = n_survivors
+        out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+        n2, _ = _fused_generate_and_prune_gray(
+            parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+        n_survivors = n2
+    return out_buf[:n_survivors].copy(), total_children
+
+
+def run_one_pass(sample):
+    """Run all parents once, return (times, children_counts, survivor_counts, wall)."""
     n = len(sample)
     times = np.empty(n)
     children_counts = np.empty(n, dtype=np.int64)
     survivor_counts = np.empty(n, dtype=np.int64)
 
-    # Warm up JIT for L4 dimensions before timing
-    print("Warming up JIT for d=64...", flush=True)
-    _warmup_l4()
+    process_fn = _process_parent_gray if _USE_GRAY else process_parent_fused
 
-    print(f"\nRunning {n} parents sequentially (single-core)...")
-    t_total = time.time()
-
+    gc.disable()
+    t_total = time.perf_counter()
     for i in range(n):
-        t0 = time.time()
-        survivors, n_children = process_parent_fused(
-            sample[i], M, C_TARGET, N_HALF_CHILD)
-        elapsed = time.time() - t0
-
-        times[i] = elapsed
+        t0 = time.perf_counter()
+        survivors, n_children = process_fn(sample[i], M, C_TARGET, N_HALF_CHILD)
+        times[i] = time.perf_counter() - t0
         children_counts[i] = n_children
         survivor_counts[i] = len(survivors)
+    wall = time.perf_counter() - t_total
+    gc.enable()
+    return times, children_counts, survivor_counts, wall
 
-        if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
-            pct = (i + 1) / n * 100
-            wall = time.time() - t_total
-            print(f"  [{i+1}/{n}] ({pct:.0f}%) "
-                  f"wall={wall:.1f}s, last={elapsed:.3f}s, "
-                  f"children={n_children:,}, surv={len(survivors):,}",
-                  flush=True)
 
-    wall_total = time.time() - t_total
-    return times, children_counts, survivor_counts, wall_total
+def benchmark_sequential(sample, n_passes=5):
+    """Time each parent over multiple passes — gives reliable throughput.
+
+    Two warmup passes (results discarded), then n_passes timed.
+    Returns the median pass results.
+    """
+    n = len(sample)
+
+    # JIT warmup on dummy data
+    print("Warming up JIT...", flush=True)
+    _warmup_jit()
+
+    # Two warmup passes on real data (stabilizes caches + branch predictors;
+    # second pass catches anything the first didn't fully warm)
+    for w in range(2):
+        print(f"  Warmup pass {w+1}/2 ({n} parents)...", flush=True)
+        t0 = time.perf_counter()
+        run_one_pass(sample)
+        print(f"    {time.perf_counter() - t0:.2f}s", flush=True)
+
+    # Timed passes
+    pass_walls = []
+    pass_times = []
+    pass_children = None
+    pass_survivors = None
+
+    for p in range(n_passes):
+        # Force GC between passes so it doesn't fire mid-pass
+        gc.collect()
+        print(f"\n  Pass {p+1}/{n_passes}...", flush=True)
+        times, children_counts, survivor_counts, wall = run_one_pass(sample)
+        pass_walls.append(wall)
+        pass_times.append(times)
+        # Children/survivors are deterministic — same every pass
+        if pass_children is None:
+            pass_children = children_counts
+            pass_survivors = survivor_counts
+
+        total_children = int(np.sum(children_counts))
+        children_per_sec = total_children / wall
+        print(f"    {wall:.3f}s  |  {n/wall:.2f} parents/sec  |  "
+              f"{children_per_sec/1e6:.2f}M children/sec", flush=True)
+
+    # Select median pass by wall time
+    median_idx = int(np.argsort(pass_walls)[len(pass_walls) // 2])
+    return (pass_times[median_idx], pass_children, pass_survivors,
+            pass_walls[median_idx], pass_walls)
 
 
 def benchmark_parallel(sample, n_workers):
@@ -164,13 +272,22 @@ def benchmark_parallel(sample, n_workers):
 
 
 def compute_stats(times, children_counts, survivor_counts, wall_total,
-                  parallel_result=None):
+                  pass_walls, parallel_result=None):
     """Compute and format benchmark statistics."""
     n = len(times)
     parents_per_sec = n / wall_total
+    total_children = int(np.sum(children_counts))
+    children_per_sec = total_children / wall_total
+
+    # Variance across passes
+    walls_arr = np.array(pass_walls)
+    rates = n / walls_arr
+    child_rates = total_children / walls_arr
+    cv_pct = float(np.std(rates) / np.mean(rates) * 100) if len(rates) > 1 else 0.0
 
     stats = {
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'variant': 'gray' if _USE_GRAY else 'odometer',
         'parameters': {
             'n_half': N_HALF, 'm': M, 'c_target': C_TARGET,
             'd_parent': D_PARENT, 'd_child': D_CHILD,
@@ -186,6 +303,7 @@ def compute_stats(times, children_counts, survivor_counts, wall_total,
         'sequential': {
             'wall_seconds': round(wall_total, 3),
             'parents_per_sec': round(parents_per_sec, 4),
+            'children_per_sec': round(children_per_sec, 0),
             'per_parent_mean_ms': round(np.mean(times) * 1000, 3),
             'per_parent_median_ms': round(np.median(times) * 1000, 3),
             'per_parent_p5_ms': round(np.percentile(times, 5) * 1000, 3),
@@ -193,8 +311,19 @@ def compute_stats(times, children_counts, survivor_counts, wall_total,
             'per_parent_max_ms': round(np.max(times) * 1000, 3),
             'children_per_parent_mean': round(float(np.mean(children_counts)), 1),
             'children_per_parent_median': round(float(np.median(children_counts)), 1),
+            'total_children': total_children,
             'survivor_rate': round(float(np.sum(survivor_counts)) /
                                    max(1, float(np.sum(children_counts))), 6),
+        },
+        'reliability': {
+            'n_passes': len(pass_walls),
+            'pass_walls': [round(w, 3) for w in pass_walls],
+            'pass_rates': [round(n / w, 4) for w in pass_walls],
+            'pass_child_rates': [round(total_children / w, 0) for w in pass_walls],
+            'rate_cv_pct': round(cv_pct, 2),
+            'min_rate': round(float(np.min(rates)), 4),
+            'max_rate': round(float(np.max(rates)), 4),
+            'median_rate': round(float(np.median(rates)), 4),
         },
         'projections': {},
     }
@@ -204,7 +333,6 @@ def compute_stats(times, children_counts, survivor_counts, wall_total,
                          ('cloud_48', 48),
                          ('cloud_96', 96),
                          ('cloud_196', 196)]:
-        # Each core processes parents at single-core rate
         total_sec = TOTAL_L3_SURVIVORS / (parents_per_sec * cores)
         stats['projections'][label] = {
             'cores': cores,
@@ -229,6 +357,7 @@ def compute_stats(times, children_counts, survivor_counts, wall_total,
 def print_report(stats):
     """Pretty-print the benchmark results."""
     seq = stats['sequential']
+    rel = stats['reliability']
     print(f"\n{'='*60}")
     print(f"  L4 BASELINE BENCHMARK RESULTS")
     print(f"{'='*60}")
@@ -237,15 +366,23 @@ def print_report(stats):
     print(f"  Parameters: n_half={N_HALF}, m={M}, c_target={C_TARGET}")
     print(f"  d: {D_PARENT} -> {D_CHILD}")
     print()
-    print(f"  Sequential (1 core):")
-    print(f"    Wall time:          {seq['wall_seconds']:.1f}s")
+    print(f"  Sequential (1 core, median of {rel['n_passes']} passes):")
+    print(f"    Wall time:          {seq['wall_seconds']:.3f}s")
     print(f"    Throughput:         {seq['parents_per_sec']:.2f} parents/sec")
+    print(f"    Children/sec:       {seq['children_per_sec']/1e6:.2f}M")
     print(f"    Per-parent mean:    {seq['per_parent_mean_ms']:.1f} ms")
     print(f"    Per-parent median:  {seq['per_parent_median_ms']:.1f} ms")
     print(f"    Per-parent p5/p95:  {seq['per_parent_p5_ms']:.1f} / "
           f"{seq['per_parent_p95_ms']:.1f} ms")
     print(f"    Children/parent:    {seq['children_per_parent_mean']:.0f} (mean)")
     print(f"    Survivor rate:      {seq['survivor_rate']:.4%}")
+    print()
+    print(f"  Reliability ({rel['n_passes']} passes):")
+    print(f"    Pass rates:         "
+          f"{', '.join(f'{r:.2f}' for r in rel['pass_rates'])} parents/sec")
+    print(f"    CV:                 {rel['rate_cv_pct']:.1f}%")
+    print(f"    Range:              {rel['min_rate']:.2f} - "
+          f"{rel['max_rate']:.2f} parents/sec")
     print()
     print(f"  Projections for full L4 ({TOTAL_L3_SURVIVORS:,} parents):")
     for label, proj in stats['projections'].items():
@@ -265,7 +402,7 @@ def print_report(stats):
 
 
 def save_results(stats):
-    """Append results to the baseline results file."""
+    """Save results, keeping only the last 5 entries."""
     if os.path.exists(RESULTS_PATH):
         with open(RESULTS_PATH) as f:
             all_results = json.load(f)
@@ -273,6 +410,10 @@ def save_results(stats):
         all_results = []
 
     all_results.append(stats)
+
+    # Keep only last 5 results to avoid unbounded growth
+    if len(all_results) > 5:
+        all_results = all_results[-5:]
 
     with open(RESULTS_PATH, 'w') as f:
         json.dump(all_results, f, indent=2)
@@ -286,9 +427,18 @@ def main():
                         help='Number of L3 parents to sample (default: 100)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for sampling (default: 42)')
+    parser.add_argument('--passes', type=int, default=5,
+                        help='Number of timed passes (default: 5)')
     parser.add_argument('--parallel', action='store_true',
                         help='Also run parallel scaling test')
+    parser.add_argument('--gray', action='store_true',
+                        help='Use Gray code kernel instead of lexicographic odometer')
     args = parser.parse_args()
+
+    global _USE_GRAY
+    _USE_GRAY = args.gray
+    if _USE_GRAY:
+        print(">>> Using GRAY CODE kernel <<<", flush=True)
 
     if not os.path.exists(CHECKPOINT_PATH):
         print(f"ERROR: L3 checkpoint not found at {CHECKPOINT_PATH}")
@@ -296,18 +446,24 @@ def main():
 
     sample = load_sample(args.n_sample, seed=args.seed)
 
-    # -- Sequential benchmark (the key measurement) --
-    times, children_counts, survivor_counts, wall_total = \
-        benchmark_sequential(sample)
+    # Pin to single core + raise priority for stable measurements
+    restore = _pin_and_boost()
 
-    # -- Optional parallel test --
+    try:
+        # -- Sequential benchmark (the key measurement) --
+        times, children_counts, survivor_counts, wall_total, pass_walls = \
+            benchmark_sequential(sample, n_passes=args.passes)
+    finally:
+        restore()
+
+    # -- Optional parallel test (after restoring affinity!) --
     parallel_result = None
     if args.parallel:
         parallel_result = benchmark_parallel(sample, mp.cpu_count())
 
     # -- Report --
     stats = compute_stats(times, children_counts, survivor_counts,
-                          wall_total, parallel_result)
+                          wall_total, pass_walls, parallel_result)
     print_report(stats)
     save_results(stats)
 
