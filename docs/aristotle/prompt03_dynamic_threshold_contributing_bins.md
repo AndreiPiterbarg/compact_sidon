@@ -1,6 +1,8 @@
-# Prompt 3: Dynamic Threshold and Contributing Bins
+# Prompt 3: Dynamic Threshold Soundness
 
-**Claims 1.3 + 1.4.** Attach `output.lean` as context.
+**Claim 1.3 only.** Attach `complete_proof.lean` as context.
+
+> **NOTE:** Claim 1.4 (`contributing_bins_iff`) is **ALREADY PROVED** in `complete_proof.lean`. Only Claim 1.3 remains.
 
 ---
 
