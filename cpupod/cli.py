@@ -45,15 +45,24 @@ def main():
     elif command == "run":
         auto_teardown = "--auto-teardown" in sys.argv
         rest = [a for a in sys.argv[2:] if a != "--auto-teardown"]
-        script = rest[0] if rest else None
-        args = " ".join(rest[1:]) if len(rest) > 1 else ""
+        script = None
+        args_start = 0
+        if rest and not rest[0].startswith("--"):
+            script = rest[0]
+            args_start = 1
+        args = " ".join(rest[args_start:])
         session.run(script=script, args=args, auto_teardown=auto_teardown)
 
     elif command == "launch":
         auto_teardown = "--auto-teardown" in sys.argv
         rest = [a for a in sys.argv[2:] if a != "--auto-teardown"]
-        script = rest[0] if rest else None
-        args = " ".join(rest[1:]) if len(rest) > 1 else ""
+        # First positional arg (not starting with --) is the script
+        script = None
+        args_start = 0
+        if rest and not rest[0].startswith("--"):
+            script = rest[0]
+            args_start = 1
+        args = " ".join(rest[args_start:])
         session.launch(script=script, args=args, auto_teardown=auto_teardown)
 
     elif command == "logs":

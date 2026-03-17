@@ -67,6 +67,7 @@ def ssh_run(ssh_host, ssh_port, command, timeout=None, stream=False,
             capture_output=True,
             text=True,
             timeout=timeout,
+            stdin=subprocess.DEVNULL,
         )
 
 

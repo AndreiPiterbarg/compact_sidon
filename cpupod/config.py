@@ -50,6 +50,7 @@ SSH_OPTIONS = [
     "-o", "StrictHostKeyChecking=no",
     "-o", "UserKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
+    "-o", "ConnectTimeout=10",
     "-i", str(SSH_KEY_PATH),
 ]
 
