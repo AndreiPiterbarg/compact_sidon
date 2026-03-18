@@ -50,23 +50,21 @@
 \maketitle
 
 \begin{abstract}
-We present a self-contained, rigorous proof that the autoconvolution
-constant $C_{1a}$ --- defined as the infimum of
-$\|f * f\|_{L^\infty} / \bigl(\int f\bigr)^2$ over all nonnegative
+We present a self-contained proof that the autoconvolution constant
+$C_{1a}$ --- the infimum of
+$\|f * f\|_{L^\infty} / \bigl(\int f\bigr)^2$ over nonnegative
 functions supported on $[-\tfrac14, \tfrac14]$ --- satisfies a lower
-bound that can be certified by exhaustive computation.  The proof
-follows the framework of Cloninger and Steinerberger (2017), extended
-with a multiscale cascade and tighter pruning.  We develop the
-mathematics from first principles: the reduction from continuous
-functions to finite-dimensional bin averages (Section~\ref{sec:bin}),
-the discretization of the simplex and its error bound
-(Section~\ref{sec:disc}), the windowed test-value criterion
-(Section~\ref{sec:testvalue}), the pruning strategies that make
-exhaustive search tractable (Section~\ref{sec:pruning}), the
-multiscale cascade that exploits coarse-to-fine refinement
-(Section~\ref{sec:cascade}), and the correctness invariants that
-guarantee mathematical validity (Section~\ref{sec:correctness}).
-Throughout, we emphasize intuition alongside formal statements.
+bound certifiable by exhaustive computation.  Our starting point is the
+framework of Cloninger and Steinerberger (2017), which we extend with a
+multiscale cascade and tighter pruning.  The paper is organized around
+the natural sequence of reductions: from continuous functions to bin
+averages (Section~\ref{sec:bin}), from the continuous simplex to a
+finite lattice (Section~\ref{sec:disc}), and finally to an exhaustive
+search made tractable by pruning
+(Sections~\ref{sec:testvalue}--\ref{sec:cascade}).
+Section~\ref{sec:correctness} addresses the invariants that keep the
+computation honest.  Throughout, we emphasize intuition alongside formal
+statements.
 \end{abstract}
 
 \tableofcontents
@@ -96,6 +94,9 @@ The \emph{autoconvolution} of $f$ is
 Since $\supp(f) \subseteq [-\tfrac14, \tfrac14]$, the
 autoconvolution is supported on $[-\tfrac12, \tfrac12]$ and is itself
 nonnegative.
+
+A natural question is: how small can the peak of $f * f$ be, relative
+to the total mass of $f$?  This is precisely what $C_{1a}$ measures.
 
 \begin{definition}
 The \emph{autoconvolution constant} is
@@ -170,8 +171,9 @@ windowed bounds) and a multiscale cascade (coarse-to-fine refinement).
 \section{From Functions to Bin Averages}\label{sec:bin}
 % ======================================================================
 
-The first step reduces the problem from an optimization over functions
-to an optimization over finite-dimensional vectors.
+Our first order of business is to replace the infinite-dimensional
+optimization --- over all nonneg functions --- with something
+finite-dimensional and computable.
 
 \subsection{The Partition}
 
@@ -222,8 +224,8 @@ information about the shape of $f$ within each bin).
 
 \subsection{The Lower Bound on $\|f*f\|_\infty$}
 
-The key result is that the autoconvolution peak can be lower-bounded
-using only the bin averages.
+Remarkably, the entire reduction rests on two elementary observations
+--- one geometric, one analytic.
 
 \begin{lemma}[Reduction to Bin Averages --- Lemma~1 of CS17]
 \label{lem:bin-reduction}
@@ -232,7 +234,7 @@ averages $a = (a_0, \ldots, a_{d-1})$:
 \[
   \|f * f\|_{L^\infty}
   \;\ge\;
-  \max_{\substack{2 \le \ell \le 2n \\[2pt] k}}
+  \max_{\substack{2 \le \ell \le 2d \\[2pt] k}}
   \frac{1}{4n\ell}
   \sum_{\substack{0 \le i, j \le d-1 \\[1pt] k \le i+j \le k+\ell-2}}
   a_i\, a_j.
@@ -240,9 +242,6 @@ averages $a = (a_0, \ldots, a_{d-1})$:
 \end{lemma}
 
 \begin{proof}[Proof sketch]
-The proof uses two ingredients:
-
-\medskip
 \noindent\textbf{Ingredient 1: Support of cross-convolutions.}
 Let $f_i = f \cdot \mathbf{1}_{I_i}$ be the restriction of $f$ to bin
 $I_i$.  Then $f = \sum_i f_i$ and
@@ -250,32 +249,24 @@ $I_i$.  Then $f = \sum_i f_i$ and
   (f * f)(t) \;=\; \sum_{i,j} (f_i * f_j)(t).
 \]
 The convolution $f_i * f_j$ is supported on the Minkowski sum
-$I_i + I_j$, which is an interval of width $\tfrac{2}{4n} =
-\tfrac{1}{2n}$ centered at $\tfrac{i+j+1}{4n}$.  The key point:
-\emph{the index $i + j$ determines which part of the convolution
-domain receives the contribution from the cross-term $f_i * f_j$}.
+$I_i + I_j$, which is an interval of width $\tfrac{1}{2n}$.
+The key point: \emph{the index $i + j$ determines which part of the
+convolution domain receives the contribution from $f_i * f_j$}.
 
 \medskip
-\noindent\textbf{Ingredient 2: Pigeonhole / $L^\infty$--$L^1$ bound.}
+\noindent\textbf{Ingredient 2: Pigeonhole.}
 For any nonneg function $h$ and interval $J$:
-\[
-  \|h\|_{L^\infty} \;\ge\; \frac{1}{|J|} \int_J h.
-\]
+$\|h\|_{L^\infty} \ge \tfrac{1}{|J|} \int_J h$.
 
 \medskip
-\noindent\textbf{Combining.}  Consider a ``window'' of $\ell$
-consecutive bins in the convolution domain, starting at position $k$.
-The convolution-domain bin for sum-index $s = i + j$ has width
-$\tfrac{1}{2n}$.  A window covering $\ell - 1$ consecutive
-sum-indices $s \in \{k, k+1, \ldots, k + \ell - 2\}$ spans a
-convolution-domain interval of length $\tfrac{\ell}{2n}$.
-
-All cross-terms $f_i * f_j$ with $k \le i + j \le k + \ell - 2$ have
-their support within this window.  Each cross-term contributes
-$\int f_i * f_j = (\int f_i)(\int f_j) = \tfrac{a_i}{4n} \cdot
-\tfrac{a_j}{4n}$ total mass.  Since $f * f$ is nonneg, the total
-$L^1$ mass of $f * f$ on this window is at least the sum of these
-cross-term contributions.  Applying the pigeonhole bound:
+\noindent\textbf{Combining.}  Consider a ``window'' covering
+sum-indices $s \in \{k, k+1, \ldots, k + \ell - 2\}$.  The Minkowski
+sums for consecutive sum-indices overlap, so their union forms an
+interval of length at most $\tfrac{\ell}{2n}$ in the convolution
+domain.  All cross-terms $f_i * f_j$ with $k \le i + j \le k + \ell -
+2$ have support within this interval, contributing total $L^1$ mass
+$\sum \tfrac{a_i}{4n} \cdot \tfrac{a_j}{4n}$.  Applying pigeonhole
+with the containing interval of length $\tfrac{\ell}{2n}$:
 \[
   \|f * f\|_{L^\infty}
   \;\ge\;
@@ -287,7 +278,9 @@ cross-term contributions.  Applying the pigeonhole bound:
   \sum_{\substack{k \le i+j \le k+\ell-2}}
   a_i\, a_j.
 \]
-Taking the maximum over all windows gives the result.
+Taking the maximum over all windows gives the result.  (Using the
+containing interval $\ell/(2n)$ rather than the exact union length
+makes this a conservative bound, which is all we need.)
 \end{proof}
 
 \begin{remark}[Intuition]
@@ -296,27 +289,37 @@ in each bin.''  The products $a_i a_j$ measure how much the mass in
 bins $i$ and $j$ contribute to the autoconvolution.  The window
 argument says: if too much product-mass falls in any fixed interval of
 the convolution domain, then $f * f$ must be large somewhere in that
-interval.  The smaller the window $\ell$, the stronger the conclusion
-(mass is concentrated in a smaller region), but the fewer terms
-contribute to the sum.
+interval.
+
+The reader may wonder: why not just take the narrowest possible window
+($\ell = 2$) everywhere?  Because narrow windows see fewer
+cross-terms, so their sums can be small even when mass is spread
+across many bins.  The interplay between window width and the number of
+contributing pairs is what makes the optimization nontrivial.
 \end{remark}
+
+With the reduction to bin averages in hand, the next step is to
+discretize the continuous simplex so that a computer can enumerate it.
 
 
 % ======================================================================
 \section{Discretization of the Simplex}\label{sec:disc}
 % ======================================================================
 
-Lemma~\ref{lem:bin-reduction} reduced the problem to minimizing over
-the continuous simplex $A_n$.  But $A_n$ is an uncountable set.  We
-now discretize it to a finite lattice, at the cost of a small
-correction term.
+Having reduced the problem to minimizing over the continuous simplex
+$A_n$, we face a new obstacle: $A_n$ is uncountable.  To bring the
+problem within reach of a computer, we approximate $A_n$ by a finite
+lattice, paying a small but quantifiable price in accuracy.
 
 \subsection{The Lattice}
 
-Fix a positive integer $m$ (the ``grid resolution'').
+To discretize $A_n$, we need a grid fine enough to approximate any
+point in the simplex, yet coarse enough to enumerate.  The natural
+choice is a lattice of spacing $1/m$.
 
 \begin{definition}
-The \emph{discrete lattice} is
+Fix a positive integer $m$ (the ``grid resolution'').  The
+\emph{discrete lattice} is
 \[
   B_{n,m} \;=\; \left\{
     b \in \left(\tfrac{1}{m}\N\right)^d
@@ -331,6 +334,14 @@ Equivalently, writing $c_j = m \cdot b_j$, the lattice consists of
 nonneg integer vectors $c = (c_0, \ldots, c_{d-1})$ with
 $\sum c_j = S$, where $S = 4nm$.  These are the \emph{compositions}
 of the integer $S$ into $d$ nonneg parts.
+
+\begin{remark}[Implementation convention]
+The implementation uses a rescaled convention where integer coordinates
+sum to $m$ rather than $4nm$, absorbing the factor $4n$ into the
+scale when converting to bin averages: $a_j = c_j \cdot 4n / m$.  The
+mathematics is equivalent; we use the $S = 4nm$ convention in this
+proof for consistency with the bin-average normalization.
+\end{remark}
 
 \begin{lemma}[Lattice as an Approximation --- Lemma~2 of CS17]
 \label{lem:lattice-approx}
@@ -370,109 +381,116 @@ where $b_{n,m} = \min_{b \in B_{n,m}} \tv(b)$.
 
 \begin{proof}
 Write $a = b + \varepsilon$ where $\|\varepsilon\|_\infty \le
-\tfrac{1}{m}$.  Then
+\tfrac{1}{m}$ as vectors of bin averages.  Since $\tv$ is a quadratic
+function of its argument (a maximum of quadratic forms), we can bound
+the perturbation algebraically.
+
+For any window $(\ell, k)$, the windowed sum
+$W_{\ell,k}(a) = \tfrac{1}{4n\ell}\sum_{k \le i+j \le k+\ell-2} a_i a_j$
+expands as:
 \[
-  f * f \;=\; g * g + g * \varepsilon + \varepsilon * g
-    + \varepsilon * \varepsilon,
+  W_{\ell,k}(b + \varepsilon) = W_{\ell,k}(b)
+    + \underbrace{\frac{1}{4n\ell}\sum (b_i \varepsilon_j + \varepsilon_i b_j)}_{\text{cross terms}}
+    + \underbrace{\frac{1}{4n\ell}\sum \varepsilon_i \varepsilon_j}_{\text{error-squared}}.
 \]
-where $g$ is the step function with bin averages $b$ and $\varepsilon
-= f - g$.  Taking $L^\infty$ norms:
-\begin{align*}
-  \|f * f\|_\infty
-  &\ge \|g * g\|_\infty - 2\|g * \varepsilon\|_\infty
-    - \|\varepsilon * \varepsilon\|_\infty.
-\end{align*}
-Since $g$ is nonneg with $\int g = 1$ and $\|\varepsilon\|_\infty \le
-\tfrac{1}{m}$ with support in $(-\tfrac14, \tfrac14)$:
-\begin{itemize}
-  \item $\|g * \varepsilon\|_\infty \le \|g\|_1 \cdot
-    \|\varepsilon\|_\infty \le 1 \cdot \tfrac{1}{m} = \tfrac{1}{m}$.
-    (Young's inequality.)
-  \item $\|\varepsilon * \varepsilon\|_\infty \le
-    \|\varepsilon\|_1 \cdot \|\varepsilon\|_\infty \le
-    \tfrac{1}{m^2}$.
-    (Since $\|\varepsilon\|_1 \le d \cdot \tfrac{1}{4n} \cdot
-    \tfrac{1}{m} = \tfrac{1}{m}$, because $d = 2n$ and each bin has
-    width $\tfrac{1}{4n}$.)
-\end{itemize}
-Therefore $\|f*f\|_\infty \ge \|g*g\|_\infty - \tfrac{2}{m} -
-\tfrac{1}{m^2}$, and since $\|g*g\|_\infty \ge \tv(b)$ by
-Lemma~\ref{lem:bin-reduction}, the result follows.
+
+\noindent\textbf{Cross terms.}  For each $j$, the coefficient of
+$\varepsilon_j$ is $\tfrac{2}{4n\ell}\sum_{\text{valid }i} b_i \le
+\tfrac{2}{4n\ell} \cdot 4n = \tfrac{2}{\ell}$ (since $\sum b_i = 4n$
+and each $b_i \ge 0$).  Summing over at most $d$ values of $j$ with
+$|\varepsilon_j| \le 1/m$, the total cross-term perturbation per
+window is at most $\tfrac{2}{m}$ in absolute value.  (This bound is
+conservative; it holds uniformly over all windows.)
+
+\medskip
+\noindent\textbf{Error-squared term.}
+$\bigl|\tfrac{1}{4n\ell}\sum \varepsilon_i \varepsilon_j\bigr| \le
+\tfrac{1}{4n\ell} \cdot (\sum |\varepsilon_i|)^2$.  Since $\sum
+|\varepsilon_i| \le d / m = 2n/m$ and $4n\ell \ge 8n$, this is at
+most $\tfrac{(2n/m)^2}{8n} = \tfrac{n}{2m^2} \le \tfrac{1}{m^2}$ for
+$n \ge 1$.  (In fact the tighter bound is $1/(2m^2)$, but $1/m^2$
+suffices and is simpler.)
+
+\medskip
+\noindent Combining: $W_{\ell,k}(a) \ge W_{\ell,k}(b) - 2/m -
+1/m^2$ for every window.  Taking the max over windows:
+$\tv(a) \ge \tv(b) - 2/m - 1/m^2$.  Since
+$\|f*f\|_\infty \ge \tv(a)$ by Lemma~\ref{lem:bin-reduction}, the
+result follows.
 \end{proof}
 
 \begin{remark}[The correction term in practice]
 The correction $\tfrac{2}{m} + \tfrac{1}{m^2}$ is the ``price of
 discretization.''  At $m = 20$, it equals $0.1025$; at $m = 50$, it
 equals $0.0404$.  Larger $m$ gives a tighter bound but more lattice
-points to check.
+points to check --- a tension that drives much of the algorithm design.
 \end{remark}
 
 \subsection{The Refined (Dynamic) Correction}
 
-Lemma~\ref{lem:disc-error} uses a uniform bound on $\|g *
-\varepsilon\|_\infty$.  A tighter, position-dependent bound exploits
-the support constraint.
+The uniform bound of $2/m$ on the cross-term perturbation is
+pessimistic: it assumes every bin contributes to every window.  A
+tighter, position-dependent bound exploits the fact that narrow or
+edge-positioned windows involve fewer bins.
 
 \begin{lemma}[Dynamic Correction --- Equation~(1) of CS17]
 \label{lem:dynamic-correction}
 For a specific window at position $k$ with length $\ell$, let
-$W = \sum_{i \in \mathcal{B}(k,\ell)} b_i$ be the total mass in the
-bins that contribute to this window, where $\mathcal{B}(k,\ell) =
-\{i : \exists\, j \text{ with } k \le i+j \le k+\ell-2\}$.  Then:
-\[
-  \tv_{\ell,k}(a) \;\ge\; \tv_{\ell,k}(b) - \frac{2W}{m^2 \cdot 4n\ell}
-    - \frac{1}{m^2}.
-\]
-In integer coordinates (where $c_i = m \cdot b_i$ and
-$W_{\text{int}} = \sum_{i \in \mathcal{B}} c_i$), the
+$W_{\text{int}} = \sum_{i \in \mathcal{B}(k,\ell)} c_i$ be the total
+integer mass in contributing bins, where $\mathcal{B}(k,\ell) = \{i :
+\exists\, j \text{ with } k \le i+j \le k+\ell-2\}$.  Then the
 \emph{window-specific effective threshold} is:
 \[
-  T_{\ell,k} \;=\; c_{\mathrm{target}} + \frac{1 + 2 W_{\text{int}}}{m^2}
+  T_{\ell,k} \;=\; c_{\mathrm{target}}
+    + \frac{1 + 2\, W_{\mathrm{int}}}{m^2}
 \]
-rather than the uniform $T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
+rather than the uniform
+$T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
 \end{lemma}
 
 \begin{proof}
-The cross-term $\|g * \varepsilon\|_\infty$ at a specific window
-position $k$ is bounded by $\tfrac{1}{m}$ times the integral of $g$
-over only those bins that contribute to that window, divided by the
-window length.  This gives
-$\tfrac{W}{m \cdot 4n\ell}$ for each of the two cross-terms
-$g * \varepsilon$ and $\varepsilon * g$, totaling
-$\tfrac{2W}{m \cdot 4n\ell}$.
-
-In integer coordinates, the windowed sum
-$\sum_{k \le i+j \le k+\ell-2} c_i c_j$ is compared against the
-integer threshold:
+For the window at $(\ell, k)$, the cross-term perturbation is bounded
+by $\tfrac{2}{4n\ell} \cdot \tfrac{1}{m} \sum_{i \in \mathcal{B}}
+b_i = \tfrac{2W}{4n\ell m}$ where $W = W_{\text{int}}/m$.  In integer
+coordinates (multiplying the test-value inequality through by
+$4n\ell\, m^2$), the windowed sum $\sum c_i c_j$ is compared against:
 \[
   \text{int\_thresh}
   \;=\;
   \bigl\lfloor
-    \bigl(c_{\mathrm{target}} \cdot m^2 + 1 + 2\,W_{\text{int}}\bigr)
+    \bigl(c_{\mathrm{target}} \cdot m^2 + 1
+      + 2\,W_{\text{int}}\bigr)
     \cdot \frac{\ell}{4n}
     \cdot (1 - 4\epsilon_{\mathrm{mach}})
   \bigr\rfloor,
 \]
 where the $(1 - 4\epsilon_{\mathrm{mach}})$ factor guards against
-floating-point rounding, making the threshold conservative (never
-over-prunes).
+floating-point rounding, and the $+1$ term provides an additional
+safety margin.  Both make the threshold conservative (the code may fail
+to prune a borderline case, but it will never falsely prune).
 \end{proof}
 
 \begin{remark}[Why dynamic is better]
-The uniform correction uses $W_{\text{int}} = m$ (the total mass).
-The dynamic correction uses the actual mass in contributing bins,
-which can be much smaller for narrow windows near the edges of the
-convolution domain.  This makes the effective threshold lower
+The uniform correction uses $W_{\text{int}} = S = 4nm$ (the total
+mass).  The dynamic correction uses the actual mass in contributing
+bins, which can be much smaller for narrow windows near the edges of
+the convolution domain.  This makes the effective threshold lower
 (easier to exceed), allowing more configurations to be pruned.
 \end{remark}
+
+The discretization machinery is now complete: given any continuous
+function, we can approximate its bin averages on a lattice and bound
+the resulting error.  What remains is to describe the quantity we
+actually compute at each lattice point, and the strategies that make
+the computation feasible.
 
 
 % ======================================================================
 \section{The Windowed Test Value}\label{sec:testvalue}
 % ======================================================================
 
-We now formalize the quantity that the algorithm computes for each
-lattice point.
+With the discretization in hand, we can describe precisely what the
+algorithm computes at each lattice point.
 
 \subsection{Definition}
 
@@ -494,10 +512,9 @@ The \emph{test value} is
 \]
 \end{definition}
 
-In words: compute the autoconvolution, then slide a window of each
-possible width $\ell$ across it, sum the $\ell - 1$ consecutive
-entries in each window position, normalize by $4n\ell$, and take the
-maximum.
+In words: compute the autoconvolution, slide a window of each possible
+width $\ell$ across it, sum the $\ell - 1$ consecutive entries in each
+window position, normalize by $4n\ell$, and take the maximum.
 
 \subsection{Efficient Computation via Prefix Sums}
 
@@ -522,6 +539,11 @@ positions each).  Total: $O(d^2)$ per lattice point.
 
 \subsection{Reversal Symmetry}\label{subsec:reversal}
 
+A key structural observation cuts the search space in half.  If we
+reverse the order of the bins, the autoconvolution peak does not change
+--- intuitively, because convolution does not care which direction we
+label the support.
+
 \begin{theorem}[Autoconvolution Reversal Symmetry]
 \label{thm:reversal}
 For any mass vector $a$, $\tv(a) = \tv(\rev(a))$, where
@@ -529,7 +551,7 @@ $\rev(a) = (a_{d-1}, \ldots, a_0)$.
 \end{theorem}
 
 \begin{proof}
-The proof proceeds in three steps.
+The argument has three moving parts.
 
 \medskip
 \noindent\textbf{Step 1: Autoconvolution reversal.}
@@ -572,16 +594,22 @@ $b \le \rev(b)$ lexicographically.  This halves the search space (up
 to palindromes).
 \end{corollary}
 
+Even after exploiting reversal symmetry, the number of lattice points
+to check --- roughly $\binom{S+d-1}{d-1}/2$ --- grows rapidly with $d$
+and $m$.  To keep the computation tractable, we need ways to rule out
+large swathes of the simplex without computing the full test value.
+
 
 % ======================================================================
 \section{Pruning Strategies}\label{sec:pruning}
 % ======================================================================
 
-The lattice $B_{n,m}$ has $\binom{S + d - 1}{d - 1}$ points, which
-grows rapidly.  Pruning eliminates configurations without computing
-the full test value.
-
 \subsection{Asymmetry Pruning}
+
+At first glance, the following bound might seem too crude to be useful:
+it ignores everything about $f$ except how much mass sits on each half
+of the support.  Yet in practice, this single test eliminates the vast
+majority of configurations at every cascade level.
 
 \begin{theorem}[Asymmetry Bound]
 \label{thm:asymmetry}
@@ -621,18 +649,16 @@ ruled out.  The threshold left-mass fraction is:
 For $c_{\mathrm{target}} = 1.4$: $p^* \approx 0.8367$.
 \end{corollary}
 
-\begin{remark}[Discrete margin]
-In the discrete setting, the left-mass fraction
-$L_{\text{disc}} = \sum_{i=0}^{n-1} c_i / S$ may differ from the
-continuous $L$ by up to $\tfrac{1}{4m}$ (due to the rounding
-procedure in Lemma~\ref{lem:lattice-approx}).  To be safe, we add
-this margin to the threshold:
-\[
-  p^*_{\text{safe}} \;=\; \sqrt{c_{\mathrm{target}} / 2}
-    + \frac{1}{4m}.
-\]
-A configuration is kept (not pruned) only if
-$1 - p^*_{\text{safe}} < L_{\text{disc}} < p^*_{\text{safe}}$.
+\begin{remark}[No discrete margin needed]
+One might expect a safety margin to account for the discrepancy between
+discrete and continuous left-mass fractions.  However, our discrete
+compositions represent piecewise-constant step functions, for which the
+left-half mass $L = \sum_{i < n} c_i / S$ is \emph{exact} --- no
+approximation is involved.  Moreover, the midpoint $x = 0$ always
+falls on a bin boundary, and the left-mass fraction is preserved
+exactly under dyadic refinement (child bins for the left half sum to
+the parent's left bins).  Therefore no margin is necessary: we prune
+at the exact threshold $p^*$.
 \end{remark}
 
 \begin{remark}[Important subtlety]
@@ -726,7 +752,7 @@ elements rather than concentrated in one.
 \subsection{Canonical Symmetry Exploitation}
 
 By Theorem~\ref{thm:reversal}, $\tv(b) = \tv(\rev(b))$ for every
-lattice point $b$.  We define:
+lattice point $b$.  This motivates the following notion of canonicality.
 
 \begin{definition}
 A composition $b$ is \emph{canonical} if $b \le \rev(b)$
@@ -743,15 +769,12 @@ palindromes.
 \end{proposition}
 
 \begin{proof}
-Partition all compositions into three classes:
-\begin{enumerate}
-  \item Palindromes ($P$ total): $b = \rev(b)$.  Each is canonical.
-  \item Strictly canonical non-palindromes ($C$ total):
-    $b < \rev(b)$.
-  \item Strictly non-canonical ($C$ total): $b > \rev(b)$.
-\end{enumerate}
-Classes 2 and 3 are in bijection via reversal, so $N = P + 2C$, hence
-$C = (N-P)/2$.  The canonical count is $P + C = (N+P)/2$.
+Every composition falls into exactly one of three categories:
+palindromes (those equal to their own reversal), strictly canonical
+non-palindromes ($b < \rev(b)$), and their reversals.  Since reversal
+is an involution with no fixed points outside the palindromes, the
+second and third categories have equal size $C$.  Counting gives
+$N = P + 2C$, so the canonical count is $P + C = (N+P)/2$.
 \end{proof}
 
 \begin{remark}[Loop-bound tightening for $d = 4$]
@@ -777,9 +800,11 @@ the inner pairs when outer pairs tie.
 \section{The Multiscale Cascade}\label{sec:cascade}
 % ======================================================================
 
-Enumerating all compositions at a fine resolution $d$ is
-combinatorially explosive.  The cascade strategy starts coarse and
-refines only the configurations that survive pruning.
+Brute-force enumeration at fine resolution is hopelessly infeasible ---
+even modest parameters yield billions of lattice points.  The key idea,
+borrowed from multigrid methods in numerical analysis, is to start
+coarse: most configurations can be ruled out cheaply at low resolution,
+and only the stubborn survivors need to be examined more closely.
 
 \subsection{Overview}
 
@@ -813,38 +838,52 @@ with $c_{2i}, c_{2i+1} \ge 0$ and both being nonneg integers.
 
 \subsection{Energy Cap}\label{subsec:energy-cap}
 
-A child bin with value $c_j$ contributes $a_j^2 = (c_j/m)^2 \cdot
-(4n_{\text{child}})^2$ to the $\ell=2$ diagonal window.  If this
-single-bin contribution already exceeds the threshold, the child is
-immediately pruned.  Therefore, we cap each child bin at:
+One might worry that generating all possible children is wasteful.
+Indeed, many children are dead on arrival --- the single-bin diagonal
+window already kills them.  The energy cap avoids generating these
+corpses.
+
+Recall that $a_j = c_j / m$ and the $\ell = 2$ diagonal window at
+position $2j$ gives $\tv(a) \ge a_j^2 / (8n_{\text{child}}) =
+c_j^2 / (8 n_{\text{child}} m^2)$.  We cap each child bin at:
 \[
   x_{\text{cap}} \;=\;
-  \left\lfloor m \cdot \sqrt{\frac{T}{d_{\text{child}}}} \right\rfloor,
+  \left\lfloor m \cdot \sqrt{
+    \frac{8 n_{\text{child}} \cdot T}{1}} \right\rfloor
+  \;=\;
+  \left\lfloor m \cdot \sqrt{8 n_{\text{child}} \cdot T} \right\rfloor,
 \]
-where $T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$ is the
-effective threshold and $d_{\text{child}} = 2d$.  Any child with a bin
-exceeding $x_{\text{cap}}$ would be pruned by the $\ell=2$ window, so
-we never generate it.
+where $T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
 
 \begin{proposition}[Energy Cap Soundness]
-If $c_j > x_{\mathrm{cap}}$, then
-$a_j^2 / (4 n_{\mathrm{child}} \cdot 2) > T$.
+If $c_j > x_{\mathrm{cap}}$, then $\tv(a) > T$.
 \end{proposition}
 
 \begin{proof}
-We have $a_j = c_j \cdot 4n_{\text{child}} / m$ and
-$d_{\text{child}} = 2n_{\text{child}}$.  Then:
+The $\ell = 2$ window at position $2j$ gives:
 \[
-  \frac{a_j^2}{4 n_{\mathrm{child}} \cdot 2}
-  = \frac{c_j^2 \cdot 2 n_{\mathrm{child}}}{m^2}.
+  \tv(a) \;\ge\; \frac{\conv[2j]}{8 n_{\text{child}}}
+  \;\ge\; \frac{c_j^2}{8 n_{\text{child}}\, m^2}.
 \]
-With $c_j > m\sqrt{T/(2n_{\mathrm{child}})}$:
+With $c_j > m \sqrt{8 n_{\text{child}} T}$:
 \[
-  \frac{c_j^2 \cdot 2 n_{\mathrm{child}}}{m^2}
-  > \frac{m^2 \cdot T/(2n_{\mathrm{child}}) \cdot 2n_{\mathrm{child}}}{m^2}
-  = T. \qedhere
+  \frac{c_j^2}{8 n_{\text{child}}\, m^2}
+  \;>\; \frac{m^2 \cdot 8 n_{\text{child}} \cdot T}
+             {8 n_{\text{child}}\, m^2}
+  \;=\; T. \qedhere
 \]
 \end{proof}
+
+\begin{remark}[Tighter Cauchy--Schwarz cap]
+The implementation also applies a second, tighter cap based on a direct
+Cauchy--Schwarz bound on $\|f*f\|_\infty$ that does not go through the
+test-value discretization (analogous to how asymmetry pruning bypasses
+the correction term).  This gives $x_{\text{cap,CS}} = \lfloor m
+\sqrt{8 n_{\text{child}} \cdot c_{\text{target}}} \rfloor \le
+x_{\text{cap}}$, and the implementation uses $\min(x_{\text{cap}},
+x_{\text{cap,CS}})$.  Both caps are sound; the tighter one simply
+prunes more aggressively.
+\end{remark}
 
 \subsection{Cascade Soundness}
 
@@ -856,42 +895,31 @@ $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
 \begin{proof}
-We show by induction that every composition in $B_{n_k, m}$ (the
-lattice at level $k$) is either:
-\begin{enumerate}[label=(\alph*)]
-  \item directly pruned at level $k$ (its test value exceeds $T$), or
-  \item an ancestor of some composition at level $k+1$ that is itself
-    pruned.
-\end{enumerate}
+We argue by induction on the cascade level.  At level $L_0$,
+completeness is straightforward: every canonical composition is
+enumerated, and reversal symmetry (Theorem~\ref{thm:reversal})
+accounts for the rest.
 
-\textbf{Base case ($L_0$):}  At level $L_0$, all canonical
-compositions of $B_{n_0, m}$ are enumerated.  By reversal symmetry
-(Theorem~\ref{thm:reversal}), the non-canonical compositions have
-identical test values to their canonical counterparts, so checking
-canonicals suffices.
+For the inductive step, suppose every composition at level $k$ is
+either directly pruned or refined.  A refined composition's children
+are all generated and tested at level $k+1$; if every child is pruned,
+the parent is indirectly eliminated, since any continuous function
+close to the parent at resolution $d_k$ must be close to one of its
+children at resolution $d_{k+1}$.  (This follows because the level-$k$
+bin averages are determined by summing adjacent pairs of level-$(k+1)$
+bin averages, so the parent-child relationship is surjective onto the
+full level-$(k+1)$ lattice.)
 
-\textbf{Inductive step:}  A level-$k$ composition $b$ that is
-\emph{not} directly pruned survives to be refined.  Its children
-(level-$k+1$ compositions) are \emph{all} generated and tested.
-If every child is pruned, then $b$ is indirectly eliminated:
-any continuous function $f$ whose bin averages at resolution $d_k$
-are close to $b$ must have bin averages at resolution $d_{k+1}$
-that are close to one of $b$'s children, and that child is pruned.
-
-\textbf{Termination:}  If level $L_k$ has zero survivors, then every
-composition at resolution $d_k$ is pruned (directly or ancestrally).
-Since $B_{n_k, m}$ is a $\tfrac{1}{m}$-net of $A_{n_k}$
-(Lemma~\ref{lem:lattice-approx}), every continuous vector $a$ has a
-nearby lattice point whose test value exceeds $T$.  By
-Lemma~\ref{lem:disc-error}:
+When the cascade reaches a level with zero survivors, the net property
+of the lattice (Lemma~\ref{lem:lattice-approx}) ensures that every
+continuous vector $a$ has a nearby lattice point with test value at
+least $T$, and the discretization error bound
+(Lemma~\ref{lem:disc-error}) finishes the job:
 \[
-  \tv(a) \;\ge\; \tv(b) - \frac{2}{m} - \frac{1}{m^2}
-  \;\ge\; T - \frac{2}{m} - \frac{1}{m^2}
-  \;=\; c_{\mathrm{target}}.
+  \|f*f\|_\infty \ge \tv(a) \ge \tv(b) - \frac{2}{m} - \frac{1}{m^2}
+  \ge T - \frac{2}{m} - \frac{1}{m^2} = c_{\mathrm{target}}.
 \]
-By Lemma~\ref{lem:bin-reduction}, $\|f*f\|_\infty \ge \tv(a) \ge
-c_{\mathrm{target}}$ for every $f$.  Therefore $C_{1a} \ge
-c_{\mathrm{target}}$.
+Since $f$ was arbitrary, $C_{1a} \ge c_{\mathrm{target}}$.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -966,14 +994,14 @@ array:
 \State Generate all canonical compositions of $S = 4 n_0 m$ into
   $d_0$ parts
 \State Apply asymmetry pruning (threshold
-  $\sqrt{c_{\text{target}}/2} + 1/(4m)$)
+  $\sqrt{c_{\text{target}}/2}$)
 \State Compute test values for remaining compositions; prune those
   with $\tv \ge T$
 \State $\text{survivors}_0 \gets$ unpruned compositions
 \For{$k = 1, 2, \ldots, L_{\max}$}
   \State $d_k \gets 2 d_{k-1}$; \quad
     $n_k \gets 2 n_{k-1}$
-  \State $x_{\text{cap}} \gets \lfloor m \sqrt{T / d_k} \rfloor$
+  \State $x_{\text{cap}} \gets \lfloor m \sqrt{8 n_k \cdot T} \rfloor$
   \ForAll{parent $P \in \text{survivors}_{k-1}$}
     \ForAll{children $C$ of $P$ (dyadic split with energy cap)}
       \State Apply asymmetry pruning to $C$
@@ -1008,37 +1036,24 @@ $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
 \begin{proof}
-The proof follows from the chain of lemmas:
+The argument is satisfyingly modular: each lemma handles one link in
+the chain, and snapping them together yields the result.
 
-\begin{enumerate}
-  \item By Lemma~\ref{lem:bin-reduction}, for any $f \in \mathcal{F}$
-    with $\int f = 1$ and corresponding bin averages $a$ at resolution
-    $d_k$:
-    $\|f*f\|_\infty \ge \tv(a)$.
-
-  \item By Lemma~\ref{lem:lattice-approx}, there exists a lattice
-    point $b \in B_{n_k, m}$ with $\|a - b\|_\infty \le 1/m$.
-
-  \item By Lemma~\ref{lem:disc-error}:
-    $\tv(a) \ge \tv(b) - \tfrac{2}{m} - \tfrac{1}{m^2}$.
-
-  \item By Theorem~\ref{thm:cascade-sound}, since the cascade
-    terminated with zero survivors, every $b \in B_{n_k, m}$ satisfies
-    $\tv(b) \ge T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
-
-  \item Combining:
-    \[
-      \|f*f\|_\infty
-      \;\ge\; \tv(a)
-      \;\ge\; \tv(b) - \frac{2}{m} - \frac{1}{m^2}
-      \;\ge\; T - \frac{2}{m} - \frac{1}{m^2}
-      \;=\; c_{\mathrm{target}}.
-    \]
-
-  \item Since this holds for every $f \in \mathcal{F}$ with
-    $\int f = 1$, by definition $C_{1a} \ge c_{\mathrm{target}}$.
-    \qedhere
-\end{enumerate}
+Fix any $f \in \mathcal{F}$ with $\int f = 1$, and let $a$ denote its
+bin averages at resolution $d_k$.  Lemma~\ref{lem:bin-reduction} gives
+$\|f*f\|_\infty \ge \tv(a)$.  Since $B_{n_k, m}$ is a $1/m$-net of
+$A_{n_k}$, there is a lattice point $b$ with $\|a - b\|_\infty \le
+1/m$, and the discretization bound (Lemma~\ref{lem:disc-error}) yields
+$\tv(a) \ge \tv(b) - 2/m - 1/m^2$.  But the cascade has pruned every
+lattice point, so $\tv(b) \ge T$.  Chaining these inequalities:
+\[
+  \|f*f\|_\infty
+  \;\ge\; \tv(a)
+  \;\ge\; \tv(b) - \frac{2}{m} - \frac{1}{m^2}
+  \;\ge\; T - \frac{2}{m} - \frac{1}{m^2}
+  \;=\; c_{\mathrm{target}}.
+\]
+Since $f$ was arbitrary, $C_{1a} \ge c_{\mathrm{target}}$.
 \end{proof}
 
 
@@ -1046,8 +1061,10 @@ The proof follows from the chain of lemmas:
 \section{Correctness Invariants}\label{sec:correctness}
 % ======================================================================
 
-For the proof to be mathematically valid, the implementation must
-satisfy four invariants.
+Stating the algorithm is only half the battle.  For the proof to carry
+mathematical weight, we must verify that the implementation faithfully
+realizes the specification.  Four invariants pin down exactly what
+``faithful'' means.
 
 \subsection{Invariant 1: Complete Enumeration}
 
@@ -1069,12 +1086,15 @@ shown to be covered by a checked ancestor and all its refinements.
 For each composition that is not eliminated by asymmetry, every valid
 window $(\ell, k)$ with $2 \le \ell \le 2d$ and all valid starting
 positions $k$ must be tested before the composition is declared a
-survivor.
+survivor.  Early exit occurs only \emph{after} a pruning window is
+found --- never for survivors.
 
 \subsection{Invariant 3: Conservative Arithmetic}
 
-Floating-point errors must not cause false positives (wrongly ruling
-out a valid configuration whose true test value is below $T$).
+Floating-point arithmetic is the Achilles' heel of computer-assisted
+proofs: a single rounding error in the wrong direction could cause a
+valid configuration to be falsely pruned, invalidating the entire
+argument.  We guard against this as follows:
 
 \begin{itemize}
   \item Integer coordinates: the autoconvolution is computed in
@@ -1085,8 +1105,10 @@ out a valid configuration whose true test value is below $T$).
     \emph{lower} than the true mathematical threshold.  This means
     the check $\text{ws} > \text{int\_thresh}$ is a \emph{sufficient}
     condition for pruning, never a false positive.
-  \item The additional $+1 + 10^{-9} m^2$ term in the base threshold
-    further ensures conservatism.
+  \item The additional $+1 + 10^{-9} m^2$ term in the code's base
+    threshold further ensures conservatism (this term is omitted from
+    the mathematical formulas for clarity, but makes the code strictly
+    more conservative than what the formulas describe).
 \end{itemize}
 
 \subsection{Invariant 4: Refinement Completeness}
