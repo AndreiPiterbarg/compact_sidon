@@ -280,7 +280,85 @@ is much smaller, making the threshold lower and pruning easier.
 \section{The Windowed Test Value}\label{sec:testvalue}
 % ======================================================================
 
-% TODO: definition, prefix sums, reversal symmetry
+\subsection{Definition}
+
+\begin{definition}
+For a mass vector $a = (a_0, \ldots, a_{d-1})$ with $a_i \ge 0$ and
+$\sum a_i = 4n$, the \emph{autoconvolution} is the vector of length
+$2d - 1$:
+\[
+  \conv[s] \;=\; \sum_{\substack{i + j = s \\[1pt] 0 \le i,j \le d-1}}
+  a_i\, a_j,
+  \qquad s = 0, 1, \ldots, 2(d-1).
+\]
+The \emph{test value} is
+\[
+  \tv(a) \;=\;
+  \max_{\substack{2 \le \ell \le 2d \\[2pt] 0 \le k \le 2(d-1) - (\ell-2)}}
+  \frac{1}{4n\ell}
+  \sum_{s=k}^{k+\ell-2} \conv[s].
+\]
+\end{definition}
+
+In words: compute the autoconvolution, slide a window of each width
+$\ell$ across it, sum the $\ell - 1$ entries in each position,
+normalize by $4n\ell$, and take the maximum.
+
+\subsection{Efficient Computation via Prefix Sums}
+
+Let $P[s] = \sum_{k=0}^{s} \conv[k]$ be the prefix sum.  Then the
+window sum from $s_\text{lo}$ to $s_\text{hi}$ is
+$P[s_\text{hi}] - P[s_\text{lo} - 1]$ (with $P[-1] = 0$).
+
+Computing the autoconvolution takes $O(d^2)$, prefix sums $O(d)$, and
+all windows $O(d^2)$.  Total: $O(d^2)$ per lattice point.
+
+\subsection{Reversal Symmetry}
+
+This is the mathematical basis for the canonical optimization that
+halves the search space.
+
+\begin{theorem}[Autoconvolution Reversal Symmetry]
+\label{thm:reversal}
+For any mass vector $a$, $\tv(a) = \tv(\rev(a))$, where
+$\rev(a) = (a_{d-1}, \ldots, a_0)$.
+\end{theorem}
+
+\begin{proof}
+\textbf{Step 1: Autoconvolution reversal.}
+Let $a' = \rev(a)$, so $a'_i = a_{d-1-i}$.  Then:
+\[
+  \conv'[s]
+  \;=\; \sum_{i+j=s} a'_i a'_j
+  \;=\; \sum_{i+j=s} a_{d-1-i}\, a_{d-1-j}.
+\]
+Substituting $i' = d-1-i$, $j' = d-1-j$ gives $i'+j' = 2(d-1) - s$,
+so $\conv'[s] = \conv[2(d-1) - s]$.  The autoconvolution of the
+reversal is the reversal of the autoconvolution.
+
+\medskip
+\noindent\textbf{Step 2: Window-sum bijection.}
+A window sum of width $w = \ell - 1$ at position $s_0$ transforms to:
+\[
+  \sum_{s=s_0}^{s_0+w-1} \conv'[s]
+  = \sum_{s'=2(d-1)-s_0-w+1}^{2(d-1)-s_0} \conv[s'].
+\]
+This is a window of the \emph{same width} $w$ at a reflected
+position.  The mapping is a bijection on windows of each width.
+
+\medskip
+\noindent\textbf{Step 3: Normalization preserves the maximum.}
+Since $\tfrac{1}{4n\ell}$ depends only on $\ell$ (not the position),
+and the multiset of window sums at each width is identical for
+$\conv$ and $\conv'$, the maximum is the same:
+$\tv(a) = \tv(a')$.
+\end{proof}
+
+\begin{corollary}[Canonical Symmetry]
+It suffices to check only \emph{canonical} compositions satisfying
+$b \le \rev(b)$ lexicographically.  This halves the search space
+(up to palindromes).
+\end{corollary}
 
 
 % ======================================================================
