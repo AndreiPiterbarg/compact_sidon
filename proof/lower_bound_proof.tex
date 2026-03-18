@@ -96,14 +96,184 @@ The proof strategy:
 \section{From Functions to Bin Averages}\label{sec:bin}
 % ======================================================================
 
-% TODO: partition, bin averages, Lemma 1 (windowed lower bound)
+\subsection{The Partition}
+
+Fix a positive integer $n$ (the ``half-bin count'').  Partition
+$(-\tfrac14, \tfrac14)$ into $d = 2n$ equal bins:
+\[
+  I_j \;=\; \left(\frac{j}{4n},\; \frac{j+1}{4n}\right),
+  \qquad j = -n, -n+1, \ldots, n-1.
+\]
+Each bin has width $\tfrac{1}{4n}$.  In the implementation, we
+re-index as $0, 1, \ldots, d-1$ via $j \mapsto j + n$.
+
+\subsection{Bin Averages}
+
+For any nonnegative $f$ with $\supp(f) \subseteq (-\tfrac14,
+\tfrac14)$ and $\int f = 1$, define the \emph{bin averages}:
+\[
+  a_j \;=\; 4n \int_{I_j} f(x)\, dx \;\ge\; 0,
+  \qquad j = 0, \ldots, d-1.
+\]
+
+The factor $4n$ normalizes so that $a_j$ is the average value of $f$
+on bin $I_j$.  The constraint $\int f = 1$ becomes
+$\sum_{j=0}^{d-1} a_j = 4n$.
+
+\begin{definition}
+The \emph{continuous simplex} is
+$A_n = \bigl\{ a \in \R_{\ge 0}^d \mid \sum a_j = 4n \bigr\}$.
+\end{definition}
+
+\subsection{The Lower Bound on $\|f*f\|_\infty$}
+
+\begin{lemma}[Reduction to Bin Averages --- Lemma~1 of CS17]
+\label{lem:bin-reduction}
+For any $f \in \mathcal{F}$ with $\int f = 1$ and bin averages $a$:
+\[
+  \|f * f\|_{L^\infty}
+  \;\ge\;
+  \max_{\substack{2 \le \ell \le 2n \\[2pt] k}}
+  \frac{1}{4n\ell}
+  \sum_{\substack{0 \le i, j \le d-1 \\[1pt] k \le i+j \le k+\ell-2}}
+  a_i\, a_j.
+\]
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+The proof uses two ingredients:
+
+\medskip
+\noindent\textbf{1.\ Support of cross-convolutions.}
+Let $f_i = f \cdot \mathbf{1}_{I_i}$.  Then $f = \sum_i f_i$ and
+$(f*f)(t) = \sum_{i,j} (f_i * f_j)(t)$.  The convolution $f_i * f_j$
+is supported on the Minkowski sum $I_i + I_j$, so the index $i + j$
+determines which part of the convolution domain receives each
+cross-term.
+
+\medskip
+\noindent\textbf{2.\ Pigeonhole.}
+For any nonneg $h$ and interval $J$:
+$\|h\|_{L^\infty} \ge \tfrac{1}{|J|} \int_J h$.
+
+\medskip
+\noindent\textbf{Combining.}  A window of $\ell$ consecutive
+convolution-domain values covers $\ell - 1$ consecutive sum-indices
+and spans a convolution-domain interval of length $\tfrac{\ell}{2n}$.
+All cross-terms $f_i * f_j$ with $k \le i + j \le k + \ell - 2$ land
+in this window, contributing total $L^1$ mass
+$\sum \tfrac{a_i}{4n} \cdot \tfrac{a_j}{4n}$.  Applying pigeonhole:
+\[
+  \|f * f\|_{L^\infty}
+  \;\ge\;
+  \frac{1}{\ell / (2n)}
+  \sum_{\substack{k \le i+j \le k+\ell-2}}
+  \frac{a_i\, a_j}{(4n)^2}
+  \;=\;
+  \frac{1}{4n\ell}
+  \sum_{\substack{k \le i+j \le k+\ell-2}}
+  a_i\, a_j. \qedhere
+\]
+\end{proof}
+
+\begin{remark}[Intuition]
+The products $a_i a_j$ measure how much mass from bins $i$ and $j$
+contributes to $f * f$.  The window argument says: if enough
+product-mass concentrates in a short interval of the convolution
+domain, the autoconvolution peak must be large there.
+\end{remark}
 
 
 % ======================================================================
 \section{Discretization of the Simplex}\label{sec:disc}
 % ======================================================================
 
-% TODO: lattice B_{n,m}, 1/m-net, correction 2/m + 1/m^2, dynamic correction
+Lemma~\ref{lem:bin-reduction} reduced the problem to minimizing over
+the continuous simplex $A_n$.  We now discretize it to a finite lattice.
+
+\subsection{The Lattice}
+
+Fix a positive integer $m$ (the grid resolution).
+
+\begin{definition}
+The \emph{discrete lattice} is
+\[
+  B_{n,m} \;=\; \left\{
+    b \in \left(\tfrac{1}{m}\N\right)^d
+    \;\middle|\;
+    \sum_{j=0}^{d-1} b_j = 4n
+  \right\}.
+\]
+\end{definition}
+
+Writing $c_j = m \cdot b_j$, the lattice consists of nonneg integer
+vectors with $\sum c_j = S = 4nm$ --- the \emph{compositions} of $S$
+into $d$ parts.  There are $\binom{S+d-1}{d-1}$ such compositions.
+
+\begin{lemma}[$\tfrac{1}{m}$-net --- Lemma~2 of CS17]
+\label{lem:lattice-approx}
+For every $a \in A_n$, there exists $b \in B_{n,m}$ with
+$\|a - b\|_\infty \le \tfrac{1}{m}$.
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Round each $a_j$ to the nearest multiple of $1/m$ via a greedy
+procedure maintaining a running deficit, forcing the sum constraint
+with the last coordinate.  Each coordinate changes by at most $1/m$.
+\end{proof}
+
+\subsection{The Discretization Error Bound}
+
+\begin{lemma}[Discretization Error --- Lemma~3 of CS17]
+\label{lem:disc-error}
+\[
+  C_{1a} \;\ge\; b_{n,m} - \frac{2}{m} - \frac{1}{m^2},
+\]
+where $b_{n,m} = \min_{b \in B_{n,m}} \tv(b)$.
+\end{lemma}
+
+\begin{proof}
+Write $a = b + \varepsilon$ with $\|\varepsilon\|_\infty \le 1/m$.
+Then $f * f = g*g + g*\varepsilon + \varepsilon*g +
+\varepsilon*\varepsilon$ where $g$ has bin averages $b$.  By Young's
+inequality:
+\begin{itemize}
+  \item $\|g * \varepsilon\|_\infty \le \|g\|_1 \cdot
+    \|\varepsilon\|_\infty \le 1/m$.
+  \item $\|\varepsilon * \varepsilon\|_\infty \le
+    \|\varepsilon\|_1 \cdot \|\varepsilon\|_\infty \le 1/m^2$
+    (since $\|\varepsilon\|_1 \le d \cdot \tfrac{1}{4n} \cdot
+    \tfrac{1}{m} = 1/m$).
+\end{itemize}
+So $\|f*f\|_\infty \ge \|g*g\|_\infty - 2/m - 1/m^2 \ge
+\tv(b) - 2/m - 1/m^2$.
+\end{proof}
+
+\begin{remark}
+The correction $2/m + 1/m^2$ is the price of discretization.  At
+$m = 20$ it is $0.1025$; at $m = 50$ it is $0.0404$.
+\end{remark}
+
+\subsection{Dynamic (Per-Window) Correction}
+
+The uniform correction can be tightened on a per-window basis.
+
+\begin{lemma}[Dynamic Correction --- Equation~(1) of CS17]
+\label{lem:dynamic-correction}
+For a window at position $k$ with length $\ell$, let
+$W_{\mathrm{int}} = \sum_{i \in \mathcal{B}(k,\ell)} c_i$ be the
+total integer mass in contributing bins.  Then the effective threshold
+for that window is:
+\[
+  T_{\ell,k} \;=\; c_{\mathrm{target}} + \frac{1 + 2\, W_{\mathrm{int}}}{m^2}
+\]
+rather than the uniform $T = c_{\mathrm{target}} + 2/m + 1/m^2$.
+\end{lemma}
+
+This is tighter because $W_{\mathrm{int}} \le m$ always, with
+equality only when all bins contribute (wide windows centered in the
+domain).  For narrow or edge-positioned windows, $W_{\mathrm{int}}$
+is much smaller, making the threshold lower and pruning easier.
 
 
 % ======================================================================
