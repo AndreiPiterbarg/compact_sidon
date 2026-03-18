@@ -365,7 +365,107 @@ $b \le \rev(b)$ lexicographically.  This halves the search space
 \section{Pruning Strategies}\label{sec:pruning}
 % ======================================================================
 
-% TODO: asymmetry, block-sum, two-max, canonical symmetry
+The lattice $B_{n,m}$ has $\binom{S + d - 1}{d - 1}$ points.
+Pruning eliminates configurations cheaply, without the full test value.
+
+\subsection{Asymmetry Pruning}
+
+\begin{theorem}[Asymmetry Bound]
+\label{thm:asymmetry}
+Let $f \ge 0$ with $\supp(f) \subseteq (-\tfrac14, \tfrac14)$,
+$\int f = 1$, and left-half mass $L = \int_{-1/4}^{0} f$.  Then
+$\|f * f\|_{L^\infty} \ge 2L^2$.
+\end{theorem}
+
+\begin{proof}
+The left-left contribution of $f*f$ on $(-\tfrac12, 0)$ has total
+$L^1$ mass at least $L^2$ (by restricting both integration variables
+to $(-\tfrac14, 0)$ in the convolution integral).  Since
+$|(-\tfrac12, 0)| = \tfrac12$, the pigeonhole bound gives
+$\|f*f\|_\infty \ge L^2 / (1/2) = 2L^2$.  By symmetry, the same
+holds for the right-half mass $R = 1 - L$.
+\end{proof}
+
+\begin{corollary}[Asymmetry Threshold]
+If $L \ge \sqrt{c_{\mathrm{target}}/2}$, the configuration is
+eliminated.  In the discrete setting, a margin of $1/(4m)$ is added
+to account for rounding:
+$p^*_{\mathrm{safe}} = \sqrt{c_{\mathrm{target}}/2} + 1/(4m)$.
+\end{corollary}
+
+\begin{remark}
+The asymmetry bound is a direct $L^\infty$ bound --- it does
+\emph{not} go through discretization, so we compare against
+$c_{\mathrm{target}}$ itself (not $c_{\mathrm{target}} + 2/m + 1/m^2$).
+\end{remark}
+
+\subsection{Contiguous Block-Sum Bound}
+
+\begin{theorem}[Block-Sum Bound]
+\label{thm:block-sum}
+For a contiguous block of $p$ bins $\{q, \ldots, q+p-1\}$ with sum
+$B = \sum_{i=q}^{q+p-1} c_i$:
+\[
+  \tv(a) \;\ge\; \frac{B^2}{4n \cdot 2p \cdot m^2}.
+\]
+\end{theorem}
+
+\begin{proof}
+The window $\ell = 2p$ at $k = 2q$ captures all intra-block pairs
+$(i,j)$ with $q \le i,j \le q+p-1$.  Since $a_i \ge 0$, cross-block
+terms only add, so the window sum $\ge (\sum_{\text{block}} a_i)^2
+= B^2/m^2$.  Normalizing by $4n \cdot 2p$ gives the result.
+\end{proof}
+
+\begin{remark}[Special cases]
+$p = 1$ gives the single-element bound $c_i^2 / (8nm^2)$.
+$p = n$ gives the half-sum bound (related to asymmetry).
+Intermediate $p$ catches mass concentrated in middle blocks
+that evade both checks.
+\end{remark}
+
+\subsection{Two-Max Cross-Term Bound}
+
+\begin{theorem}[Two-Max Bound]
+\label{thm:two-max}
+Let $c_{p_1}, c_{p_2}$ be the two largest values with $p_1 \ne p_2$.
+Then:
+\[
+  \tv(a) \;\ge\; \frac{2\, c_{p_1}\, c_{p_2}}{8n\, m^2}.
+\]
+\end{theorem}
+
+\begin{proof}
+At index $s = p_1 + p_2$: $\conv[s] \ge a_{p_1} a_{p_2} +
+a_{p_2} a_{p_1} = 2 c_{p_1} c_{p_2} / m^2$.  This single entry is
+an $\ell = 2$ window, giving $\tv \ge 2 c_{p_1} c_{p_2} / (8nm^2)$.
+\end{proof}
+
+\subsection{Canonical Counting}
+
+\begin{proposition}[Canonical Count]
+\label{prop:canon-count}
+The number of canonical compositions ($b \le \rev(b)$ lex) is
+$\tfrac{N + P}{2}$, where $N = \binom{S+d-1}{d-1}$ and $P$ is the
+palindrome count.
+\end{proposition}
+
+\begin{proof}
+Partition compositions into palindromes ($P$), strictly canonical
+non-palindromes ($C$), and strictly non-canonical ($C$).  The last
+two classes biject via reversal, so $N = P + 2C$ and the canonical
+count is $P + C = (N+P)/2$.
+\end{proof}
+
+\begin{remark}[Loop-bound tightening for $d = 4$]
+For $(c_0, c_1, c_2, c_3)$ with $c_3 = S - c_0 - c_1 - c_2$,
+canonicality requires $c_0 \le c_3$, yielding tight loop bounds:
+$c_0 \le \lfloor S/2 \rfloor$,
+$c_1 \le S - 2c_0$,
+$c_2 \le S - 2c_0 - c_1$,
+plus the palindrome filter $c_0 = c_3 \Rightarrow c_1 \le c_2$.
+Analogous (but more complex) bounds hold for $d = 6$.
+\end{remark}
 
 
 % ======================================================================
