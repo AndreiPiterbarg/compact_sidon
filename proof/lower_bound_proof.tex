@@ -472,7 +472,100 @@ Analogous (but more complex) bounds hold for $d = 6$.
 \section{The Multiscale Cascade}\label{sec:cascade}
 % ======================================================================
 
-% TODO: dyadic splitting, energy cap, cascade soundness, canonical handling
+Rather than enumerate all compositions at fine resolution directly,
+the cascade starts coarse and refines only survivors.
+
+\subsection{Dyadic Splitting}
+
+A parent $b = (b_0, \ldots, b_{d-1})$ at resolution $d$ produces
+children $c = (c_0, \ldots, c_{2d-1})$ at resolution $2d$, where
+$c_{2i} + c_{2i+1} = b_i$ for each $i$, with both parts nonneg
+integers.
+
+\subsection{Energy Cap}
+
+A child bin $c_j$ exceeding
+$x_{\mathrm{cap}} = \lfloor m \sqrt{T / d_{\mathrm{child}}} \rfloor$
+would be immediately pruned by the $\ell = 2$ diagonal window, so we
+never generate it.
+
+\begin{proposition}[Energy Cap Soundness]
+If $c_j > x_{\mathrm{cap}}$, then the $\ell=2$ test value at
+position $2j$ exceeds $T$.
+\end{proposition}
+
+\begin{proof}
+With $a_j = c_j \cdot 4n_{\mathrm{child}} / m$ and
+$d_{\mathrm{child}} = 2n_{\mathrm{child}}$:
+\[
+  \frac{a_j^2}{4 n_{\mathrm{child}} \cdot 2}
+  = \frac{c_j^2 \cdot 2 n_{\mathrm{child}}}{m^2}
+  > \frac{m^2 \cdot T/(2n_{\mathrm{child}}) \cdot 2n_{\mathrm{child}}}{m^2}
+  = T. \qedhere
+\]
+\end{proof}
+
+\subsection{Cascade Soundness}
+
+\begin{theorem}[Cascade Soundness]
+\label{thm:cascade-sound}
+If the cascade terminates with zero survivors at level $L_k$, then
+$C_{1a} \ge c_{\mathrm{target}}$.
+\end{theorem}
+
+\begin{proof}
+By induction, every composition in $B_{n_k, m}$ is either directly
+pruned or an ancestor of pruned descendants.
+
+At $L_0$, all canonical compositions are enumerated (reversal
+symmetry covers non-canonicals).  At each subsequent level, \emph{all}
+children of each surviving parent are generated and tested.  If every
+child is pruned, the parent is indirectly eliminated.
+
+When zero survivors remain: every $b \in B_{n_k, m}$ has
+$\tv(b) \ge T$.  For any $f$ with bin averages $a$, there exists
+$b$ with $\|a - b\|_\infty \le 1/m$ (Lemma~\ref{lem:lattice-approx}).
+Then:
+\[
+  \|f*f\|_\infty \ge \tv(a) \ge \tv(b) - \frac{2}{m} - \frac{1}{m^2}
+  \ge T - \frac{2}{m} - \frac{1}{m^2} = c_{\mathrm{target}}. \qedhere
+\]
+\end{proof}
+
+\subsection{Canonical Handling Across Levels}
+
+At $L_0$, only canonical compositions are generated.  At $L_1{+}$:
+
+\begin{itemize}
+  \item Generate \emph{all} children (no canonical filter during
+    generation), because children of canonical $P$ need not be
+    canonical.
+  \item Test each child.  Since $\tv(C) = \tv(\rev(C))$, testing
+    $C$ covers $\rev(C)$ automatically.
+  \item Canonicalize survivors: $C \mapsto \min(C, \rev(C))$.
+  \item Deduplicate (sort + scan).
+\end{itemize}
+
+This is complete because if $C'$ is any child-level composition, then
+either its parent or the parent's reversal is in the parent list, so
+$C'$ or $\rev(C')$ is tested.
+
+\subsection{Fused Generate-and-Prune Kernel}
+
+At deep cascade levels, each parent may have millions of children.
+The fused kernel generates and tests each child inline via a
+Cartesian-product odometer, never materializing the full array:
+
+\begin{itemize}
+  \item \textbf{Incremental autoconvolution:} when only the last
+    cursor position changes ($\sim$67\% of steps), the raw
+    autoconvolution is updated in $O(d)$ instead of $O(d^2)$.
+  \item \textbf{Quick-check:} re-tries the previous killing window
+    before a full scan.
+  \item \textbf{Subtree pruning:} on deep carries, checks the
+    partial autoconvolution of fixed bins against worst-case unfixed
+    mass; if it exceeds the threshold, the entire subtree is skipped.
+\end{itemize}
 
 
 % ======================================================================
