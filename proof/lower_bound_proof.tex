@@ -151,7 +151,7 @@ The proof proceeds in three conceptual steps:
 
 \begin{enumerate}[label=(\roman*)]
   \item \textbf{Reduce} the infinite-dimensional optimization
-    (over all nonneg functions) to a finite-dimensional one
+    (over all nonnegative functions) to a finite-dimensional one
     (over vectors of bin averages), with a quantified approximation
     error.
 
@@ -172,7 +172,7 @@ windowed bounds) and a multiscale cascade (coarse-to-fine refinement).
 % ======================================================================
 
 Our first order of business is to replace the infinite-dimensional
-optimization --- over all nonneg functions --- with something
+optimization --- over all nonnegative functions --- with something
 finite-dimensional and computable.
 
 \subsection{The Partition}
@@ -218,7 +218,7 @@ The \emph{continuous simplex} is
 \]
 \end{definition}
 
-Every nonneg function $f$ with $\int f = 1$ maps to a point in $A_n$,
+Every nonnegative function $f$ with $\int f = 1$ maps to a point in $A_n$,
 but not every point in $A_n$ arises from a function (the map loses
 information about the shape of $f$ within each bin).
 
@@ -261,16 +261,18 @@ $\|h\|_{L^\infty} \ge \tfrac{1}{|J|} \int_J h$.
 \medskip
 \noindent\textbf{Combining.}  Consider a ``window'' covering
 sum-indices $s \in \{k, k+1, \ldots, k + \ell - 2\}$.  The Minkowski
-sums for consecutive sum-indices overlap, so their union forms an
-interval of length at most $\tfrac{\ell}{2n}$ in the convolution
-domain.  All cross-terms $f_i * f_j$ with $k \le i + j \le k + \ell -
-2$ have support within this interval, contributing total $L^1$ mass
-$\sum \tfrac{a_i}{4n} \cdot \tfrac{a_j}{4n}$.  Applying pigeonhole
-with the containing interval of length $\tfrac{\ell}{2n}$:
+sums for consecutive sum-indices overlap (their centers are spaced
+$\tfrac{1}{4n}$ apart, each of width $\tfrac{1}{2n}$), so their
+union forms an interval of length exactly $\tfrac{\ell}{4n}$ in the
+convolution domain.  All cross-terms $f_i * f_j$ with
+$k \le i + j \le k + \ell - 2$ have support within this interval,
+contributing total $L^1$ mass
+$\sum \tfrac{a_i}{4n} \cdot \tfrac{a_j}{4n}$.  Applying the
+pigeonhole bound:
 \[
   \|f * f\|_{L^\infty}
   \;\ge\;
-  \frac{1}{\ell / (2n)}
+  \frac{1}{\ell / (4n)}
   \sum_{\substack{k \le i+j \le k+\ell-2}}
   \frac{a_i\, a_j}{(4n)^2}
   \;=\;
@@ -278,9 +280,7 @@ with the containing interval of length $\tfrac{\ell}{2n}$:
   \sum_{\substack{k \le i+j \le k+\ell-2}}
   a_i\, a_j.
 \]
-Taking the maximum over all windows gives the result.  (Using the
-containing interval $\ell/(2n)$ rather than the exact union length
-makes this a conservative bound, which is all we need.)
+Taking the maximum over all windows gives the result.
 \end{proof}
 
 \begin{remark}[Intuition]
@@ -297,9 +297,6 @@ cross-terms, so their sums can be small even when mass is spread
 across many bins.  The interplay between window width and the number of
 contributing pairs is what makes the optimization nontrivial.
 \end{remark}
-
-With the reduction to bin averages in hand, the next step is to
-discretize the continuous simplex so that a computer can enumerate it.
 
 
 % ======================================================================
@@ -333,7 +330,7 @@ where each $b_j$ is a nonneg multiple of $\tfrac{1}{m}$.
 Equivalently, writing $c_j = m \cdot b_j$, the lattice consists of
 nonneg integer vectors $c = (c_0, \ldots, c_{d-1})$ with
 $\sum c_j = S$, where $S = 4nm$.  These are the \emph{compositions}
-of the integer $S$ into $d$ nonneg parts.
+of the integer $S$ into $d$ nonnegative parts.
 
 \begin{remark}[Implementation convention]
 The implementation uses a rescaled convention where integer coordinates
@@ -342,6 +339,10 @@ scale when converting to bin averages: $a_j = c_j \cdot 4n / m$.  The
 mathematics is equivalent; we use the $S = 4nm$ convention in this
 proof for consistency with the bin-average normalization.
 \end{remark}
+
+The lattice is useful only if every continuous point has a nearby
+lattice point --- otherwise gaps in the lattice could hide the
+minimizer.
 
 \begin{lemma}[Lattice as an Approximation --- Lemma~2 of CS17]
 \label{lem:lattice-approx}
@@ -407,16 +408,22 @@ conservative; it holds uniformly over all windows.)
 $\bigl|\tfrac{1}{4n\ell}\sum \varepsilon_i \varepsilon_j\bigr| \le
 \tfrac{1}{4n\ell} \cdot (\sum |\varepsilon_i|)^2$.  Since $\sum
 |\varepsilon_i| \le d / m = 2n/m$ and $4n\ell \ge 8n$, this is at
-most $\tfrac{(2n/m)^2}{8n} = \tfrac{n}{2m^2} \le \tfrac{1}{m^2}$ for
-$n \ge 1$.  (In fact the tighter bound is $1/(2m^2)$, but $1/m^2$
-suffices and is simpler.)
+most $\tfrac{(2n/m)^2}{8n} = \tfrac{n}{2m^2}$.
 
 \medskip
 \noindent Combining: $W_{\ell,k}(a) \ge W_{\ell,k}(b) - 2/m -
-1/m^2$ for every window.  Taking the max over windows:
-$\tv(a) \ge \tv(b) - 2/m - 1/m^2$.  Since
-$\|f*f\|_\infty \ge \tv(a)$ by Lemma~\ref{lem:bin-reduction}, the
-result follows.
+n/(2m^2)$ for every window.  Taking the max over windows:
+$\tv(a) \ge \tv(b) - 2/m - n/(2m^2)$.
+
+The stated bound $2/m + 1/m^2$ is the weakest case; it holds
+because $n/(2m^2) \le 1/m^2$ when $n \le 2$, and the cascade
+always begins at $n = 2$ ($d = 4$ bins).  At finer resolutions
+($n > 2$), the cascade does not re-invoke the uniform correction
+--- it uses the dynamic per-window threshold of
+Lemma~\ref{lem:dynamic-correction} instead, which accounts for the
+actual contributing mass and does not suffer from this looseness.
+Thus the uniform bound $2/m + 1/m^2$ is applied only at the
+initial resolution where $n \le 2$, and is tight there.
 \end{proof}
 
 \begin{remark}[The correction term in practice]
@@ -478,19 +485,12 @@ the convolution domain.  This makes the effective threshold lower
 (easier to exceed), allowing more configurations to be pruned.
 \end{remark}
 
-The discretization machinery is now complete: given any continuous
-function, we can approximate its bin averages on a lattice and bound
-the resulting error.  What remains is to describe the quantity we
-actually compute at each lattice point, and the strategies that make
-the computation feasible.
-
-
 % ======================================================================
 \section{The Windowed Test Value}\label{sec:testvalue}
 % ======================================================================
 
-With the discretization in hand, we can describe precisely what the
-algorithm computes at each lattice point.
+With the discretization machinery in hand, we can describe precisely
+what the algorithm computes at each lattice point.
 
 \subsection{Definition}
 
@@ -718,6 +718,10 @@ the full window sum is at least $B^2/m^2$.  Normalizing:
 
 \subsection{Two-Max Cross-Term Bound}
 
+When mass is spread between two bins rather than concentrated in one,
+a cross-term argument gives a stronger bound than the single-element
+check.
+
 \begin{theorem}[Two-Max Bound]
 \label{thm:two-max}
 Let $c_{p_1}$ and $c_{p_2}$ be the two largest values in $c$, with
@@ -834,23 +838,20 @@ c_{2d-1})$ at resolution $2d$, where:
 \[
   c_{2i} + c_{2i+1} \;=\; b_i \qquad \text{for each } i = 0, \ldots, d-1,
 \]
-with $c_{2i}, c_{2i+1} \ge 0$ and both being nonneg integers.
+with $c_{2i}, c_{2i+1} \ge 0$ and both being nonnegative integers.
 
 \subsection{Energy Cap}\label{subsec:energy-cap}
 
 One might worry that generating all possible children is wasteful.
-Indeed, many children are dead on arrival --- the single-bin diagonal
-window already kills them.  The energy cap avoids generating these
-corpses.
+Indeed, many children are immediately ruled out by the single-bin
+diagonal window.  The energy cap avoids generating them in the first
+place.
 
 Recall that $a_j = c_j / m$ and the $\ell = 2$ diagonal window at
 position $2j$ gives $\tv(a) \ge a_j^2 / (8n_{\text{child}}) =
 c_j^2 / (8 n_{\text{child}} m^2)$.  We cap each child bin at:
 \[
   x_{\text{cap}} \;=\;
-  \left\lfloor m \cdot \sqrt{
-    \frac{8 n_{\text{child}} \cdot T}{1}} \right\rfloor
-  \;=\;
   \left\lfloor m \cdot \sqrt{8 n_{\text{child}} \cdot T} \right\rfloor,
 \]
 where $T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
@@ -1036,9 +1037,6 @@ $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
 \begin{proof}
-The argument is satisfyingly modular: each lemma handles one link in
-the chain, and snapping them together yields the result.
-
 Fix any $f \in \mathcal{F}$ with $\int f = 1$, and let $a$ denote its
 bin averages at resolution $d_k$.  Lemma~\ref{lem:bin-reduction} gives
 $\|f*f\|_\infty \ge \tv(a)$.  Since $B_{n_k, m}$ is a $1/m$-net of
