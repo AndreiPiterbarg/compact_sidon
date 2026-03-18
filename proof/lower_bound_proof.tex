@@ -1,0 +1,159 @@
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{geometry}
+\usepackage{hyperref}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\tv}{\operatorname{tv}}
+\newcommand{\rev}{\operatorname{rev}}
+\newcommand{\conv}{\operatorname{conv}}
+
+\title{%
+  Proving Lower Bounds on the Autoconvolution Constant $C_{1a}$\\[6pt]
+  \large Via the Cloninger--Steinerberger Branch-and-Prune Algorithm
+}
+\author{Jai Bajaj}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We outline a proof framework for establishing lower bounds on the
+autoconvolution constant $C_{1a}$ via exhaustive branch-and-prune
+computation.  TODO: expand.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Introduction}\label{sec:intro}
+% ======================================================================
+
+Consider the class of nonnegative, integrable functions supported on
+the interval $[-\tfrac14, \tfrac14]$:
+\[
+  \mathcal{F} \;=\; \Bigl\{
+    f : \R \to \R_{\ge 0}
+    \;\Big|\;
+    \supp(f) \subseteq \bigl[-\tfrac14, \tfrac14\bigr],\;
+    \int f > 0
+  \Bigr\}.
+\]
+
+The \emph{autoconvolution} of $f$ is
+\[
+  (f * f)(t) \;=\; \int_{-\infty}^{\infty} f(x)\, f(t - x)\, dx.
+\]
+Since $\supp(f) \subseteq [-\tfrac14, \tfrac14]$, the
+autoconvolution is supported on $[-\tfrac12, \tfrac12]$.
+
+\begin{definition}
+The \emph{autoconvolution constant} is
+\[
+  C_{1a} \;=\; \inf_{f \in \mathcal{F}} \;
+  \frac{\displaystyle\max_{|t| \le 1/2}\, (f*f)(t)}%
+       {\displaystyle\left(\int f\right)^{\!2}}.
+\]
+\end{definition}
+
+By homogeneity, we may normalize $\int f = 1$, so
+$C_{1a} = \inf_{f} \|f*f\|_{L^\infty}$.
+
+The best known bounds are $1.2802 \leq C_{1a} \leq 1.5029$.  The
+upper bound comes from exhibiting explicit functions; the lower bound
+(Cloninger \& Steinerberger, 2017) requires showing that \emph{no}
+function can achieve a peak below the threshold.  This is the subject
+of our proof.
+
+The proof strategy:
+\begin{enumerate}
+  \item Reduce from continuous functions to finite-dimensional bin averages.
+  \item Discretize the simplex to a finite lattice, with error bounds.
+  \item Exhaustively check every lattice point, using pruning and a
+    multiscale cascade to make this tractable.
+\end{enumerate}
+
+
+% ======================================================================
+\section{From Functions to Bin Averages}\label{sec:bin}
+% ======================================================================
+
+% TODO: partition, bin averages, Lemma 1 (windowed lower bound)
+
+
+% ======================================================================
+\section{Discretization of the Simplex}\label{sec:disc}
+% ======================================================================
+
+% TODO: lattice B_{n,m}, 1/m-net, correction 2/m + 1/m^2, dynamic correction
+
+
+% ======================================================================
+\section{The Windowed Test Value}\label{sec:testvalue}
+% ======================================================================
+
+% TODO: definition, prefix sums, reversal symmetry
+
+
+% ======================================================================
+\section{Pruning Strategies}\label{sec:pruning}
+% ======================================================================
+
+% TODO: asymmetry, block-sum, two-max, canonical symmetry
+
+
+% ======================================================================
+\section{The Multiscale Cascade}\label{sec:cascade}
+% ======================================================================
+
+% TODO: dyadic splitting, energy cap, cascade soundness, canonical handling
+
+
+% ======================================================================
+\section{Correctness and Verification}\label{sec:correctness}
+% ======================================================================
+
+% TODO: four invariants, computational checks
+
+
+% ======================================================================
+\section{Discussion}\label{sec:discussion}
+% ======================================================================
+
+% TODO: relation to CS17, limitations
+
+
+\begin{thebibliography}{9}
+
+\bibitem{CS17}
+A.~Cloninger and S.~Steinerberger,
+\emph{On Suprema of Autoconvolutions with an Application to Sidon Sets},
+Proc.\ AMS \textbf{145}(8), 3191--3200, 2017.
+\href{https://arxiv.org/abs/1403.7988}{arXiv:1403.7988}.
+
+\bibitem{MV10}
+M.~Matolcsi and C.~Vinuesa,
+\emph{Improved bounds on the supremum of autoconvolutions},
+J.\ Math.\ Anal.\ Appl.\ \textbf{372}(2), 439--447, 2010.
+
+\end{thebibliography}
+
+\end{document}
