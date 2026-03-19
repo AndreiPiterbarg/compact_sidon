@@ -597,8 +597,9 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
     inv_ell2 = 1.0 / (4.0 * n_half * 2)
     # Asymmetry bound applies directly to c (not through discretization),
     # so compare against c_target, not prune_target.
-    c_target = prune_target - 2.0 * inv_m - inv_m * inv_m
     inv_m_sq = inv_m * inv_m
+    correction_max = max(1.0, 2.0 * n_half) * (2.0 * inv_m + inv_m_sq)
+    c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
     thread_asym = np.zeros(n_c0, dtype=np.int64)
@@ -649,7 +650,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                     hi_bin_val = s_lo  # s_lo + ell - 2 = s_lo + 0 = s_lo for ell=2
                     hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                     W_pos = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                    dyn_thresh_pos = c_target + (1.0 + 2.0 * W_pos) * inv_m_sq + fp_margin
+                    dyn_thresh_pos = c_target + (4.0 * n_half / 2.0) * (1.0 + 2.0 * W_pos) * inv_m_sq + fp_margin
                     if tv > dyn_thresh_pos:
                         pruned_d2 = True
                         break
@@ -760,7 +761,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                             hi_bin_val = s_lo + ell - 2
                             hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                             W_int = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                            dyn_thresh = c_target + (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
+                            dyn_thresh = c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
                             if tv > dyn_thresh:
                                 pruned = True
                                 break
@@ -867,8 +868,9 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
     # Asymmetry bound applies directly to c (not through discretization),
     # so compare against c_target, not prune_target.
-    c_target = prune_target - 2.0 * inv_m - inv_m * inv_m
     inv_m_sq = inv_m * inv_m
+    correction_max = max(1.0, 2.0 * n_half) * (2.0 * inv_m + inv_m_sq)
+    c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
     thread_asym = np.zeros(n_c0, dtype=np.int64)
@@ -991,7 +993,7 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
                         lo_bin = s_lo - 3 if s_lo > 3 else 0
                         hi_bin = s_lo + ell - 2 if s_lo + ell - 2 < 3 else 3
                         W_int = pc[hi_bin + 1] - pc[lo_bin]
-                        dyn_thresh = c_target + (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
+                        dyn_thresh = c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
                         if tv > dyn_thresh:
                             pruned = True
                             break
@@ -1032,8 +1034,9 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
     # Asymmetry bound applies directly to c (not through discretization),
     # so compare against c_target, not prune_target.
-    c_target = prune_target - 2.0 * inv_m - inv_m * inv_m
     inv_m_sq = inv_m * inv_m
+    correction_max = max(1.0, 2.0 * n_half) * (2.0 * inv_m + inv_m_sq)
+    c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
     thread_asym = np.zeros(n_c0, dtype=np.int64)
@@ -1160,7 +1163,7 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
                                 lo_bin = s_lo - 5 if s_lo > 5 else 0
                                 hi_bin = s_lo + ell - 2 if s_lo + ell - 2 < 5 else 5
                                 W_int = pc6[hi_bin + 1] - pc6[lo_bin]
-                                dyn_thresh = c_target + (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
+                                dyn_thresh = c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) * inv_m_sq + fp_margin
                                 if tv > dyn_thresh:
                                     pruned = True
                                     break
@@ -1206,7 +1209,7 @@ def run_single_level(n_half, m, c_target, batch_size=100000, verbose=True):
     d = 2 * n_half
     S = m  # S=m convention: integer coords sum to m (not 4nm)
     n_total = count_compositions(d, S)
-    corr = correction(m)
+    corr = correction(m, n_half)
     prune_target = c_target + corr
     asym_thresh = asymmetry_threshold(c_target)
     margin = 0.0  # No margin needed: left_frac exact for step functions
@@ -1347,7 +1350,7 @@ def find_best_bound_direct(n_half, m, batch_size=50000, verbose=True):
     d = 2 * n_half
     S = m  # S=m convention: integer coords sum to m (not 4nm)
     n_total = count_compositions(d, S)
-    corr = correction(m)
+    corr = correction(m, n_half)
     margin = 0.0  # No margin needed: left_frac exact for step functions
     total_mass = float(S)
     inv_m = 1.0 / m

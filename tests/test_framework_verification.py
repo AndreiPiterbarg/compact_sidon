@@ -19,20 +19,37 @@ from test_values import compute_test_value_single, compute_test_values_batch
 
 
 # =====================================================================
-# 1. Correction term: 2/m + 1/m^2
+# 1. Correction term: base = 2/m + 1/m^2, full = factor * base
 # =====================================================================
 
 class TestCorrectionDerivation(unittest.TestCase):
-    """Verify correction(m) = 2/m + 1/m^2 matches Lemma 3 of CS14."""
+    """Verify correction(m, n_half, ell_min) matches corrected Lemma 3.
 
-    def test_formula_exact(self):
+    Legacy mode (n_half=None): returns base = 2/m + 1/m^2.
+    Full mode: returns max(1, 4*n_half/ell_min) * base.
+    """
+
+    def test_base_formula_exact(self):
+        """Legacy mode returns base = 2/m + 1/m^2."""
         for m in [5, 10, 20, 50, 100, 200]:
             expected = 2.0 / m + 1.0 / (m * m)
             self.assertAlmostEqual(correction(m), expected, places=15,
                                    msg=f"correction({m}) mismatch")
 
+    def test_full_formula_exact(self):
+        """Full mode returns max(1, 4*n_half/ell_min) * base."""
+        for m in [5, 10, 20, 50, 100, 200]:
+            base = 2.0 / m + 1.0 / (m * m)
+            for n_half in [1, 2, 4, 8, 16]:
+                for ell_min in [2, 4]:
+                    factor = max(1.0, 4.0 * n_half / ell_min)
+                    expected = factor * base
+                    actual = correction(m, n_half=n_half, ell_min=ell_min)
+                    self.assertAlmostEqual(actual, expected, places=15,
+                                           msg=f"correction({m}, {n_half}, {ell_min}) mismatch")
+
     def test_correction_is_global_upper_bound(self):
-        """correction(m) upper-bounds the window correction eps^2 + 2*eps*W for all W <= 1."""
+        """correction(m) (legacy) upper-bounds eps^2 + 2*eps*W for all W <= 1."""
         for m in [10, 20, 50, 100]:
             eps = 1.0 / m
             corr = correction(m)
@@ -43,19 +60,28 @@ class TestCorrectionDerivation(unittest.TestCase):
                                      msg=f"Window correction {window_corr} > correction({m})={corr} at W={w}")
 
     def test_correction_matches_matlab_gridspace(self):
-        """Verify correction(m) = gridSpace^2 + 2*gridSpace (with W=1 maximum)."""
+        """Verify correction(m) (legacy) = gridSpace^2 + 2*gridSpace (with W=1 maximum)."""
         for m in [20, 50]:
             gridSpace = 1.0 / m
             matlab_max = gridSpace ** 2 + 2 * gridSpace * 1.0
             self.assertAlmostEqual(correction(m), matlab_max, places=15)
 
     def test_correction_decreasing(self):
-        """correction(m) is strictly decreasing."""
+        """correction(m) (legacy) is strictly decreasing."""
         prev = correction(2)
         for m in range(3, 201):
             curr = correction(m)
             self.assertLess(curr, prev, msg=f"correction not decreasing at m={m}")
             prev = curr
+
+    def test_full_correction_ge_base(self):
+        """Full correction (with n_half) is always >= base correction."""
+        for m in [10, 20, 50, 100]:
+            base = correction(m)
+            for n_half in [1, 2, 4, 8]:
+                full = correction(m, n_half=n_half)
+                self.assertGreaterEqual(full, base - 1e-15,
+                                        msg=f"correction({m}, {n_half}) < base")
 
 
 # =====================================================================
@@ -245,7 +271,8 @@ class TestXCapDerivation(unittest.TestCase):
     """Verify x_cap formulas and that CS cap <= test-value cap always."""
 
     def _x_cap_tv(self, m, c_target, d_child):
-        corr = 2.0 / m + 1.0 / (m * m)
+        n_half_child = d_child // 2
+        corr = correction(m, n_half_child)
         thresh = c_target + corr + 1e-9
         return int(math.floor(m * math.sqrt(thresh / d_child)))
 

@@ -12,7 +12,7 @@
 
   where the window at position $k$ with length $\ell$ covers $\ell - 1$ consecutive conv values.
 
-  A configuration is pruned (ruled out) if $\text{tv}(a) \geq T$, where $T = c_{\text{target}} + 2/m + 1/m^2$ is the effective threshold. Any lower bound on $\text{tv}(a)$ that exceeds $T$ is sufficient to prune.
+  A configuration is pruned (ruled out) if $\text{tv}(a) \geq T(\ell)$, where $T(\ell) = c_{\text{target}} + (4n/\ell)(2/m + 1/m^2)$ is the per-window effective threshold (the factor $4n/\ell$ arises from window normalization; globally $T_{\max} = c_{\text{target}} + 2n(2/m + 1/m^2)$ since $\ell \geq 2$). Any lower bound on $\text{tv}(a)$ that exceeds $T(\ell)$ for some window of length $\ell$ is sufficient to prune.
 
   The key property we exploit everywhere is:
 
@@ -145,17 +145,15 @@
 
   In fused_prove_target, the host precomputes:
 
-  $$\texttt{int_thresh}[\ell-2] ;=; \bigl\lfloor T \cdot m^2 \cdot 4n \cdot \ell \cdot (1 - 4\varepsilon) \bigr\rfloor$$
+  $$\texttt{int_thresh}[\ell-2] ;=; \bigl\lfloor T(\ell) \cdot m^2 \cdot 4n \cdot \ell \cdot (1 - 4\varepsilon) \bigr\rfloor$$
 
-  where $\varepsilon = $ DBL_EPSILON $\approx 2.2 \times 10^{-16}$. The $(1 - 4\varepsilon)$ factor guards against FP64 rounding producing a value slightly above the true mathematical product — it makes the threshold       
-  conservative (lower), meaning fewer configs pruned, never more.
+  where $T(\ell) = c_{\text{target}} + (4n/\ell)(2/m + 1/m^2)$ is the per-window threshold and $\varepsilon = $ DBL_EPSILON $\approx 2.2 \times 10^{-16}$. The $(1 - 4\varepsilon)$ factor guards against FP64 rounding producing a value slightly above the true mathematical product — it makes the threshold conservative (lower), meaning fewer configs pruned, never more.
 
   The exact mathematical pruning condition for a window of length $\ell$ with integer sum $W = \sum_{\text{window}} c_i c_j$ is:
 
-  $$\frac{W}{4n \cdot \ell \cdot m^2} > T \quad\Longleftrightarrow\quad W > T \cdot 4n \cdot \ell \cdot m^2$$
+  $$\frac{W}{4n \cdot \ell \cdot m^2} > T(\ell) \quad\Longleftrightarrow\quad W > T(\ell) \cdot 4n \cdot \ell \cdot m^2$$
 
-  Since $\texttt{int_thresh}[\ell-2] \leq T \cdot 4n \cdot \ell \cdot m^2$, the check $W > \texttt{int_thresh}[\ell-2]$ is a sufficient condition — it may miss a few borderline configs (conservative), but never falsely     
-  prunes.
+  Since $\texttt{int_thresh}[\ell-2] \leq T(\ell) \cdot 4n \cdot \ell \cdot m^2$, the check $W > \texttt{int_thresh}[\ell-2]$ is a sufficient condition — it may miss a few borderline configs (conservative), but never falsely prunes.
 
   For each new bound, the connection to integer thresholds:
 
@@ -169,8 +167,8 @@
   │ Cross-term $c_0 c_5$ │ $2 \cdot c_0 \cdot c_5$       │ 2             │ 2*c0*c5 > local_thresh[0]        │
   └──────────────────────┴───────────────────────────────┴───────────────┴──────────────────────────────────┘
 
-  All comparisons are exact integer arithmetic — no floating-point error. Combined with the conservative threshold, this makes the integer checks strictly safe: they never prune a configuration whose true test value is     
-  below $T$.
+  All comparisons are exact integer arithmetic — no floating-point error. Combined with the conservative threshold, this makes the integer checks strictly safe: they never prune a configuration whose true test value is
+  below $T(\ell)$.
 
   ---
   Chain of Validity

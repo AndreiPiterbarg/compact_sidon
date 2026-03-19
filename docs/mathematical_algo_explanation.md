@@ -59,27 +59,32 @@
 
   Lemma 3 — Discretization Error Bound
 
-  Result: $c \geq b_{n,m} - \frac{2}{m} - \frac{1}{m^2}$
+  Result: $c \geq b_{n,m} - \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right)$ per window of length $\ell$, or globally $c \geq b_{n,m} - 2n\left(\frac{2}{m} + \frac{1}{m^2}\right)$ (since $\ell \geq 2 \Rightarrow 4n/\ell \leq 2n$).
 
-  The correction $2/m + 1/m^2$ arises from bounding $|f*\varepsilon|\infty \leq 1/m$ and
-  $|\varepsilon*\varepsilon|\infty \leq 1/m^2$ where $\varepsilon = f - g$ is the rounding error (bounded 
-  by $1/m$).
+  The per-window correction $(4n/\ell)(2/m + 1/m^2)$ arises from bounding $|f*\varepsilon|_\infty \leq 1/m$ and
+  $|\varepsilon*\varepsilon|_\infty \leq 1/m^2$ where $\varepsilon = f - g$ is the rounding error (bounded
+  by $1/m$), multiplied by the window normalization factor $4n/\ell$. The original CS14 paper states the
+  per-window error as $2/m + 1/m^2$, but this is the error in the *unnormalized* convolution sum; after
+  dividing by $4n\ell$ and accounting for the $\ell-1$ terms in each window, the effective correction
+  per window is $(4n/\ell)(2/m + 1/m^2)$. For n_half=2, m=20: the global bound is $4 \times (2/20 + 1/400) = 0.41$.
 
   Refined correction (Equation 1 in paper — use this for better pruning):
   $$|(f * \varepsilon)(x)| \leq \frac{1}{m} \int_{-1/4 + \max(x,0)}^{1/4 + \min(0,x)} f(x-y),dy$$
 
-  This exploits the support constraint to get a tighter bound that depends on position $x$, making it more   effective at excluding cases than the uniform $1/m$ bound.
+  This exploits the support constraint to get a tighter bound that depends on position $x$, making it more   effective at excluding cases than the uniform bound.
 
   ---
   3. The Effective Threshold
 
   To prove $c \geq c_{\text{target}}$:
 
-  $$T = c_{\text{target}} + \frac{2}{m} + \frac{1}{m^2}$$
+  $$T(\ell) = c_{\text{target}} + \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right)$$
+
+  (Per-window threshold; globally bounded by $T_{\max} = c_{\text{target}} + 2n(2/m + 1/m^2)$ since $\ell \geq 2$.)
 
   A vector $b$ is ruled out if there exists at least one window $(k, \ell)$ such that:
 
-  $$\frac{1}{4n\ell} \sum_{k \leq i+j \leq k+\ell-2} b_i b_j > T$$
+  $$\frac{1}{4n\ell} \sum_{k \leq i+j \leq k+\ell-2} b_i b_j > T(\ell)$$
 
   If every $b \in B_{n,m}$ is ruled out, then $c \geq c_{\text{target}}$ is proven.
 
@@ -194,8 +199,9 @@
 
   7b. Refined correction term (Equation 1)
 
-  Use the position-dependent bound on $|(f * \varepsilon)(x)|$ instead of the uniform $1/m$ bound. This   
-  tightens the effective threshold window-by-window, ruling out more cases.
+  Use the position-dependent bound on $|(f * \varepsilon)(x)|$ instead of the uniform bound. The full
+  per-window correction is $(4n/\ell)(2/m + 1/m^2)$, which varies with window length $\ell$. The
+  position-dependent refinement tightens this further window-by-window, ruling out more cases.
 
   7c. Early termination per refinement
 
@@ -241,7 +247,7 @@
   ---
   10. Practical Parameter Choices
 
-  ┌─────────────────────┬───────────────┬────────────────────────────────────────────────────────────────┐  │      Parameter      │  Paper value  │                      Effect of increasing                      │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $m$                 │ 50            │ Reduces correction term $2/m + 1/m^2$, increases grid size     │  │ (discretization)    │               │ polynomially                                                   │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $n$ (bins)          │ 3 → 6 → 12 →  │ Finer spatial resolution, exponential cost increase            │  │                     │ 24            │                                                                │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $c_{\text{target}}$ │ 1.28          │ Higher targets are harder to prove                             │  └─────────────────────┴───────────────┴────────────────────────────────────────────────────────────────┘
+  ┌─────────────────────┬───────────────┬────────────────────────────────────────────────────────────────┐  │      Parameter      │  Paper value  │                      Effect of increasing                      │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $m$                 │ 50            │ Reduces correction term $(4n/\ell)(2/m + 1/m^2)$, increases    │  │ (discretization)    │               │ grid size polynomially                                         │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $n$ (bins)          │ 3 → 6 → 12 →  │ Finer spatial resolution, exponential cost increase            │  │                     │ 24            │                                                                │  ├─────────────────────┼───────────────┼────────────────────────────────────────────────────────────────┤  │ $c_{\text{target}}$ │ 1.28          │ Higher targets are harder to prove                             │  └─────────────────────┴───────────────┴────────────────────────────────────────────────────────────────┘
   Trade-off: Larger $m$ gives a tighter bound (smaller correction) but more parents to check. Larger $n$  
   gives finer resolution but the number of parents and refinements explodes. The multiscale approach      
   mitigates this: most parents are eliminated at coarse $n$, only a few need refinement.
@@ -250,7 +256,7 @@
   11. End-to-End Algorithm Pseudocode
 
   function prove_lower_bound(c_target, m, n_start, n_max):
-      T = c_target + 2/m + 1/m^2
+      T_global = c_target + 2*n_start*(2/m + 1/m^2)  # global threshold; per-window is (4n/ell)(2/m+1/m^2)
 
       # Generate all parents at coarse level
       survivors = enumerate_all(B_{n_start, m})
@@ -274,7 +280,7 @@
                   for ell = 2 to 2n:
                       for k = -n to n-ell:
                           val = windowed_test_value(c_gamma, k, ell, n)
-                          if val > T:    # (use refined correction here)
+                          if val > T_global:    # (per-window dynamic threshold uses (4n/ell)(2/m+1/m^2))
                               ruled_out = true
                               break
                       if ruled_out: break
@@ -303,8 +309,9 @@
   1. Complete enumeration — every $b \in B_{n,m}$ must be checked (or shown to be covered by a checked    
   ancestor + its refinements)
   2. All windows checked — for each refinement, every valid $(k, \ell)$ must be tested before declaring it   a survivor
-  3. Exact arithmetic or safe rounding — the comparison against $T$ must use the correct threshold        
-  including the full correction term; floating-point errors must not cause false positives (wrongly ruling   out a valid case)
+  3. Exact arithmetic or safe rounding — the comparison against the threshold must use the correct
+  per-window correction $(4n/\ell)(2/m + 1/m^2)$; floating-point errors must not cause false positives
+  (wrongly ruling out a valid case)
   4. Refinement completeness — every refinement of a surviving parent must itself be checked at the finer 
   level
 

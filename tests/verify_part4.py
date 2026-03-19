@@ -326,8 +326,9 @@ def verify_item2():
 
         # Expected x_cap (Cauchy-Schwarz bound = MATLAB's formula)
         x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
-        # Test-value bound
-        corr = 2.0 / m + 1.0 / (m * m)
+        # Test-value bound (corrected: factor * base where factor = max(1, 4*n_half_child/ell_min))
+        n_half_child = d_child // 2
+        corr = correction(m, n_half_child)
         x_cap_tv = int(math.floor(m * math.sqrt((c_target + corr + 1e-9) / d_child)))
         x_cap_expected = min(x_cap_cs, x_cap_tv, m)
         x_cap_expected = max(x_cap_expected, 0)

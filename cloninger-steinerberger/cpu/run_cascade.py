@@ -67,20 +67,21 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
     survived = np.ones(B, dtype=numba.boolean)
 
     m_d = np.float64(m)
-    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
     inv_4n = 1.0 / (4.0 * np.float64(n_half))
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     d_minus_1 = d - 1
+    eps_margin = 1e-9 * m_d * m_d
 
     # Pre-compute per-ell constants ONCE (shared read-only across threads)
+    # CORRECTED: the correction term (1 + 2*W_int) is NOT scaled by ell/(4n).
+    # Correct threshold: floor(c_target*m^2*ell/(4n) + 1 + eps + 2*W_int)
+    # Previously the (1 + 2*W_int) was incorrectly multiplied by ell/(4n).
     max_ell = 2 * d
-    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
-    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
+    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
-        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
+        ct_base_ell_arr[ell] = c_target * m_d * m_d * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
@@ -102,8 +103,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            dyn_base_ell = dyn_base_ell_arr[ell]
-            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
+            ct_base_ell = ct_base_ell_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -119,7 +119,8 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
-                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
+                # CORRECTED: (1 + eps + 2*W_int) added directly, NOT scaled by ell/(4n)
+                dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int)
                 dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
@@ -144,19 +145,18 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
     survived = np.ones(B, dtype=numba.boolean)
 
     m_d = np.float64(m)
-    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
     inv_4n = 1.0 / (4.0 * np.float64(n_half))
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     d_minus_1 = d - 1
+    eps_margin = 1e-9 * m_d * m_d
 
+    # CORRECTED: same fix as int32 path
     max_ell = 2 * d
-    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
-    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
+    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
-        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
+        ct_base_ell_arr[ell] = c_target * m_d * m_d * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
@@ -178,8 +178,7 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            dyn_base_ell = dyn_base_ell_arr[ell]
-            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
+            ct_base_ell = ct_base_ell_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -195,7 +194,8 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
+                # CORRECTED: (1 + eps + 2*W_int) added directly, NOT scaled by ell/(4n)
+                dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int)
                 dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
@@ -1711,13 +1711,21 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     return n_surv, 0
 
 
-def _compute_bin_ranges(parent_int, m, c_target, d_child):
+def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     """Compute per-bin lo/hi cursor ranges and total children count.
+
+    Parameters
+    ----------
+    n_half_child : int or None
+        Half-dimension of child.  When provided, uses the corrected
+        correction term ``correction(m, n_half_child)``.  When None,
+        falls back to the legacy flat correction for backward
+        compatibility with external callers.
 
     Returns (lo_arr, hi_arr, total_children) or None if any bin has empty range.
     """
     d_parent = len(parent_int)
-    corr = 2.0 / m + 1.0 / (m * m)
+    corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
     # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
@@ -1771,7 +1779,7 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
     d_parent = len(parent_int)
     d_child = 2 * d_parent
 
-    result = _compute_bin_ranges(parent_int, m, c_target, d_child)
+    result = _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child)
     if result is None:
         return np.empty((0, d_child), dtype=np.int32), 0
     lo_arr, hi_arr, total_children = result
@@ -1820,7 +1828,7 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
     d_child = 2 * d_parent
     label = f"parent {parent_idx+1}/{n_parents}"
 
-    result = _compute_bin_ranges(parent_int, m, c_target, d_child)
+    result = _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child)
     if result is None:
         _log(f"       {label}: empty range, skipped")
         return np.empty((0, d_child), dtype=np.int32), 0
@@ -1940,10 +1948,10 @@ def run_level0(n_half, m, c_target, verbose=True):
     d = 2 * n_half
     S = m
     n_total = count_compositions(d, S)
-    corr = correction(m)
+    corr = correction(m, n_half)
 
     if verbose:
-        _log(f"\n[L0] d={d}, m={m}, compositions={n_total:,}")
+        _log(f"\n[L0] d={d}, m={m}, n_half={n_half}, compositions={n_total:,}")
         _log(f"     correction={corr:.6f}, threshold={c_target+corr:.6f}")
 
     t0 = time.time()
@@ -2029,7 +2037,7 @@ def run_level0(n_half, m, c_target, verbose=True):
 # Refinement: uniform full-bin split (legacy — kept as fallback)
 # =====================================================================
 
-def generate_children_uniform(parent_int, m, c_target):
+def generate_children_uniform(parent_int, m, c_target, n_half_child=None):
     """Generate all child compositions from a parent via uniform 2-split.
 
     Each parent bin c_i is split into (a, b) where a + b = c_i.
@@ -2040,6 +2048,9 @@ def generate_children_uniform(parent_int, m, c_target):
     parent_int : (d_parent,) int array
     m : int
     c_target : float
+    n_half_child : int or None
+        Half-dimension of child.  When provided, uses the corrected
+        correction term ``correction(m, n_half_child)``.
 
     Returns
     -------
@@ -2049,7 +2060,7 @@ def generate_children_uniform(parent_int, m, c_target):
     d_child = 2 * d_parent
 
     # x_cap: single-bin energy cap
-    corr = 2.0 / m + 1.0 / (m * m)
+    corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
     # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
@@ -2213,7 +2224,7 @@ def _process_single_parent_legacy(args):
     """
     parent, m, c_target, n_half_child, batch_size = args
 
-    children = generate_children_uniform(parent, m, c_target)
+    children = generate_children_uniform(parent, m, c_target, n_half_child)
     n_children = len(children)
 
     if n_children == 0:
@@ -2437,14 +2448,15 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
     except (ImportError, ValueError, OSError):
         pass  # Windows or insufficient permissions — proceed anyway
     d0 = 2 * n_half
-    corr = correction(m)
+    corr = correction(m, n_half)
     n_total = count_compositions(d0, m)
 
     if verbose:
         _log(f"\n{'='*70}")
         _log(f"CPU CASCADE PROVER")
         _log(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
-        _log(f"  correction={corr:.6f}, effective threshold={c_target+corr:.6f}")
+        _log(f"  correction(m, n_half={n_half})={corr:.6f}, "
+             f"effective threshold={c_target+corr:.6f}")
         _log(f"  L0 compositions: {n_total:,}")
         _log(f"  workers: {n_workers} (logical CPUs: {mp.cpu_count()}, "
              f"effective: {_effective_cpu_count()})")
@@ -2525,7 +2537,7 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         # --- Pre-filter: skip parents where any bin > 2*x_cap ---
         # Such parents produce zero children (empty cursor range in every
         # bin exceeding x_cap), but still incur IPC + dispatch overhead.
-        corr_pf = 2.0 / m + 1.0 / (m * m)
+        corr_pf = correction(m, n_half_child)
         thresh_pf = c_target + corr_pf + 1e-9
         x_cap_pf = int(math.floor(m * math.sqrt(thresh_pf / d_child)))
         # Cauchy-Schwarz bound: no correction needed

@@ -8,9 +8,21 @@ import numba
 from math import comb
 
 
-def correction(m):
-    """Discretization error bound (Lemma 3): C_{1a} >= b_{n,m} - 2/m - 1/m^2."""
-    return 2.0 / m + 1.0 / (m * m)
+def correction(m, n_half=None, ell_min=2):
+    """Discretization error bound (Lemma 3, corrected).
+
+    The per-window correction includes a (4n/ell) factor from the test_value
+    normalization. For the max over all windows, the worst case is ell=ell_min=2:
+      correction = (4*n_half/ell_min) * (2/m + 1/m^2)
+
+    When n_half is None, returns the legacy (incorrect) flat correction for
+    backward compatibility with code that handles the factor separately.
+    """
+    base = 2.0 / m + 1.0 / (m * m)
+    if n_half is None:
+        return base
+    factor = max(1.0, 4.0 * n_half / ell_min)
+    return factor * base
 
 
 def asymmetry_threshold(c_target):

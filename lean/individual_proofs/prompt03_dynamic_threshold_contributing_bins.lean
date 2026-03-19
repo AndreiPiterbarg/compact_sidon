@@ -13,12 +13,13 @@ Note: `discretization_error_bound` and `correction_term_bound` are stated as axi
 
 PROOF STRATEGY:
 This is a refinement of Claim 1.2 with window-dependent correction.
-The uniform correction 2/m + 1/m² bounds the error using ∑|δ_i| ≤ d/m.
+The uniform correction (4n/ℓ)·(2/m + 1/m²) bounds the per-window error, where the
+(4n/ℓ) factor arises from the window normalization applied to height-space errors.
 But for a specific window (ℓ, s_lo), only contributing bins matter.
 The error for that window involves ∑_{i ∈ B} |δ_i|·μ_j terms.
-Key bound: |TV_continuous - TV_discrete| ≤ 2W/m + 1/m²
+Key bound: |TV_continuous - TV_discrete| ≤ (4n/ℓ)·(2W/m + 1/m²)
 where W = (∑_{i ∈ B} c_i)/m ≤ 1.
-So: TV > c_target + 2W/m + 1/m² ⟹ TV_continuous > c_target ⟹ R(f) ≥ c_target.
+So: TV > c_target + (4n/ℓ)·(2W/m + 1/m²) ⟹ TV_continuous > c_target ⟹ R(f) ≥ c_target.
 -/
 
 import Mathlib

@@ -7,27 +7,38 @@
 
 ---
 
-## Verification 1: Correction Term `2/m + 1/m²`
+## Verification 1: Correction Term `(4n/ℓ)(2/m + 1/m²)`
 
-**Source:** Lemma 3 of CS14 (arXiv:1403.7988). The discretization error between the continuous autoconvolution constant and its discrete approximation satisfies:
-
-```
-C_{1a} >= b_{n,m} - 2/m - 1/m²
-```
-
-**Derivation:** The function f is approximated by a step function on d = 2n bins of width Δ = 1/(4n). Each bin's height is a_i = c_i / m (integer coords c_i summing to m). The gridSpace in MATLAB is `gridSpace = 1/m` (mass quanta), and:
+**Source:** Lemma 3 of CS14 (arXiv:1403.7988). The discretization error between the continuous autoconvolution constant and its discrete approximation satisfies, per window of length ℓ:
 
 ```
-correction = 2 * gridSpace + gridSpace² = 2/m + 1/m²
+C_{1a} >= b_{n,m} - (4n/ℓ)(2/m + 1/m²)
 ```
+
+Globally (since ℓ >= 2, so 4n/ℓ <= 2n): `C_{1a} >= b_{n,m} - 2n(2/m + 1/m²)`.
+
+**Derivation:** The function f is approximated by a step function on d = 2n bins of width Δ = 1/(4n). Each bin's height is a_i = c_i / m (integer coords c_i summing to m). The gridSpace in MATLAB is `gridSpace = 1/m` (mass quanta), and the raw (unnormalized) correction is:
+
+```
+raw_correction = 2 * gridSpace + gridSpace² = 2/m + 1/m²
+```
+
+The per-window correction includes the normalization factor 4n/ℓ:
+
+```
+correction(ℓ) = (4n/ℓ) * (2/m + 1/m²)
+```
+
+For n_half=2, m=20: raw = 0.1025, global (ℓ=2) = 4 × 0.1025 = 0.41.
 
 **Verification:**
-- `correction(m=50)` = 2/50 + 1/2500 = 0.0404 ✓
-- `correction(m=100)` = 2/100 + 1/10000 = 0.0201 ✓
+- Raw `correction(m=50)` = 2/50 + 1/2500 = 0.0404 ✓
+- Raw `correction(m=100)` = 2/100 + 1/10000 = 0.0201 ✓
 - Monotone decreasing in m ✓
 - MATLAB `gridSpace = 1/m` matches Python `1/m` ✓
+- Global correction for n_half=2, m=20: 2*2*(2/20 + 1/400) = 4*0.1025 = 0.41 ✓
 
-**Code:** `pruning.py:12` — `return 2.0 / m + 1.0 / (m * m)`
+**Code:** `pruning.py:12` — `return 2.0 / m + 1.0 / (m * m)` (raw term; multiplied by 4n/ℓ per window in the cascade)
 
 ---
 
@@ -110,7 +121,7 @@ The `1e-9*m²` term (= 1e-9 in continuous space) makes Python strictly more cons
 
 ### Standard x_cap (from correction term):
 ```python
-x_cap = floor(m * sqrt(thresh / d_child))   # thresh = c_target + 2/m + 1/m² + 1e-9
+x_cap = floor(m * sqrt(thresh / d_child))   # thresh = c_target + (4n/ℓ)(2/m + 1/m²) + 1e-9, with ℓ=2 for single-bin check
 ```
 
 **Derivation:** If any bin c_i > x_cap, the ℓ=2 diagonal window gives test value:
@@ -124,7 +135,7 @@ which exceeds thresh when c_i > m·√(thresh/d).
 x_cap_cs = floor(m * sqrt(c_target / d_child))
 ```
 
-**Key insight:** The Cauchy-Schwarz bound `||f*f||_∞ ≥ d·c_i²/m²` does not go through the test-value framework, so **no correction term is needed**. This bound is:
+**Key insight:** The Cauchy-Schwarz bound `||f*f||_∞ ≥ d·c_i²/m²` does not go through the test-value framework, so **no correction term $(4n/\ell)(2/m + 1/m^2)$ is needed**. This bound is:
 
 1. A direct L^∞ bound (like asymmetry), not a windowed test value
 2. Invariant under refinement (child bin inherits parent bin value)
@@ -290,7 +301,7 @@ Both `compute_test_values_batch` (integer-space) and `compute_test_value_single`
 
 | # | Item | Status | Impact of Fix |
 |---|------|--------|---------------|
-| 1 | Correction term 2/m + 1/m² | CORRECT | — |
+| 1 | Correction term (4n/ℓ)(2/m + 1/m²) per window | CORRECT | — |
 | 2 | Asymmetry threshold √(c/2) | CORRECT | — |
 | 3 | Composition count C(S+d-1,d-1) | CORRECT | — |
 | 4 | Dynamic threshold MATLAB≡Python | CORRECT | — |

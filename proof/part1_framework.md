@@ -33,12 +33,12 @@ The test value is TV = max_{ℓ, s_lo} TV(ℓ, s_lo).
 
 ---
 
-## Verification 1: correction(m) = 2/m + 1/m²
+## Verification 1: correction(n, m) = 2n·(2/m + 1/m²)
 
 **File:** `pruning.py:11-13`
 
 **Statement.** The discretization error bound from the Cloninger-Steinerberger Lemma 3 is
-correction(m) = 2/m + 1/m².
+correction(n, m, ℓ) = (4n/ℓ)·(2/m + 1/m²) per window, or correction(n, m) = 2n·(2/m + 1/m²) globally (worst case ℓ=2).
 
 **Proof of the bound.**
 
@@ -55,21 +55,31 @@ This is the exact content of Lemma 3 in CS14: the discrete test value TV_disc(f)
 for any function g whose bin averages match f. The correction ε² + 2ε·W_window accounts
 for the error between the step-function test value and the continuous autoconvolution maximum.
 
-**Global upper bound.** Since W_window ≤ Σ aᵢ · Δ / Δ ... more precisely,
-W_window = Σ_{contributing bins} aᵢ · Δ = Σ bᵢ where bᵢ = cᵢ/m. Since these are a
-subset of all bins, W_window ≤ Σ bᵢ = Σ cᵢ/m = 1.
+**Per-window correction in test-value space.** The test value is
+TV = (1/(4nℓ)) · Σ conv_a[k], where conv_a uses heights aᵢ = cᵢ·4n/m. The
+discretization error per bin is |δᵢ| ≤ 1/m in mass space, i.e., |δ_height_i| ≤ 4n/m
+in height space. The error in the windowed test value is:
 
-Therefore:
-    ε² + 2ε·W ≤ 1/m² + 2/m = correction(m)
+    |TV_disc - TV_cont| ≤ (4n/ℓ) · (2/m + 1/m²)
 
-The global correction(m) = 2/m + 1/m² is the worst-case (over all windows) of the
-per-window correction. ✓
+where the factor 4n/ℓ arises from the window normalization 1/(4nℓ) applied to the
+convolution sum error, which scales as (4n)² from the height encoding.
+
+**Global upper bound (ℓ = 2, worst case):**
+
+    correction(n, m) = 2n · (2/m + 1/m²)
+
+This is the worst-case (over all windows, minimizing ℓ = 2) of the per-window correction. ✓
 
 **Python-MATLAB correspondence.** The Python dynamic threshold uses the window-dependent
-correction directly (sharper); the global correction(m) is used only in `solvers.py`'s
-`prune_target = c_target + correction(m)` which is more conservative (sound). ✓
+correction directly (sharper); the global correction(n, m) is used only in `solvers.py`'s
+`prune_target = c_target + correction(n, m)` which is more conservative (sound). ✓
 
-**Numerical checks:** correction(20) = 0.1025, correction(50) = 0.0404, correction(100) = 0.0201.
+**Numerical checks (n_half=2, so n ranges with level):**
+correction(n=2, m=20) = 2·2·(2/20 + 1/400) = 4·0.1025 = 0.41,
+correction(n=4, m=20) = 2·4·0.1025 = 0.82,
+correction(n=32, m=20) = 2·32·0.1025 = 6.56.
+(The global bound is loose; the per-window bound with actual ℓ and W is much tighter.)
 
 ---
 
@@ -413,7 +423,7 @@ Combined with 0 ≤ i ≤ d-1: i ∈ [max(0, s_lo-(d-1)), min(d-1, s_lo+ℓ-2)].
 
 | Item | Code Location | Status | Notes |
 |------|---------------|--------|-------|
-| correction(m) = 2/m + 1/m² | pruning.py:11-13 | **VALID** | Global upper bound on window correction |
+| correction(n,m) = 2n·(2/m + 1/m²) | pruning.py:11-13 | **VALID** | Global upper bound on window correction; per-window: (4n/ℓ)·(2/m + 1/m²) |
 | asymmetry_threshold = √(c_target/2) | pruning.py:16-22 | **VALID** | Direct Cauchy-Schwarz argument |
 | count_compositions = C(S+d-1, d-1) | pruning.py:25-29 | **VALID** | Stars-and-bars |
 | dyn_base = c_target·m²+1+1e-9·m² | run_cascade.py:63-64 | **VALID** | Exact MATLAB match + FP margin |

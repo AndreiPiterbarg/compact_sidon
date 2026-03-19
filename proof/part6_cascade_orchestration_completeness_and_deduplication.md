@@ -357,7 +357,7 @@ if n_survived == 0:
 
 then every configuration at resolution $2^{k+1} \cdot n_{\text{half}}$ has been pruned. By the completeness chain above, every continuous function $f$ has a discretization at this resolution that was pruned (either at level $k$ or at an earlier level). Therefore $\|f*f\|_\infty \ge c_{\text{target}}$ for all such $f$, proving $c \ge c_{\text{target}}$.
 
-**Key requirement.** This argument requires that pruning at finite resolution is sound for the continuous function. This is guaranteed by Lemma 3 (Part 1, Verification 1): the discretization error is bounded by $2/m + 1/m^2$, and the dynamic threshold incorporates the per-window correction $\varepsilon^2 + 2\varepsilon \cdot W_{\text{int}}$ to account for this error. $\checkmark$
+**Key requirement.** This argument requires that pruning at finite resolution is sound for the continuous function. This is guaranteed by Lemma 3 (Part 1, Verification 1): the discretization error is bounded by $(4n/\ell) \cdot (2/m + 1/m^2)$ per window (or $2n \cdot (2/m + 1/m^2)$ globally), and the dynamic threshold incorporates the per-window correction $\varepsilon^2 + 2\varepsilon \cdot W_{\text{int}}$ (scaled by the $4n/\ell$ window normalization factor) to account for this error. $\checkmark$
 
 ### Verdict: VERIFIED $\square$
 

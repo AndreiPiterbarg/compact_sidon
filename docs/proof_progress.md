@@ -108,7 +108,7 @@ All completed proofs are merged into a single file: `lean/complete_proof.lean`. 
 | Claim | Description | Lean Status |
 |-------|-------------|-------------|
 | 1.1 | Test value = lower bound on $\|f*f\|_\infty$ | **STUB** in complete_proof.lean |
-| 1.2 | Correction term $2/m + 1/m^2$ | **STUB** in complete_proof.lean |
+| 1.2 | Correction term $(4n/\ell)(2/m + 1/m^2)$ per window | **STUB** in complete_proof.lean |
 | 1.3 | Dynamic threshold soundness | **STUB** in complete_proof.lean |
 | 1.4 | Contributing bins formula | **STUB** in complete_proof.lean |
 | 2.1 | Asymmetry: $\|f*f\|_\infty \geq 2L^2$ | **IN PROGRESS** — restriction lemmas proved (F10-F14) |
@@ -123,7 +123,7 @@ All completed proofs are merged into a single file: `lean/complete_proof.lean`. 
 | 4.2 | Incremental autoconvolution | **PROVED** |
 | 4.3 | Quick-check soundness | **PROVED** |
 | 4.4 | Subtree pruning soundness | **STUB** (helpers proved: dyn_it_mono, subtree_pruning_chain) |
-| 4.5 | CS x_cap no correction needed | **STUB** in complete_proof.lean |
+| 4.5 | CS x_cap no $(4n/\ell)(2/m+1/m^2)$ correction needed | **STUB** in complete_proof.lean |
 | 4.6 | Hoisted asymmetry invariant | **PROVED** |
 | 4.7 | Ell scan order irrelevant | **PROVED** |
 | 4.8 | int32 overflow safety | **PROVED** (int32_safe); conv bounds **STUB** |

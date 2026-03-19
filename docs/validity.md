@@ -80,7 +80,7 @@ W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
 
 Each parent bin c_i is split into (a, c_i - a) where both sub-bins are capped at x_cap:
 ```python
-x_cap = floor(m * sqrt(thresh / d_child))   # thresh = c_target + 2/m + 1/m^2 + 1e-9
+x_cap = floor(m * sqrt(thresh / d_child))   # thresh = c_target + (4n/ℓ)(2/m + 1/m²) + 1e-9, with ℓ=2 for single-bin check
 ```
 
 **Completeness proof:** Any child with a bin > x_cap would be immediately pruned by the ell=2 diagonal window test, because (x_cap+1)^2 > dyn_it for that window. Verified for all m in [5, 200] and d_child in {4, 8, 16, 32, 64, 128, 256, 512, 1024}. All cases pass with margin >= 1.
@@ -132,7 +132,7 @@ Exhaustive test of all 891 canonical d=4, m=20 compositions:
 | Total pruned | 655 |
 | Total survived | 236 |
 
-4 compositions are correctly pruned by the per-window dynamic threshold despite having max test value below the uniform conservative threshold. This is expected behavior — the dynamic correction `2*W_int/m^2` is tighter than the uniform `2/m` when not all bins contribute to a window.
+4 compositions are correctly pruned by the per-window dynamic threshold despite having max test value below the uniform conservative threshold. This is expected behavior — the dynamic per-window correction `(4n/ℓ)(2*W_int/m^2)` is tighter than the uniform global correction `2n(2/m + 1/m^2)` when not all bins contribute to a window.
 
 ---
 
@@ -143,11 +143,12 @@ The CPU result (m=20, ~12 minutes) vs GPU (m=50, 60+ hours) is **not** an apples
 | Parameter | CPU (m=20) | GPU (m=50) |
 |-----------|-----------|-----------|
 | L0 compositions (d=4) | C(23,3) = 1,771 | C(53,3) = 23,426 |
-| Correction term | 2/20 + 1/400 = 0.1025 | 2/50 + 1/2500 = 0.0404 |
-| Effective threshold | 1.4025 | 1.3404 |
+| Raw correction (2/m + 1/m²) | 2/20 + 1/400 = 0.1025 | 2/50 + 1/2500 = 0.0404 |
+| Global correction 2n(2/m+1/m²) | 4 × 0.1025 = 0.41 | 4 × 0.0404 = 0.1616 |
+| Effective global threshold | 1.81 | 1.4616 |
 | Children per parent | fewer (smaller x_cap) | many more |
 
-The m=20 grid has dramatically fewer compositions at every level. The correction term is larger (0.1025 vs 0.0404), meaning the effective threshold is higher and the proof is "harder" per-composition, but this is compensated by the cascade refining to d=64 where structure is resolved finely enough. The mathematical proof is valid regardless of m — the correction term `2/m + 1/m^2` correctly accounts for discretization error at that grid spacing.
+The m=20 grid has dramatically fewer compositions at every level. The global correction term is larger (0.41 vs 0.1616), meaning the effective threshold is higher and the proof is "harder" per-composition, but this is compensated by the cascade refining to d=64 where structure is resolved finely enough. The mathematical proof is valid regardless of m — the per-window correction `(4n/ℓ)(2/m + 1/m^2)` correctly accounts for discretization error at that grid spacing (note: the actual per-window dynamic threshold uses ℓ-dependent correction, so larger windows have tighter thresholds).
 
 ---
 

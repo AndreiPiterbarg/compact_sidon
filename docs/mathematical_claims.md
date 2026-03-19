@@ -64,13 +64,15 @@ $$b_{n,m}(c) = \max_{\ell \in \{2, \ldots, 2d\}} \max_{s_{\text{lo}}} \text{TV}(
 
 **Statement (Lemma 3 of CS14).** For any nonneg function $f$ supported on $(-\tfrac{1}{4}, \tfrac{1}{4})$ and any step function $\hat{f}$ on the $d = 2n$ grid with resolution $m$:
 
-$$R(f) \geq b_{n,m}(\hat{f}) - \frac{2}{m} - \frac{1}{m^2}$$
+$$R(f) \geq b_{n,m}(\hat{f}) - \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right)$$
 
-where $b_{n,m}$ is the max test value.
+per window of length $\ell$, where $b_{n,m}$ is the max test value. Globally (since $\ell \geq 2 \Rightarrow 4n/\ell \leq 2n$): $R(f) \geq b_{n,m}(\hat{f}) - 2n(2/m + 1/m^2)$.
 
-**Implication:** If $b_{n,m}(c) > c_{\text{target}} + \frac{2}{m} + \frac{1}{m^2}$ for every composition $c$ at every level of the cascade, then $c \geq c_{\text{target}}$.
+**Implication:** If $b_{n,m}(c) > c_{\text{target}} + (4n/\ell)(2/m + 1/m^2)$ for every composition $c$ at every level of the cascade (for some window $\ell$), then $c \geq c_{\text{target}}$.
 
-**Code reference:** `pruning.py:12` — `correction(m) = 2.0/m + 1.0/(m*m)`.
+**Note:** The factor $4n/\ell$ arises from the window normalization. The original CS14 paper states the raw correction as $2/m + 1/m^2$, but the effective per-window correction after normalization is $(4n/\ell)(2/m + 1/m^2)$. For n_half=2, m=20: the global correction is $4 \times 0.1025 = 0.41$.
+
+**Code reference:** `pruning.py:12` — `correction(m) = 2.0/m + 1.0/(m*m)` (raw term; multiplied by $4n/\ell$ per window in the cascade).
 
 **Proof coverage:** `proof/part1_framework.md` Verification 1. **PROVED + VERIFIED.**
 
@@ -82,7 +84,7 @@ $$\text{thresh}(\ell, s_{\text{lo}}, c) = c_{\text{target}} + \frac{1}{m^2} + \f
 
 where $W = \frac{1}{m} \sum_{i \in \mathcal{B}} c_i$ is the total mass in bins contributing to that window, and $\mathcal{B} = \{i : \exists\, j \in [0, d-1] \text{ s.t. } s_{\text{lo}} \leq i + j \leq s_{\text{lo}} + \ell - 2\}$.
 
-**What needs proof:** This dynamic threshold is a valid (sound) refinement of Lemma 3 of CS14. It is tighter than the uniform $\frac{2}{m} + \frac{1}{m^2}$ correction because $W \leq 1$ always, and for windows that don't cover all bins, $W < 1$ strictly.
+**What needs proof:** This dynamic threshold is a valid (sound) refinement of Lemma 3 of CS14. It is tighter than the uniform per-window correction $(4n/\ell)(2/m + 1/m^2)$ because $W \leq 1$ always, and for windows that don't cover all bins, $W < 1$ strictly.
 
 **Code reference:** `run_cascade.py:64` — `dyn_base = c_target * m^2 + 1 + 1e-9*m^2`, then per-window `dyn_it = floor((dyn_base + 2*W_int) * ell/(4*n) * (1 - 4*DBL_EPS))`.
 
@@ -132,7 +134,7 @@ Each pruning rule must be **sound**: if a composition $c$ is pruned (eliminated)
 
 2. **Refinement invariance:** When a parent composition $(c_0, \ldots, c_{d-1})$ is refined to a child $(c_0^{(a)}, c_0^{(b)}, c_1^{(a)}, c_1^{(b)}, \ldots)$ where $c_i^{(a)} + c_i^{(b)} = c_i$, the child's left-half mass equals the parent's left-half mass.
 
-3. **Asymmetry bound is a direct L^inf bound** (Claim 2.1), so it does **not** go through the test-value framework and therefore does **not** need the correction term $2/m + 1/m^2$.
+3. **Asymmetry bound is a direct L^inf bound** (Claim 2.1), so it does **not** go through the test-value framework and therefore does **not** need the correction term $(4n/\ell)(2/m + 1/m^2)$.
 
 **Consequence:** The old code had a safety margin of $1/(4m)$ that was strictly unnecessary. Removing it is sound and improves pruning.
 
@@ -155,7 +157,7 @@ This is a **direct bound on the continuous $\|g*g\|_\infty$** for ANY function $
 **Code reference:** `run_cascade.py:1000-1003`.
 
 **Note on two x_cap variants:** The code computes two caps:
-- Standard: $\lfloor m \sqrt{(\text{c\_target} + 2/m + 1/m^2 + 10^{-9}) / d} \rfloor$ (goes through test-value framework, uses correction)
+- Standard: $\lfloor m \sqrt{(\text{c\_target} + (4n/\ell)(2/m + 1/m^2) + 10^{-9}) / d} \rfloor$ (goes through test-value framework, uses per-window correction with $\ell=2$)
 - Cauchy-Schwarz: $\lfloor m \sqrt{c_{\text{target}} / d} \rfloor$ (direct bound, no correction)
 
 It takes the **minimum**, which is always the Cauchy-Schwarz version (tighter). Both are sound; the tighter one does not over-prune.
@@ -438,7 +440,7 @@ The fused kernel counts survivors beyond buffer capacity and the wrapper detects
 | # | Claim | Type | Criticality | Proof Status |
 |---|-------|------|-------------|--------------|
 | 1.1 | Test value definition matches $\|f*f\|_\infty$ lower bound | Framework | Critical | **PROVED** (part1, part3) |
-| 1.2 | Correction term $2/m + 1/m^2$ (Lemma 3 of CS14) | Framework | Critical | **PROVED** (part1 V1) |
+| 1.2 | Correction term $(4n/\ell)(2/m + 1/m^2)$ per window (Lemma 3 of CS14) | Framework | Critical | **PROVED** (part1 V1) |
 | 1.3 | Dynamic threshold is a sound refinement of Lemma 3 | Framework | Critical | **PROVED** (part1 V4, part3 I5,I9) |
 | 1.4 | Contributing bins formula is correct | Framework | Critical | **PROVED** (part1, part3 I9) |
 | 2.1 | Asymmetry: $\|f*f\|_\infty \geq 2L^2$ | Pruning | Critical | **PROVED** (part1 V2) |
@@ -453,7 +455,7 @@ The fused kernel counts survivors beyond buffer capacity and the wrapper detects
 | 4.2 | Incremental autoconvolution update is correct | Optimization | High | **PROVED** (part4 I3, part5 I3-I5) |
 | 4.3 | Quick-check is sound (only prunes, never saves) | Optimization | Medium | **PROVED** (part4 I4, part5 I7) |
 | 4.4 | Subtree pruning is sound (partial conv + W_int_max) | Optimization | **Critical** | **PROVED** (part4 Add, part5 I6) |
-| 4.5 | Cauchy-Schwarz x_cap doesn't need correction | Optimization | High | **PROVED** (part1 V5b) |
+| 4.5 | Cauchy-Schwarz x_cap doesn't need $(4n/\ell)(2/m+1/m^2)$ correction | Optimization | High | **PROVED** (part1 V5b) |
 | 4.6 | Hoisted asymmetry: left_frac invariant under refinement | Optimization | High | **PROVED** (part4 Add, part5 I2) |
 | 4.7 | Ell scan order doesn't change pruning outcomes | Optimization | Low | **VERIFIED** (part4 I6) |
 | 4.8 | int32 overflow safety for $m \leq 200$ | Numerical | High | **PROVED** (part1 V9) |
