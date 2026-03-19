@@ -532,11 +532,11 @@ $s_{\text{hi}}$ is:
 \]
 
 \begin{remark}[Complexity]
-Computing the autoconvolution takes $O(d^2)$ time (or $O(d \log d)$
-via FFT, though the direct method is faster for the small $d$ values
-used here).  The prefix sum takes $O(d)$.  Evaluating all windows
-takes $O(d^2)$ time (summing over $O(d)$ window widths and $O(d)$
-positions each).  Total: $O(d^2)$ per lattice point.
+Computing the autoconvolution takes $O(d^2)$ time.  An FFT-based method
+would give $O(d \log d)$, but for the small $d$ values used here the
+direct method is faster in practice.  The prefix sum takes $O(d)$, and
+the complete window scan takes another $O(d^2)$.  Thus the overall
+cost per lattice point is $O(d^2)$.
 \end{remark}
 
 \subsection{Reversal Symmetry}\label{subsec:reversal}
@@ -906,7 +906,7 @@ array:
 
 \begin{itemize}
   \item \textbf{Incremental autoconvolution:} when only the last
-    cursor position changes ($\sim$67\% of steps), the raw
+    cursor position changes, the raw
     autoconvolution is updated in $O(d)$ instead of $O(d^2)$.
   \item \textbf{Quick-check:} re-tries the previous killing window
     before a full scan.
@@ -971,8 +971,8 @@ array:
 
 \begin{theorem}[Main Result]
 \label{thm:main}
-If Algorithm~\ref{alg:cascade} returns \textsc{Proven} with
-parameters $(c_{\mathrm{target}}, m, n_0)$, then
+If Algorithm~\ref{alg:cascade} terminates with the status
+\textnormal{\textsc{Proven}}, then
 $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
@@ -1041,8 +1041,10 @@ argument.  We guard against this as follows:
     round-off entirely.
   \item Conservative threshold: the code evaluates the corrected
     integer threshold
-    $c_{\text{target}}m^2\ell/(4n) + 1 + 2W_{\text{int}}$, together
-    with an added $10^{-9}m^2$ margin and a final
+    \[
+      c_{\text{target}}m^2\frac{\ell}{4n} + 1 + 2W_{\text{int}},
+    \]
+    together with an added $10^{-9}m^2$ margin and a final
     $(1 - 4\epsilon_{\text{mach}})$ factor before flooring.
   \item The multiplicative factor lowers the threshold slightly, but
     the additive $10^{-9}m^2$ margin is overwhelmingly larger, so the
@@ -1115,8 +1117,8 @@ $10^{-9}m^2$ safety margin.
 \subsection{Lean Formalization Status}
 
 This repository also contains a consolidated Lean 4 development in
-\texttt{lean/complete\_proof.lean}.  It formalizes a substantial portion of the
-discrete infrastructure used by the cascade: foundational
+\path{lean/complete_proof.lean}.  It formalizes a substantial portion
+of the discrete infrastructure used by the cascade: foundational
 discretization lemmas, reversal symmetry, composition counting,
 refinement mass preservation, asymmetry lemmas, and several kernel
 invariants related to $W_{\mathrm{int}}$, pruning monotonicity, and
@@ -1140,11 +1142,9 @@ Our framework is a direct extension of Cloninger \& Steinerberger
 (2017).  The key differences:
 
 \begin{enumerate}
-  \item \textbf{Dynamic correction}: We use the per-window
-    position-dependent correction (Lemma~\ref{lem:dynamic-correction})
-    instead of relying only on the coarse global bound
-    $2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.  This prunes more
-    aggressively while remaining mathematically rigorous.
+  \item \textbf{Dynamic correction}: We use a sharper per-window
+    correction rather than only a coarse global bound.  This improves
+    pruning while preserving rigor.
 
   \item \textbf{Multiscale cascade}: CS17 used $m = 50$ and refined
     from $n = 3$ through $n = 24$.  We use $m = 20$ with dyadic
@@ -1207,8 +1207,8 @@ J.\ Math.\ Anal.\ Appl.\ \textbf{372}(2), 439--447, 2010.
 
 \bibitem{White22}
 E.~White,
-\emph{New upper bounds on the supremum of autoconvolutions}, 2022.
-\href{https://arxiv.org/abs/2210.16437}{arXiv:2210.16437}.
+\emph{New upper bounds on the supremum of autoconvolutions},
+\href{https://arxiv.org/abs/2210.16437}{arXiv:2210.16437}, 2022.
 
 \bibitem{BL25}
 E.~Boyer and Z.~Li,
