@@ -1,0 +1,43 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}The Constant $C_{1a}$}{3}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Known Bounds}{3}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Proof Strategy at a High Level}{4}{subsection.1.3}%
+\contentsline {section}{\numberline {2}From Functions to Bin Averages}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}The Partition}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Bin Averages}{4}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}The Lower Bound on $\|f*f\|_\infty $}{5}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Discretization of the Simplex}{6}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The Lattice}{6}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}The Discretization Error Bound}{6}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}The Refined (Dynamic) Correction}{7}{subsection.3.3}%
+\contentsline {section}{\numberline {4}The Windowed Test Value}{8}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Definition}{8}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Efficient Computation via Prefix Sums}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Reversal Symmetry}{9}{subsection.4.3}%
+\contentsline {section}{\numberline {5}Pruning Strategies}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Asymmetry Pruning}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Canonical Symmetry Exploitation}{10}{subsection.5.2}%
+\contentsline {section}{\numberline {6}The Multiscale Cascade}{11}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Overview}{11}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Dyadic Splitting (Refinement)}{12}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Energy Cap}{12}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Cascade Soundness}{13}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Canonical Handling Across Levels}{13}{subsection.6.5}%
+\contentsline {subsection}{\numberline {6.6}Fused Generate-and-Prune Kernel}{13}{subsection.6.6}%
+\contentsline {section}{\numberline {7}The Complete Proof}{14}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Algorithm}{14}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Main Theorem}{14}{subsection.7.2}%
+\contentsline {section}{\numberline {8}Correctness Invariants}{15}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Invariant 1: Complete Enumeration}{15}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Invariant 2: All Windows Checked}{15}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Invariant 3: Conservative Arithmetic}{15}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}Invariant 4: Refinement Completeness}{16}{subsection.8.4}%
+\contentsline {section}{\numberline {9}Computational Verification}{16}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Composition Generators}{16}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Test Value Computation}{16}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Pruning Correctness}{16}{subsection.9.3}%
+\contentsline {subsection}{\numberline {9.4}MATLAB Baseline Comparison}{17}{subsection.9.4}%
+\contentsline {subsection}{\numberline {9.5}Lean Formalization Status}{17}{subsection.9.5}%
+\contentsline {section}{\numberline {10}Discussion}{17}{section.10}%
+\contentsline {subsection}{\numberline {10.1}Relationship to the Original CS17 Proof}{17}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Limitations}{17}{subsection.10.2}%
