@@ -368,76 +368,63 @@ $\tfrac{1}{m}$, the windowed test value changes by a bounded amount.
 
 \begin{lemma}[Discretization Error --- Lemma~3 of CS17]
 \label{lem:disc-error}
-For any $a \in A_n$ and its nearest lattice point $b \in B_{n,m}$:
+For any admissible window $(\ell,k)$, any $a \in A_n$, and any lattice
+approximation $b \in B_{n,m}$ with $\|a-b\|_\infty \le \tfrac{1}{m}$,
 \[
-  \tv(a) \;\ge\; \tv(b) - \frac{2}{m} - \frac{1}{m^2},
+  W_{\ell,k}(a)
+  \;\ge\;
+  W_{\ell,k}(b)
+  \;-\;
+  \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right),
 \]
-where $\tv(\cdot)$ denotes the maximum windowed test value from
-Lemma~\ref{lem:bin-reduction}.  Equivalently,
+where
 \[
-  C_{1a} \;\ge\; b_{n,m} - \frac{2}{m} - \frac{1}{m^2},
+  W_{\ell,k}(x)
+  \;=\;
+  \frac{1}{4n\ell}
+  \sum_{\substack{0 \le i,j \le d-1 \\ k \le i+j \le k+\ell-2}}
+  x_i x_j.
 \]
-where $b_{n,m} = \min_{b \in B_{n,m}} \tv(b)$.
+Consequently,
+\[
+  \tv(a)
+  \;\ge\;
+  \tv(b)
+  \;-\;
+  2n\left(\frac{2}{m} + \frac{1}{m^2}\right).
+\]
 \end{lemma}
 
-\begin{proof}
-Write $a = b + \varepsilon$ where $\|\varepsilon\|_\infty \le
-\tfrac{1}{m}$ as vectors of bin averages.  Since $\tv$ is a quadratic
-function of its argument (a maximum of quadratic forms), we can bound
-the perturbation algebraically.
-
-For any window $(\ell, k)$, the windowed sum
-$W_{\ell,k}(a) = \tfrac{1}{4n\ell}\sum_{k \le i+j \le k+\ell-2} a_i a_j$
-expands as:
+\begin{proof}[Proof sketch]
+This is the corrected CS17 discretization bound.  For a fixed window,
+the perturbation $a=b+\varepsilon$ contributes two error terms: a cross
+term of size $\tfrac{4n}{\ell}\cdot \tfrac{2}{m}\,W$, where $W \le 1$
+is the total contributing mass in that window, and a quadratic term of
+size $\tfrac{4n}{\ell}\cdot \tfrac{1}{m^2}$.  Summing them yields the
+per-window correction
 \[
-  W_{\ell,k}(b + \varepsilon) = W_{\ell,k}(b)
-    + \underbrace{\frac{1}{4n\ell}\sum (b_i \varepsilon_j + \varepsilon_i b_j)}_{\text{cross terms}}
-    + \underbrace{\frac{1}{4n\ell}\sum \varepsilon_i \varepsilon_j}_{\text{error-squared}}.
+  \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right).
 \]
-
-\noindent\textbf{Cross terms.}  For each $j$, the coefficient of
-$\varepsilon_j$ is $\tfrac{2}{4n\ell}\sum_{\text{valid }i} b_i \le
-\tfrac{2}{4n\ell} \cdot 4n = \tfrac{2}{\ell}$ (since $\sum b_i = 4n$
-and each $b_i \ge 0$).  Summing over at most $d$ values of $j$ with
-$|\varepsilon_j| \le 1/m$, the total cross-term perturbation per
-window is at most $\tfrac{2}{m}$ in absolute value.  (This bound is
-conservative; it holds uniformly over all windows.)
-
-\medskip
-\noindent\textbf{Error-squared term.}
-$\bigl|\tfrac{1}{4n\ell}\sum \varepsilon_i \varepsilon_j\bigr| \le
-\tfrac{1}{4n\ell} \cdot (\sum |\varepsilon_i|)^2$.  Since $\sum
-|\varepsilon_i| \le d / m = 2n/m$ and $4n\ell \ge 8n$, this is at
-most $\tfrac{(2n/m)^2}{8n} = \tfrac{n}{2m^2}$.
-
-\medskip
-\noindent Combining: $W_{\ell,k}(a) \ge W_{\ell,k}(b) - 2/m -
-n/(2m^2)$ for every window.  Taking the max over windows:
-$\tv(a) \ge \tv(b) - 2/m - n/(2m^2)$.
-
-The stated bound $2/m + 1/m^2$ is the weakest case; it holds
-because $n/(2m^2) \le 1/m^2$ when $n \le 2$, and the cascade
-always begins at $n = 2$ ($d = 4$ bins).  At finer resolutions
-($n > 2$), the cascade does not re-invoke the uniform correction
---- it uses the dynamic per-window threshold of
-Lemma~\ref{lem:dynamic-correction} instead, which accounts for the
-actual contributing mass and does not suffer from this looseness.
-Thus the uniform bound $2/m + 1/m^2$ is applied only at the
-initial resolution where $n \le 2$, and is tight there.
+Since $\ell \ge 2$, we have $\tfrac{4n}{\ell} \le 2n$, which gives the
+stated global bound for $\tv$.
 \end{proof}
 
 \begin{remark}[The correction term in practice]
-The correction $\tfrac{2}{m} + \tfrac{1}{m^2}$ is the ``price of
-discretization.''  At $m = 20$, it equals $0.1025$; at $m = 50$, it
-equals $0.0404$.  Larger $m$ gives a tighter bound but more lattice
-points to check --- a tension that drives much of the algorithm design.
+The raw CS17 correction is $\tfrac{2}{m} + \tfrac{1}{m^2}$, but the
+global level-$n$ correction is
+$2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.  At the starting level
+$n=2$ and $m=20$, this is $0.41$.  In the current codebase, this
+global quantity is used only for coarse caps and reporting; the actual
+pruning kernel uses the sharper window-dependent threshold described
+next.
 \end{remark}
 
 \subsection{The Refined (Dynamic) Correction}
 
-The uniform bound of $2/m$ on the cross-term perturbation is
-pessimistic: it assumes every bin contributes to every window.  A
-tighter, position-dependent bound exploits the fact that narrow or
+The global correction bound from Lemma~\ref{lem:disc-error} is
+pessimistic: it assumes the worst-case window length and replaces the
+actual contributing mass by its trivial upper bound.  A tighter,
+position-dependent bound exploits the fact that narrow or
 edge-positioned windows involve fewer bins.
 
 \begin{lemma}[Dynamic Correction --- Equation~(1) of CS17]
@@ -449,40 +436,44 @@ integer mass in contributing bins, where $\mathcal{B}(k,\ell) = \{i :
 \emph{window-specific effective threshold} is:
 \[
   T_{\ell,k} \;=\; c_{\mathrm{target}}
-    + \frac{1 + 2\, W_{\mathrm{int}}}{m^2}
+    + \frac{4n}{\ell}\cdot \frac{1 + 2\, W_{\mathrm{int}}}{m^2}
 \]
-rather than the uniform
-$T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
+rather than the coarse global threshold
+$c_{\mathrm{target}} + 2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.
 \end{lemma}
 
 \begin{proof}
-For the window at $(\ell, k)$, the cross-term perturbation is bounded
-by $\tfrac{2}{4n\ell} \cdot \tfrac{1}{m} \sum_{i \in \mathcal{B}}
-b_i = \tfrac{2W}{4n\ell m}$ where $W = W_{\text{int}}/m$.  In integer
-coordinates (multiplying the test-value inequality through by
-$4n\ell\, m^2$), the windowed sum $\sum c_i c_j$ is compared against:
+Let $\mathrm{ws}$ be the integer window sum of the autoconvolution of a
+composition $c$ with $\sum_i c_i = m$.  Since the implementation uses
+the rescaling $a_i = \tfrac{4n}{m}c_i$, the corresponding test value is
+\[
+  W_{\ell,k}(a) \;=\; \frac{4n}{m^2\ell}\,\mathrm{ws}.
+\]
+Therefore the corrected dynamic pruning condition is equivalent to
 \[
   \text{int\_thresh}
   \;=\;
   \bigl\lfloor
-    \bigl(c_{\mathrm{target}} \cdot m^2 + 1
-      + 2\,W_{\text{int}}\bigr)
-    \cdot \frac{\ell}{4n}
-    \cdot (1 - 4\epsilon_{\mathrm{mach}})
+    \Bigl(
+      c_{\mathrm{target}} \cdot m^2 \cdot \frac{\ell}{4n}
+      + 1 + 2\,W_{\text{int}} + 10^{-9}m^2
+    \Bigr)
+    (1 - 4\epsilon_{\mathrm{mach}})
   \bigr\rfloor,
 \]
-where the $(1 - 4\epsilon_{\mathrm{mach}})$ factor guards against
-floating-point rounding, and the $+1$ term provides an additional
-safety margin.  Both make the threshold conservative (the code may fail
-to prune a borderline case, but it will never falsely prune).
+which is the corrected form now used in
+\texttt{run\_cascade.py}.  The
+additive $10^{-9}m^2$ term raises the threshold, while the factor
+$(1 - 4\epsilon_{\mathrm{mach}})$ lowers it slightly before flooring;
+the additive margin dominates, so the net effect is conservative.
 \end{proof}
 
 \begin{remark}[Why dynamic is better]
-The uniform correction uses $W_{\text{int}} = S = 4nm$ (the total
-mass).  The dynamic correction uses the actual mass in contributing
-bins, which can be much smaller for narrow windows near the edges of
-the convolution domain.  This makes the effective threshold lower
-(easier to exceed), allowing more configurations to be pruned.
+The dynamic correction keeps track of the actual contributing mass
+$W_{\text{int}}$ and retains the favorable factor $\tfrac{4n}{\ell}$.
+Long windows and edge windows therefore carry smaller corrections than
+the worst-case global bound, which is why the cascade can prune far
+more aggressively than a uniform-threshold search.
 \end{remark}
 
 % ======================================================================
@@ -515,6 +506,17 @@ The \emph{test value} is
 In words: compute the autoconvolution, slide a window of each possible
 width $\ell$ across it, sum the $\ell - 1$ consecutive entries in each
 window position, normalize by $4n\ell$, and take the maximum.
+
+\begin{remark}[Integer implementation coordinates]
+The code stores compositions
+$c=(c_0,\ldots,c_{d-1}) \in \N^d$ with $\sum_i c_i = m$ and recovers
+the bin-average vector by
+\[
+  a_i \;=\; \frac{4n}{m}\,c_i.
+\]
+All pruning formulas below are stated in these implementation
+coordinates.
+\end{remark}
 
 \subsection{Efficient Computation via Prefix Sums}
 
@@ -653,7 +655,7 @@ For $c_{\mathrm{target}} = 1.4$: $p^* \approx 0.8367$.
 One might expect a safety margin to account for the discrepancy between
 discrete and continuous left-mass fractions.  However, our discrete
 compositions represent piecewise-constant step functions, for which the
-left-half mass $L = \sum_{i < n} c_i / S$ is \emph{exact} --- no
+left-half mass $L = \sum_{i < n} c_i / m$ is \emph{exact} --- no
 approximation is involved.  Moreover, the midpoint $x = 0$ always
 falls on a bin boundary, and the left-mass fraction is preserved
 exactly under dyadic refinement (child bins for the left half sum to
@@ -664,93 +666,17 @@ at the exact threshold $p^*$.
 \begin{remark}[Important subtlety]
 The asymmetry bound is a \emph{direct} $L^\infty$ bound on $f * f$.
 It does \emph{not} go through the discretization framework of
-Lemma~\ref{lem:disc-error}, so we compare against
-$c_{\mathrm{target}}$ itself (not $c_{\mathrm{target}} + \tfrac{2}{m}
-+ \tfrac{1}{m^2}$).
+Lemma~\ref{lem:disc-error}, so within the discrete cascade we compare
+it against $c_{\mathrm{target}}$ itself, not against a
+correction-shifted test-value threshold.
 \end{remark}
 
-\subsection{Contiguous Block-Sum Bound}
-
-\begin{theorem}[Block-Sum Bound]
-\label{thm:block-sum}
-For any contiguous block of $p$ bins $\{q, q+1, \ldots, q+p-1\}$
-with block sum $B = \sum_{i=q}^{q+p-1} c_i$ (in integer coordinates):
-\[
-  \tv(a) \;\ge\; \frac{B^2}{4n \cdot 2p \cdot m^2}.
-\]
-\end{theorem}
-
-\begin{proof}
-Consider the window of length $\ell = 2p$ starting at $k = 2q$ (in
-sum-index space).  This window captures $\ell - 1 = 2p - 1$
-consecutive autoconvolution values at indices $2q, 2q+1, \ldots,
-2(q+p-1)$.
-
-All \emph{intra-block} pairs $(i,j)$ with $q \le i,j \le q+p-1$
-satisfy $2q \le i+j \le 2(q+p-1)$, so they fall within this window.
-Their contribution is:
-\[
-  \sum_{\substack{q \le i \le q+p-1 \\ q \le j \le q+p-1}} a_i a_j
-  \;=\; \left(\sum_{i=q}^{q+p-1} a_i\right)^{\!2}
-  \;=\; \frac{B^2}{m^2}.
-\]
-Since all $a_i \ge 0$, the cross-block pairs contribute $\ge 0$, so
-the full window sum is at least $B^2/m^2$.  Normalizing:
-\[
-  \tv(a) \;\ge\; \frac{B^2/m^2}{4n \cdot 2p}
-  \;=\; \frac{B^2}{4n \cdot 2p \cdot m^2}. \qedhere
-\]
-\end{proof}
-
-\begin{remark}[Special cases]
-\leavevmode
-\begin{itemize}
-  \item $p = 1$ (single bin): bound $= c_i^2 / (8n m^2)$.  This is
-    the ``max-element'' check.
-  \item $p = n$ (half the bins): bound $=
-    (\text{left sum})^2 / (4n \cdot d \cdot m^2)$.  This connects to
-    the asymmetry argument.
-  \item Intermediate $p$ values catch configurations where mass is
-    concentrated in a middle block, evading both the max-element and
-    asymmetry checks.
-\end{itemize}
-\end{remark}
-
-\subsection{Two-Max Cross-Term Bound}
-
-When mass is spread between two bins rather than concentrated in one,
-a cross-term argument gives a stronger bound than the single-element
-check.
-
-\begin{theorem}[Two-Max Bound]
-\label{thm:two-max}
-Let $c_{p_1}$ and $c_{p_2}$ be the two largest values in $c$, with
-$p_1 \ne p_2$.  Then:
-\[
-  \tv(a) \;\ge\; \frac{2\, c_{p_1}\, c_{p_2}}{8n\, m^2}.
-\]
-\end{theorem}
-
-\begin{proof}
-The autoconvolution at index $s = p_1 + p_2$ satisfies:
-\[
-  \conv[p_1 + p_2]
-  \;=\; \sum_{i+j = p_1+p_2} a_i a_j
-  \;\ge\; a_{p_1} a_{p_2} + a_{p_2} a_{p_1}
-  \;=\; 2\, a_{p_1}\, a_{p_2}
-  \;=\; \frac{2\, c_{p_1}\, c_{p_2}}{m^2}.
-\]
-This single entry is an $\ell = 2$ window:
-\[
-  \tv(a) \;\ge\; \frac{\conv[p_1+p_2]}{4n \cdot 2}
-  \;\ge\; \frac{2\, c_{p_1}\, c_{p_2}}{8n\, m^2}. \qedhere
-\]
-\end{proof}
-
-\begin{remark}
-This dominates the single-element bound $c_{p_1}^2 / (8nm^2)$ whenever
-$2 c_{p_2} > c_{p_1}$, i.e., when mass is spread between the top two
-elements rather than concentrated in one.
+\begin{remark}[What the current implementation actually prunes by]
+Earlier drafts experimented with additional block-sum and two-peak
+heuristics.  The current CPU cascade does not rely on them.  The
+proof-critical pruning rules in the present code are asymmetry pruning,
+the corrected window-dependent dynamic threshold, reversal
+canonicalization, and the single-bin cap used during child generation.
 \end{remark}
 
 \subsection{Canonical Symmetry Exploitation}
@@ -818,8 +744,9 @@ and only the stubborn survivors need to be examined more closely.
     (e.g., $n_0 = 2$, $d_0 = 4$).
 
   \item \textbf{Prune.}  For each composition, apply asymmetry
-    pruning and compute the windowed test value.  If the test value
-    exceeds the effective threshold $T$, the composition is eliminated.
+    pruning and then scan windows using the corrected dynamic
+    threshold.  If some window certifies the target bound, the
+    composition is eliminated.
 
   \item \textbf{Refine survivors.}  Each surviving composition at
     resolution $d$ is refined to resolution $2d$ by \emph{dyadic
@@ -847,43 +774,67 @@ Indeed, many children are immediately ruled out by the single-bin
 diagonal window.  The energy cap avoids generating them in the first
 place.
 
-Recall that $a_j = c_j / m$ and the $\ell = 2$ diagonal window at
-position $2j$ gives $\tv(a) \ge a_j^2 / (8n_{\text{child}}) =
-c_j^2 / (8 n_{\text{child}} m^2)$.  We cap each child bin at:
+Recall that $a_j = \tfrac{4n_{\text{child}}}{m}c_j$ and the $\ell = 2$ diagonal window at
+position $2j$ gives
 \[
-  x_{\text{cap}} \;=\;
-  \left\lfloor m \cdot \sqrt{8 n_{\text{child}} \cdot T} \right\rfloor,
+  \tv(a) \;\ge\; d_{\text{child}}\,\frac{c_j^2}{m^2},
+  \qquad d_{\text{child}} = 2n_{\text{child}}.
 \]
-where $T = c_{\mathrm{target}} + \tfrac{2}{m} + \tfrac{1}{m^2}$.
+This yields the test-value cap
+\[
+  x_{\text{cap}}^{\mathrm{TV}}
+  \;=\;
+  \left\lfloor
+    m \sqrt{\frac{c_{\mathrm{target}} +
+      2n_{\text{child}}\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)
+      + 10^{-9}}
+    {d_{\text{child}}}}
+  \right\rfloor.
+\]
+The implementation also applies the sharper direct cap
+\[
+  x_{\text{cap}}^{\mathrm{CS}}
+  \;=\;
+  \left\lfloor
+    m \sqrt{\frac{c_{\mathrm{target}}}{d_{\text{child}}}}
+  \right\rfloor,
+\]
+and uses
+$x_{\text{cap}} = \min\!\left(x_{\text{cap}}^{\mathrm{TV}},
+x_{\text{cap}}^{\mathrm{CS}}\right)$.
 
 \begin{proposition}[Energy Cap Soundness]
-If $c_j > x_{\mathrm{cap}}$, then $\tv(a) > T$.
+If a child has some bin $c_j > x_{\mathrm{cap}}^{\mathrm{CS}}$, then
+any nonnegative function with those child-bin masses already satisfies
+$\|f*f\|_{L^\infty} > c_{\mathrm{target}}$.
 \end{proposition}
 
 \begin{proof}
-The $\ell = 2$ window at position $2j$ gives:
+Let $M_j = c_j/m$ be the mass in the $j$th child bin.  Restricting $f$
+to that single bin produces a nonnegative function $f_j$ supported on
+an interval of length $1/d_{\text{child}}$ and with total mass $M_j$.
+By the same averaging argument used for asymmetry pruning,
 \[
-  \tv(a) \;\ge\; \frac{\conv[2j]}{8 n_{\text{child}}}
-  \;\ge\; \frac{c_j^2}{8 n_{\text{child}}\, m^2}.
+  \|f*f\|_{L^\infty}
+  \;\ge\;
+  \|f_j*f_j\|_{L^\infty}
+  \;\ge\;
+  \frac{M_j^2}{1/d_{\text{child}}}
+  \;=\;
+  d_{\text{child}}\,\frac{c_j^2}{m^2}.
 \]
-With $c_j > m \sqrt{8 n_{\text{child}} T}$:
-\[
-  \frac{c_j^2}{8 n_{\text{child}}\, m^2}
-  \;>\; \frac{m^2 \cdot 8 n_{\text{child}} \cdot T}
-             {8 n_{\text{child}}\, m^2}
-  \;=\; T. \qedhere
-\]
+If
+$c_j > m \sqrt{c_{\mathrm{target}}/d_{\text{child}}}$,
+the right-hand side exceeds $c_{\mathrm{target}}$, which proves the
+claim.
 \end{proof}
 
 \begin{remark}[Tighter Cauchy--Schwarz cap]
-The implementation also applies a second, tighter cap based on a direct
-Cauchy--Schwarz bound on $\|f*f\|_\infty$ that does not go through the
-test-value discretization (analogous to how asymmetry pruning bypasses
-the correction term).  This gives $x_{\text{cap,CS}} = \lfloor m
-\sqrt{8 n_{\text{child}} \cdot c_{\text{target}}} \rfloor \le
-x_{\text{cap}}$, and the implementation uses $\min(x_{\text{cap}},
-x_{\text{cap,CS}})$.  Both caps are sound; the tighter one simply
-prunes more aggressively.
+The looser cap $x_{\text{cap}}^{\mathrm{TV}}$ mirrors the older global
+correction narrative, while the direct cap
+$x_{\text{cap}}^{\mathrm{CS}}$ is the effective one in the current
+implementation.  It is tighter and does not need any discretization
+correction term.
 \end{remark}
 
 \subsection{Cascade Soundness}
@@ -895,32 +846,20 @@ If the cascade terminates with zero survivors at some level $L_k$
 $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
-\begin{proof}
-We argue by induction on the cascade level.  At level $L_0$,
-completeness is straightforward: every canonical composition is
-enumerated, and reversal symmetry (Theorem~\ref{thm:reversal})
-accounts for the rest.
-
-For the inductive step, suppose every composition at level $k$ is
-either directly pruned or refined.  A refined composition's children
-are all generated and tested at level $k+1$; if every child is pruned,
-the parent is indirectly eliminated, since any continuous function
-close to the parent at resolution $d_k$ must be close to one of its
-children at resolution $d_{k+1}$.  (This follows because the level-$k$
-bin averages are determined by summing adjacent pairs of level-$(k+1)$
-bin averages, so the parent-child relationship is surjective onto the
-full level-$(k+1)$ lattice.)
-
-When the cascade reaches a level with zero survivors, the net property
-of the lattice (Lemma~\ref{lem:lattice-approx}) ensures that every
-continuous vector $a$ has a nearby lattice point with test value at
-least $T$, and the discretization error bound
-(Lemma~\ref{lem:disc-error}) finishes the job:
-\[
-  \|f*f\|_\infty \ge \tv(a) \ge \tv(b) - \frac{2}{m} - \frac{1}{m^2}
-  \ge T - \frac{2}{m} - \frac{1}{m^2} = c_{\mathrm{target}}.
-\]
-Since $f$ was arbitrary, $C_{1a} \ge c_{\mathrm{target}}$.
+\begin{proof}[Proof outline]
+The content of the cascade is not merely that ``no survivor remains'';
+it is that every terminal discrete configuration has acquired a
+certificate.  Concretely, each configuration is eliminated either by a
+direct asymmetry certificate or by a specific window certificate
+$(\ell,s_{\mathrm{lo}})$ satisfying the corrected dynamic threshold of
+Lemma~\ref{lem:dynamic-correction}.  Completeness of refinement and
+canonical handling guarantees that every composition at the terminal
+resolution is represented by one of these certificates.  The asymmetry
+certificates are direct $L^\infty$ lower bounds, while the window
+certificates combine with Lemma~\ref{lem:disc-error} to transfer the
+bound back to the continuous problem.  Hence, once the terminal
+survivor set is empty, every admissible profile has been ruled out
+below $c_{\mathrm{target}}$.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -943,7 +882,7 @@ Therefore at levels $\ge 1$:
 \begin{enumerate}
   \item Generate \emph{all} children of each parent (no canonical
     filter during generation).
-  \item Test each child against the threshold.
+  \item Test each child against the dynamic threshold.
   \item \emph{Canonicalize} survivors: replace each with
     $\min(C, \rev(C))$ lexicographically.
   \item \emph{Deduplicate}: remove duplicate canonical forms (children
@@ -989,26 +928,27 @@ array:
 \begin{algorithmic}[1]
 \Require $c_{\text{target}}$, grid resolution $m$, starting half-bins
   $n_0$, max levels $L_{\max}$
-\State $T \gets c_{\text{target}} + 2/m + 1/m^2$
-  \Comment{Effective threshold}
 \State $d_0 \gets 2 n_0$
-\State Generate all canonical compositions of $S = 4 n_0 m$ into
-  $d_0$ parts
+\State Generate all canonical compositions of $m$ into $d_0$ parts
+  \Comment{implementation coordinates}
 \State Apply asymmetry pruning (threshold
   $\sqrt{c_{\text{target}}/2}$)
-\State Compute test values for remaining compositions; prune those
-  with $\tv \ge T$
+\State For every remaining composition, scan all windows and prune if
+  some window exceeds the dynamic threshold from
+  Lemma~\ref{lem:dynamic-correction}
 \State $\text{survivors}_0 \gets$ unpruned compositions
 \For{$k = 1, 2, \ldots, L_{\max}$}
   \State $d_k \gets 2 d_{k-1}$; \quad
     $n_k \gets 2 n_{k-1}$
-  \State $x_{\text{cap}} \gets \lfloor m \sqrt{8 n_k \cdot T} \rfloor$
+  \State Compute the single-bin child cap
+    $x_{\text{cap}} = \min(x_{\text{cap}}^{\mathrm{TV}},
+    x_{\text{cap}}^{\mathrm{CS}})$
   \ForAll{parent $P \in \text{survivors}_{k-1}$}
     \ForAll{children $C$ of $P$ (dyadic split with energy cap)}
       \State Apply asymmetry pruning to $C$
       \If{not asymmetry-pruned}
-        \State Compute $\tv(C)$ via windowed autoconvolution
-        \If{$\tv(C) \ge T$ (using dynamic per-window threshold)}
+        \State Scan all windows of $C$ via prefix-sum autoconvolution
+        \If{some window exceeds the dynamic threshold}
           \State Prune $C$
         \Else
           \State $C$ survives; canonicalize and store
@@ -1037,21 +977,22 @@ $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
 \begin{proof}
-Fix any $f \in \mathcal{F}$ with $\int f = 1$, and let $a$ denote its
-bin averages at resolution $d_k$.  Lemma~\ref{lem:bin-reduction} gives
-$\|f*f\|_\infty \ge \tv(a)$.  Since $B_{n_k, m}$ is a $1/m$-net of
-$A_{n_k}$, there is a lattice point $b$ with $\|a - b\|_\infty \le
-1/m$, and the discretization bound (Lemma~\ref{lem:disc-error}) yields
-$\tv(a) \ge \tv(b) - 2/m - 1/m^2$.  But the cascade has pruned every
-lattice point, so $\tv(b) \ge T$.  Chaining these inequalities:
-\[
-  \|f*f\|_\infty
-  \;\ge\; \tv(a)
-  \;\ge\; \tv(b) - \frac{2}{m} - \frac{1}{m^2}
-  \;\ge\; T - \frac{2}{m} - \frac{1}{m^2}
-  \;=\; c_{\mathrm{target}}.
-\]
-Since $f$ was arbitrary, $C_{1a} \ge c_{\mathrm{target}}$.
+Combine three ingredients:
+\begin{enumerate}
+  \item the reduction from continuous functions to windowed test values
+    (Lemma~\ref{lem:bin-reduction});
+  \item the corrected discretization and dynamic-threshold bounds
+    (Lemmas~\ref{lem:disc-error} and
+    \ref{lem:dynamic-correction}); and
+  \item the cascade completeness statement summarized in
+    Theorem~\ref{thm:cascade-sound}.
+\end{enumerate}
+If Algorithm~\ref{alg:cascade} returns \textsc{Proven}, then some level
+has zero survivors, so every configuration at that terminal resolution
+has been eliminated by a valid asymmetry or window certificate.  Those
+certificates are exactly the hypotheses needed to conclude that no
+admissible $f$ can satisfy $\|f*f\|_\infty < c_{\mathrm{target}}$.
+Therefore $C_{1a} \ge c_{\mathrm{target}}$.
 \end{proof}
 
 
@@ -1070,7 +1011,7 @@ Every composition $b \in B_{n,m}$ must be either directly checked or
 shown to be covered by a checked ancestor and all its refinements.
 
 \begin{itemize}
-  \item At $L_0$: all $\binom{S + d_0 - 1}{d_0 - 1}$ compositions
+  \item At $L_0$: all $\binom{m + d_0 - 1}{d_0 - 1}$ compositions
     are enumerated (in canonical form, with reversal symmetry).
     Verified by comparing the generator output count against the
     stars-and-bars formula, and by checking completeness, uniqueness,
@@ -1098,15 +1039,15 @@ argument.  We guard against this as follows:
   \item Integer coordinates: the autoconvolution is computed in
     integer arithmetic ($c_i c_j$ are exact integers), avoiding
     round-off entirely.
-  \item Conservative threshold: the integer threshold includes a
-    $(1 - 4\epsilon_{\text{mach}})$ safety factor, making it
-    \emph{lower} than the true mathematical threshold.  This means
-    the check $\text{ws} > \text{int\_thresh}$ is a \emph{sufficient}
-    condition for pruning, never a false positive.
-  \item The additional $+1 + 10^{-9} m^2$ term in the code's base
-    threshold further ensures conservatism (this term is omitted from
-    the mathematical formulas for clarity, but makes the code strictly
-    more conservative than what the formulas describe).
+  \item Conservative threshold: the code evaluates the corrected
+    integer threshold
+    $c_{\text{target}}m^2\ell/(4n) + 1 + 2W_{\text{int}}$, together
+    with an added $10^{-9}m^2$ margin and a final
+    $(1 - 4\epsilon_{\text{mach}})$ factor before flooring.
+  \item The multiplicative factor lowers the threshold slightly, but
+    the additive $10^{-9}m^2$ margin is overwhelmingly larger, so the
+    net effect remains conservative: the code may miss a borderline
+    prune, but it does not falsely prune.
 \end{itemize}
 
 \subsection{Invariant 4: Refinement Completeness}
@@ -1168,7 +1109,25 @@ multiple independent checks.
 The cascade prover's dynamic threshold formula has been verified
 algebraically equivalent to the original MATLAB code of
 Cloninger--Steinerberger, with the Python implementation being
-strictly more conservative (harder to prune) due to safety margins.
+strictly more conservative (harder to prune) due to the explicit
+$10^{-9}m^2$ safety margin.
+
+\subsection{Lean Formalization Status}
+
+This repository also contains a consolidated Lean 4 development in
+\texttt{lean/complete\_proof.lean}.  It formalizes a substantial portion of the
+discrete infrastructure used by the cascade: foundational
+discretization lemmas, reversal symmetry, composition counting,
+refinement mass preservation, asymmetry lemmas, and several kernel
+invariants related to $W_{\mathrm{int}}$, pruning monotonicity, and
+integer arithmetic.
+
+At the same time, the Lean file is not yet a completely end-to-end
+formalization of the final theorem.  In particular, the corrected
+per-window discretization bound enters there as an assumed lemma, and
+the final cascade-to-continuous reduction remains only partially
+formalized.  The TeX proof and the Lean development should therefore be
+viewed as complementary rather than identical artifacts.
 
 
 % ======================================================================
@@ -1183,8 +1142,9 @@ Our framework is a direct extension of Cloninger \& Steinerberger
 \begin{enumerate}
   \item \textbf{Dynamic correction}: We use the per-window
     position-dependent correction (Lemma~\ref{lem:dynamic-correction})
-    instead of the uniform $\tfrac{2}{m} + \tfrac{1}{m^2}$.  This
-    prunes more aggressively while remaining mathematically rigorous.
+    instead of relying only on the coarse global bound
+    $2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.  This prunes more
+    aggressively while remaining mathematically rigorous.
 
   \item \textbf{Multiscale cascade}: CS17 used $m = 50$ and refined
     from $n = 3$ through $n = 24$.  We use $m = 20$ with dyadic
