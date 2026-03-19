@@ -305,14 +305,18 @@ contributing pairs is what makes the optimization nontrivial.
 
 Having reduced the problem to minimizing over the continuous simplex
 $A_n$, we face a new obstacle: $A_n$ is uncountable.  To bring the
-problem within reach of a computer, we approximate $A_n$ by a finite
-lattice, paying a small but quantifiable price in accuracy.
+problem within reach of a computer, we renormalize to the bin-mass
+coordinates
+\[
+  \mu_j \;=\; \frac{a_j}{4n},
+  \qquad
+  \sum_{j=0}^{d-1} \mu_j = 1,
+\]
+and approximate this normalized simplex by a finite lattice.
 
 \subsection{The Lattice}
 
-To discretize $A_n$, we need a grid fine enough to approximate any
-point in the simplex, yet coarse enough to enumerate.  The natural
-choice is a lattice of spacing $1/m$.
+In these normalized coordinates, the natural grid has spacing $1/m$.
 
 \begin{definition}
 Fix a positive integer $m$ (the ``grid resolution'').  The
@@ -321,7 +325,7 @@ Fix a positive integer $m$ (the ``grid resolution'').  The
   B_{n,m} \;=\; \left\{
     b \in \left(\tfrac{1}{m}\N\right)^d
     \;\middle|\;
-    \sum_{j=0}^{d-1} b_j = 4n
+    \sum_{j=0}^{d-1} b_j = 1
   \right\},
 \]
 where each $b_j$ is a nonnegative multiple of $\tfrac{1}{m}$.
@@ -329,15 +333,18 @@ where each $b_j$ is a nonnegative multiple of $\tfrac{1}{m}$.
 
 Equivalently, writing $c_j = m \cdot b_j$, the lattice consists of
 nonnegative integer vectors $c = (c_0, \ldots, c_{d-1})$ with
-$\sum c_j = S$, where $S = 4nm$.  These are the \emph{compositions}
-of the integer $S$ into $d$ nonnegative parts.
+$\sum c_j = m$.  These are the \emph{compositions} of the integer $m$
+into $d$ nonnegative parts.
 
 \begin{remark}[Implementation convention]
-The implementation uses a rescaled convention where integer coordinates
-sum to $m$ rather than $4nm$, absorbing the factor $4n$ into the
-scale when converting to bin averages: $a_j = c_j \cdot 4n / m$.  The
-mathematics is equivalent; we use the $S = 4nm$ convention in this
-proof for consistency with the bin-average normalization.
+The implementation stores the integer composition $c$ itself.  The
+corresponding bin-average vector is
+\[
+  a_j \;=\; \frac{4n}{m}\,c_j.
+\]
+Thus the discretization lemmas are most naturally phrased in the
+normalized mass coordinates $b_j = c_j/m$, while the test-value
+formulas remain most natural in the bin-average coordinates $a_j$.
 \end{remark}
 
 The lattice is useful only if every continuous point has a nearby
@@ -346,32 +353,35 @@ minimizer.
 
 \begin{lemma}[Lattice as an Approximation --- Lemma~2 of CS17]
 \label{lem:lattice-approx}
-$B_{n,m}$ is a $\tfrac{1}{m}$-net of $A_n$ in $\ell^\infty$-norm.
-That is, for every $a \in A_n$, there exists $b \in B_{n,m}$ with
-$\|a - b\|_\infty \le \tfrac{1}{m}$.
+$B_{n,m}$ is a $\tfrac{1}{m}$-net of the normalized mass simplex.
+That is, for every $\mu \in \R_{\ge 0}^d$ with $\sum \mu_j = 1$, there
+exists $b \in B_{n,m}$ with $\|\mu - b\|_\infty \le \tfrac{1}{m}$.
 \end{lemma}
 
 \begin{proof}[Proof sketch]
-Given $a \in A_n$, round each coordinate to the nearest multiple of
+Given $\mu$ with $\sum \mu_j = 1$, round each coordinate to the
+nearest multiple of
 $\tfrac{1}{m}$, adjusting to maintain the sum constraint.
 Specifically, use a greedy rounding: process coordinates left to
-right, maintaining a running deficit $t_i = \sum_{j<i}(b_j - a_j)$.
+right, maintaining a running deficit $t_i = \sum_{j<i}(b_j - \mu_j)$.
 Round down first, then alternate to keep $-\tfrac{1}{m} < t_{i+1} \le
 0$.  The last coordinate is set to enforce the exact sum.  Each
-coordinate satisfies $|a_j - b_j| \le \tfrac{1}{m}$.
+coordinate satisfies $|\mu_j - b_j| \le \tfrac{1}{m}$.
 \end{proof}
 
 \subsection{The Discretization Error Bound}
 
-Since we approximate $a$ by $b$ with per-coordinate error at most
+Since we approximate the normalized mass vector $\mu$ by $b$ with
+per-coordinate error at most
 $\tfrac{1}{m}$, the windowed test value changes by a bounded amount.
 
-\begin{lemma}[Discretization Error --- Lemma~3 of CS17]
+\begin{lemma}[Discretization Error --- corrected Lemma~3 of CS17]
 \label{lem:disc-error}
-For any admissible window $(\ell,k)$, any $a \in A_n$, and any lattice
-approximation $b \in B_{n,m}$ with $\|a-b\|_\infty \le \tfrac{1}{m}$,
+Let $a \in A_n$, write $\mu_i = a_i/(4n)$, and let
+$b \in B_{n,m}$ satisfy $\|\mu-b\|_\infty \le \tfrac{1}{m}$.
+Then, for any admissible window $(\ell,k)$,
 \[
-  W_{\ell,k}(a)
+  W_{\ell,k}(\mu)
   \;\ge\;
   W_{\ell,k}(b)
   \;-\;
@@ -381,15 +391,16 @@ where
 \[
   W_{\ell,k}(x)
   \;=\;
-  \frac{1}{4n\ell}
+  \frac{4n}{\ell}
   \sum_{\substack{0 \le i,j \le d-1 \\ k \le i+j \le k+\ell-2}}
   x_i x_j.
 \]
-Consequently,
+Consequently, if $\tilde b_i = 4n\,b_i$ is the associated bin-average
+vector, then
 \[
   \tv(a)
   \;\ge\;
-  \tv(b)
+  \tv(\tilde b)
   \;-\;
   2n\left(\frac{2}{m} + \frac{1}{m^2}\right).
 \]
@@ -397,10 +408,11 @@ Consequently,
 
 \begin{proof}[Proof sketch]
 This is the corrected CS17 discretization bound.  For a fixed window,
-the perturbation $a=b+\varepsilon$ contributes two error terms: a cross
-term of size $\tfrac{4n}{\ell}\cdot \tfrac{2}{m}\,W$, where $W \le 1$
-is the total contributing mass in that window, and a quadratic term of
-size $\tfrac{4n}{\ell}\cdot \tfrac{1}{m^2}$.  Summing them yields the
+write $\mu=b+\varepsilon$.  The perturbation contributes two error
+terms: a cross term of size
+$\tfrac{4n}{\ell}\cdot \tfrac{2}{m}\,W$, where $W \le 1$ is the total
+contributing mass in that window, and a quadratic term of size
+$\tfrac{4n}{\ell}\cdot \tfrac{1}{m^2}$.  Summing them yields the
 per-window correction
 \[
   \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right).
@@ -590,16 +602,18 @@ window position.  Since the multiset of window sums is identical at
 each width, $\tv(a) = \tv(a')$.
 \end{proof}
 
-\begin{corollary}[Canonical Symmetry]
-It suffices to check only \emph{canonical} compositions $b$ satisfying
-$b \le \rev(b)$ lexicographically.  This halves the search space (up
+\begin{corollary}[Canonical Filter]
+It suffices to check only \emph{canonical} integer compositions $c$
+with $c \le \rev(c)$ lexicographically.  The associated bin-average
+vectors have the same test value, so this halves the search space (up
 to palindromes).
 \end{corollary}
 
-Even after exploiting reversal symmetry, the number of lattice points
-to check --- roughly $\binom{S+d-1}{d-1}/2$ --- grows rapidly with $d$
-and $m$.  To keep the computation tractable, we need ways to rule out
-large swathes of the simplex without computing the full test value.
+Even after exploiting reversal symmetry, the number of implementation
+states to check --- roughly $\binom{m+d-1}{d-1}/2$ --- grows rapidly
+with $d$ and $m$.  To keep the computation tractable, we need ways to
+rule out large swathes of the simplex without computing the full test
+value.
 
 
 % ======================================================================
@@ -651,50 +665,69 @@ ruled out.  The threshold left-mass fraction is:
 For $c_{\mathrm{target}} = 1.4$: $p^* \approx 0.8367$.
 \end{corollary}
 
-\begin{remark}[No discrete margin needed]
-One might expect a safety margin to account for the discrepancy between
-discrete and continuous left-mass fractions.  However, our discrete
-compositions represent piecewise-constant step functions, for which the
-left-half mass $L = \sum_{i < n} c_i / m$ is \emph{exact} --- no
-approximation is involved.  Moreover, the midpoint $x = 0$ always
-falls on a bin boundary, and the left-mass fraction is preserved
-exactly under dyadic refinement (child bins for the left half sum to
-the parent's left bins).  Therefore no margin is necessary: we prune
-at the exact threshold $p^*$.
+\begin{remark}[Exactness for step functions and under refinement]
+For a step function already represented by a composition
+$c = (c_0,\ldots,c_{d-1})$ with $\sum c_i = m$, the left-half mass is
+\[
+  L \;=\; \sum_{i < n} \frac{c_i}{m},
+\]
+because the midpoint $x = 0$ lies exactly on a bin boundary.  This
+quantity is also preserved exactly under dyadic refinement: the left
+child bins sum to the left parent bins.  Thus asymmetry pruning is an
+exact statement for discrete step functions inside the cascade.
 \end{remark}
 
-\begin{remark}[Important subtlety]
+\begin{remark}[Continuous-transfer caveat]
 The asymmetry bound is a \emph{direct} $L^\infty$ bound on $f * f$.
 It does \emph{not} go through the discretization framework of
-Lemma~\ref{lem:disc-error}, so within the discrete cascade we compare
-it against $c_{\mathrm{target}}$ itself, not against a
-correction-shifted test-value threshold.
+Lemma~\ref{lem:disc-error}.  Accordingly, one must distinguish two
+uses of asymmetry:
+\begin{itemize}
+  \item for an \emph{exact step function} represented by a composition
+    $c$, the criterion is immediate and needs no correction term;
+  \item for the \emph{continuous-to-discrete transfer}, one must
+    analyze how the chosen discretization records left- and right-half
+    masses.
+\end{itemize}
+In the cumulative-floor discretization formalized in Lean, the
+discrete left mass records $\lfloor mL \rfloor/m$, so a left-heavy
+certificate transfers directly to the underlying continuous profile,
+whereas the symmetric right-heavy condition needs an additional lemma
+or a safety margin.  The final theorem below is therefore phrased
+conditionally on whatever asymmetry-transfer principle one adopts.
 \end{remark}
 
 \begin{remark}[What the current implementation actually prunes by]
 Earlier drafts experimented with additional block-sum and two-peak
 heuristics.  The current CPU cascade does not rely on them.  The
-proof-critical pruning rules in the present code are asymmetry pruning,
-the corrected window-dependent dynamic threshold, reversal
-canonicalization, and the single-bin cap used during child generation.
+present code prunes by asymmetry, the corrected window-dependent
+dynamic threshold, reversal canonicalization, and the single-bin cap
+used during child generation.  In the proof narrative below, the
+window certificates and the single-bin bound are the unconditional
+continuous certificates; asymmetry is best viewed as an exact discrete
+pruning rule together with a separate transfer question.
 \end{remark}
 
 \subsection{Canonical Symmetry Exploitation}
 
-By Theorem~\ref{thm:reversal}, $\tv(b) = \tv(\rev(b))$ for every
-lattice point $b$.  This motivates the following notion of canonicality.
+If $c$ is an implementation-space composition and
+$\tilde c_i = \tfrac{4n}{m}c_i$ is its associated bin-average vector,
+then Theorem~\ref{thm:reversal} gives
+$\tv(\tilde c) = \tv(\widetilde{\rev(c)})$.  This motivates the
+following notion of canonicality.
 
 \begin{definition}
-A composition $b$ is \emph{canonical} if $b \le \rev(b)$
-lexicographically.  That is, comparing $b_0$ with $b_{d-1}$, then
-$b_1$ with $b_{d-2}$, etc., $b$ comes first (or they are equal, i.e.,
-$b$ is a palindrome).
+A composition $c$ is \emph{canonical} if $c \le \rev(c)$
+lexicographically.  That is, comparing $c_0$ with $c_{d-1}$, then
+$c_1$ with $c_{d-2}$, etc., $c$ comes first (or they are equal, i.e.,
+$c$ is a palindrome).
 \end{definition}
 
 \begin{proposition}[Canonical Count]
 \label{prop:canon-count}
-The number of canonical compositions is $\tfrac{N + P}{2}$, where
-$N = \binom{S+d-1}{d-1}$ is the total count and $P$ is the number of
+For integer compositions of a fixed total mass $M$ into $d$ parts, the
+number of canonical compositions is $\tfrac{N + P}{2}$, where
+$N = \binom{M+d-1}{d-1}$ is the total count and $P$ is the number of
 palindromes.
 \end{proposition}
 
@@ -708,20 +741,21 @@ $N = P + 2C$, so the canonical count is $P + C = (N+P)/2$.
 \end{proof}
 
 \begin{remark}[Loop-bound tightening for $d = 4$]
-For $b = (c_0, c_1, c_2, c_3)$ with $c_3 = S - c_0 - c_1 - c_2$,
+For $b = (c_0, c_1, c_2, c_3)$ with total mass $M$ and
+$c_3 = M - c_0 - c_1 - c_2$,
 canonicality ($b \le \rev(b)$) requires $c_0 \le c_3$, giving three
 loop bounds:
 \begin{itemize}
-  \item $c_0 \le \lfloor S/2 \rfloor$ \quad (if $c_0 > S/2$ then
+  \item $c_0 \le \lfloor M/2 \rfloor$ \quad (if $c_0 > M/2$ then
     $c_3 < c_0$).
-  \item $c_1 \le S - 2c_0$ \quad (need $c_2 \ge 0$ with
-    $c_1 + c_2 \le S - 2c_0$).
-  \item $c_2 \le S - 2c_0 - c_1$ \quad (ensures $c_3 \ge c_0$).
+  \item $c_1 \le M - 2c_0$ \quad (need $c_2 \ge 0$ with
+    $c_1 + c_2 \le M - 2c_0$).
+  \item $c_2 \le M - 2c_0 - c_1$ \quad (ensures $c_3 \ge c_0$).
 \end{itemize}
 Plus a palindrome filter: when $c_0 = c_3$, require $c_1 \le c_2$.
 
-For $d = 6$, analogous bounds apply: $c_0 \le \lfloor S/2 \rfloor$,
-$c_4 \le S - c_0 - c_1 - c_2 - c_3 - c_0$, with equality checks for
+For $d = 6$, analogous bounds apply: $c_0 \le \lfloor M/2 \rfloor$,
+$c_4 \le M - c_0 - c_1 - c_2 - c_3 - c_0$, with equality checks for
 the inner pairs when outer pairs tie.
 \end{remark}
 
@@ -740,7 +774,7 @@ and only the stubborn survivors need to be examined more closely.
 
 \begin{enumerate}[label=\textbf{Step \arabic*:}]
   \item \textbf{Start coarse.}  At level $L_0$, enumerate all
-    canonical compositions in $B_{n_0, m}$ with $d_0 = 2n_0$ bins
+    canonical compositions of $m$ into $d_0 = 2n_0$ parts
     (e.g., $n_0 = 2$, $d_0 = 4$).
 
   \item \textbf{Prune.}  For each composition, apply asymmetry
@@ -837,29 +871,32 @@ implementation.  It is tighter and does not need any discretization
 correction term.
 \end{remark}
 
-\subsection{Cascade Soundness}
+\subsection{Cascade Coverage}
 
-\begin{theorem}[Cascade Soundness]
+\begin{theorem}[Terminal-Grid Coverage]
 \label{thm:cascade-sound}
 If the cascade terminates with zero survivors at some level $L_k$
-(with resolution $d_k = d_0 \cdot 2^k$), then
-$C_{1a} \ge c_{\mathrm{target}}$.
+(with resolution $d_k = d_0 \cdot 2^k$), then every composition at
+that terminal resolution has some ancestor on its refinement path that
+is covered by at least one valid certificate: asymmetry pruning, the
+single-bin cap, or a specific window certificate satisfying the
+corrected dynamic threshold of
+Lemma~\ref{lem:dynamic-correction}.
 \end{theorem}
 
 \begin{proof}[Proof outline]
 The content of the cascade is not merely that ``no survivor remains'';
 it is that every terminal discrete configuration has acquired a
-certificate.  Concretely, each configuration is eliminated either by a
-direct asymmetry certificate or by a specific window certificate
-$(\ell,s_{\mathrm{lo}})$ satisfying the corrected dynamic threshold of
-Lemma~\ref{lem:dynamic-correction}.  Completeness of refinement and
-canonical handling guarantees that every composition at the terminal
-resolution is represented by one of these certificates.  The asymmetry
-certificates are direct $L^\infty$ lower bounds, while the window
-certificates combine with Lemma~\ref{lem:disc-error} to transfer the
-bound back to the continuous problem.  Hence, once the terminal
-survivor set is empty, every admissible profile has been ruled out
-below $c_{\mathrm{target}}$.
+certificate.  Level $L_0$ is complete up to reversal symmetry, and the
+refinement step generates every child of every surviving parent except
+those excluded by the single-bin cap, which are already covered by the
+direct bound from Section~\ref{subsec:energy-cap}.  Canonicalize-after-
+test handling ensures that reversal symmetry does not lose any child-
+level configuration.  Thus each prune event cuts off an entire
+subtree of descendants.  Therefore, if the survivor set is empty at
+level $L_k$, every terminal composition has some ancestor that was
+eliminated either by asymmetry, by the single-bin cap, or by a
+concrete window $(\ell,s_{\mathrm{lo}})$ whose threshold test passes.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -923,7 +960,7 @@ array:
 \subsection{Algorithm}
 
 \begin{algorithm}[H]
-\caption{Prove $C_{1a} \ge c_{\text{target}}$}
+\caption{Cascade Search For Terminal Coverage}
 \label{alg:cascade}
 \begin{algorithmic}[1]
 \Require $c_{\text{target}}$, grid resolution $m$, starting half-bins
@@ -959,7 +996,7 @@ array:
   \State Deduplicate survivors (canonicalize $\to$ sort $\to$ scan)
   \State $\text{survivors}_k \gets$ deduplicated survivors
   \If{$|\text{survivors}_k| = 0$}
-    \State \Return \textsc{Proven}: $C_{1a} \ge c_{\text{target}}$
+    \State \Return \textsc{Zero-Survivors}
   \EndIf
 \EndFor
 \State \Return \textsc{Inconclusive}:
@@ -969,10 +1006,12 @@ array:
 
 \subsection{Main Theorem}
 
-\begin{theorem}[Main Result]
+\begin{theorem}[Conditional Main Result]
 \label{thm:main}
 If Algorithm~\ref{alg:cascade} terminates with the status
-\textnormal{\textsc{Proven}}, then
+\textnormal{\textsc{Zero-Survivors}}, and if every composition
+eliminated solely by asymmetry pruning is equipped with a valid
+continuous transfer argument at the relevant level, then
 $C_{1a} \ge c_{\mathrm{target}}$.
 \end{theorem}
 
@@ -987,11 +1026,15 @@ Combine three ingredients:
   \item the cascade completeness statement summarized in
     Theorem~\ref{thm:cascade-sound}.
 \end{enumerate}
-If Algorithm~\ref{alg:cascade} returns \textsc{Proven}, then some level
-has zero survivors, so every configuration at that terminal resolution
-has been eliminated by a valid asymmetry or window certificate.  Those
-certificates are exactly the hypotheses needed to conclude that no
-admissible $f$ can satisfy $\|f*f\|_\infty < c_{\mathrm{target}}$.
+If Algorithm~\ref{alg:cascade} returns \textsc{Zero-Survivors}, then
+some level has zero survivors, so every configuration at that terminal
+resolution has some ancestor carrying one of the certificates listed
+in Theorem~\ref{thm:cascade-sound}.  The single-bin cap is a direct
+$L^\infty$ lower bound, and the window certificates combine with
+Lemmas~\ref{lem:disc-error} and \ref{lem:dynamic-correction} to
+transfer the bound to the continuous problem.  By the additional
+assumption in the statement, the remaining asymmetry eliminations also
+transfer.
 Therefore $C_{1a} \ge c_{\mathrm{target}}$.
 \end{proof}
 
@@ -1007,7 +1050,8 @@ realizes the specification.  Four invariants pin down exactly what
 
 \subsection{Invariant 1: Complete Enumeration}
 
-Every composition $b \in B_{n,m}$ must be either directly checked or
+Every implementation-space composition
+$c \in \N^d$ with $\sum_i c_i = m$ must be either directly checked or
 shown to be covered by a checked ancestor and all its refinements.
 
 \begin{itemize}
@@ -1098,12 +1142,13 @@ multiple independent checks.
 \subsection{Pruning Correctness}
 
 \begin{itemize}
-  \item No over-pruning: zero compositions pruned whose true test
+  \item Window pruning: zero compositions are pruned whose true test
     value is below the dynamic threshold.
-  \item No missed prunes: zero compositions not pruned whose true
-    test value exceeds the dynamic threshold.
-  \item Asymmetry filter verified to be exactly symmetric under
-    reversal.
+  \item Window pruning: zero compositions fail to be pruned when their
+    true test value exceeds the dynamic threshold.
+  \item Asymmetry filter: exhaustive step-function checks at coarse
+    levels confirm the expected lower bound on the exact discretized
+    profiles, and the filter is exactly symmetric under reversal.
 \end{itemize}
 
 \subsection{MATLAB Baseline Comparison}
@@ -1120,16 +1165,17 @@ This repository also contains a consolidated Lean 4 development in
 \path{lean/complete_proof.lean}.  It formalizes a substantial portion
 of the discrete infrastructure used by the cascade: foundational
 discretization lemmas, reversal symmetry, composition counting,
-refinement mass preservation, asymmetry lemmas, and several kernel
+refinement mass preservation, the basic asymmetry bound, and several kernel
 invariants related to $W_{\mathrm{int}}$, pruning monotonicity, and
 integer arithmetic.
 
 At the same time, the Lean file is not yet a completely end-to-end
 formalization of the final theorem.  In particular, the corrected
-per-window discretization bound enters there as an assumed lemma, and
-the final cascade-to-continuous reduction remains only partially
-formalized.  The TeX proof and the Lean development should therefore be
-viewed as complementary rather than identical artifacts.
+per-window discretization bound enters there as an assumed lemma, the
+fully symmetric no-margin asymmetry transfer is not yet formalized,
+and the final cascade-to-continuous reduction remains only partially
+formalized.  The TeX proof and the Lean development should therefore
+be viewed as complementary rather than identical artifacts.
 
 
 % ======================================================================
@@ -1175,6 +1221,12 @@ Our framework is a direct extension of Cloninger \& Steinerberger
     mitigates this, but very aggressive targets
     ($c_{\mathrm{target}}$ close to $C_{1a}$) will require more
     cascade levels and higher computational cost.
+
+  \item As written, the end-to-end theorem isolates one remaining
+    transfer issue: the current implementation's symmetric no-margin
+    asymmetry rule is exact for step functions, but an explicit
+    continuous transfer lemma is still needed if one wants that rule
+    itself to serve as an unconditional terminal certificate.
 \end{itemize}
 
 
