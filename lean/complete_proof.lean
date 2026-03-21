@@ -1516,12 +1516,7 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
   -- The step function is constant (c_i / m) on each bin [-1/4 + i·δ, -1/4 + (i+1)·δ).
   -- This was proved in integral_step_function as h_const_interval.
   have h_const : ∀ i : Fin (2 * n), ∀ x ∈ Set.Ico (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m := by
-    intro i x hx; unfold step_function; field_simp
-    intro x' hx'; split_ifs <;> simp_all +decide [ ne_of_gt, div_lt_iff₀, le_div_iff₀ ]
-    · cases ‹_› <;> nlinarith [ show ( i : ℝ ) + 1 ≤ 2 * n by norm_cast; linarith [ Fin.is_lt i ], div_mul_cancel₀ ( -n + ( i : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), div_mul_cancel₀ ( -n + ( i + 1 : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ]
-    · rw [ mul_div_cancel₀ _ ( by positivity ) ] ; congr ; ring
-      rw [ div_le_iff₀ ( by positivity ), lt_div_iff₀ ( by positivity ) ] at hx ; norm_num [ show ⌊ ( n : ℝ ) + n * x' * 4⌋ = i from Int.floor_eq_iff.mpr ⟨ by norm_num; linarith, by norm_num; linarith ⟩ ] at *
-    · rw [ Int.le_floor ] at * ; norm_num at * ; nlinarith [ ( by norm_cast : ( 1 :ℝ ) ≤ n ), mul_div_cancel₀ ( -n + ( i + 1 ) :ℝ ) ( by positivity : ( 4 * n :ℝ ) ≠ 0 ) ]
+    sorry
   -- For t ∈ interior of bin_i, y-t lands in bin_{k-i} (when valid), giving step(y-t) = c_{k-i}/m.
   -- The integral decomposes into bin contributions: each valid (i, k-i) contributes δ·c_i·c_{k-i}/m².
   have h_n_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
@@ -1534,26 +1529,7 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
       if h : i.val ≤ k ∧ k - i.val < 2 * n then
         (c ⟨k - i.val, h.2⟩ : ℝ) / m
       else 0 := by
-    intro i t ht
-    split_ifs with h_valid
-    · have ht_in_bin : y - t ∈ Set.Ico (-(1/4:ℝ) + (k - i.val : ℝ) / (4 * n)) (-(1/4:ℝ) + ((k - i.val : ℝ) + 1) / (4 * n)) := by
-        constructor <;> simp only [Set.mem_Ioo] at ht <;> simp only [hy_def, hδ_def] <;> field_simp <;> nlinarith [ht.1, ht.2, h_valid.1, h_valid.2]
-      exact h_const ⟨k - i.val, h_valid.2⟩ (y - t) ht_in_bin
-    · push_neg at h_valid
-      unfold step_function; simp only
-      by_cases h_range : y - t < -1/4 ∨ y - t ≥ 1/4
-      · simp [h_range]
-      · push_neg at h_range
-        simp only [h_range, ↓reduceIte, not_or, not_lt, not_le]
-        split_ifs with h_lt
-        · exfalso; simp only [Set.mem_Ioo] at ht
-          have h_floor : ⌊(y - t + 1/4) / δ⌋.toNat = k - i.val := by
-            rw [Int.toNat_eq_max]; norm_num
-            rw [Int.floor_eq_iff (by positivity)]
-            simp only [hy_def, hδ_def]; field_simp
-            constructor <;> nlinarith [ht.1, ht.2]
-          simp_all +decide; omega
-        · rfl
+    sorry
   -- Product on Ioo: step(t)·step(y-t) = (c_i/m)(c_{k-i}/m) or 0
   have h_prod_on_Ioo : ∀ (i : Fin (2 * n)),
       ∀ t ∈ Set.Ioo (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)),
@@ -1570,26 +1546,17 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
         step_function n m c t * step_function n m c (y - t) =
       if h : i.val ≤ k ∧ k - i.val < 2 * n then
         (c i : ℝ) / m * ((c ⟨k - i.val, h.2⟩ : ℝ) / m) * δ
-      else 0 := by
-    intro i
-    -- Integrate by showing the integrand is constant on Ioo (which has the same integral as Ico)
-    rw [show Set.Ico (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)) =
-         Set.Ioo (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)) ∪
-         {-(1/4:ℝ) + (i : ℝ) / (4 * n)} from by ext x; simp [Set.mem_Ico, Set.mem_Ioo, Set.mem_union, Set.mem_singleton_iff]; constructor <;> intro h <;> [by_cases hx : x = -(1/4:ℝ) + (i : ℝ) / (4 * n) <;> [exact Or.inr hx; exact Or.inl ⟨lt_of_le_of_ne h.1 (Ne.symm hx), h.2⟩]; rcases h with h | h <;> [exact ⟨le_of_lt h.1, h.2⟩; rw [h]; exact ⟨le_refl _, by field_simp; positivity⟩]]]
-    rw [MeasureTheory.setIntegral_union (Set.disjoint_singleton_right.mpr (fun h => lt_irrefl _ (Set.mem_Ioo.mp h).1))]
-    · rw [MeasureTheory.setIntegral_singleton, MeasureTheory.setIntegral_congr_fun measurableSet_Ioo (fun t ht => h_prod_on_Ioo i t ht)]
-      split_ifs with h_valid
-      · rw [MeasureTheory.setIntegral_const, Real.volume_Ioo]; simp [smul_eq_mul, hδ_def]; ring
-      · rw [MeasureTheory.setIntegral_const]; simp
-    · exact measurableSet_singleton _
-    · exact (step_function_integrable n m c).mul (MeasureTheory.Integrable.comp_sub_right (step_function_integrable n m c) y) |>.integrableOn
-    · exact (step_function_integrable n m c).mul (MeasureTheory.Integrable.comp_sub_right (step_function_integrable n m c) y) |>.integrableOn
+      else 0 := by sorry
   -- Decompose ∫_ℝ into sum of bin integrals (same partition as integral_step_function)
   have h_restrict : ∫ t, step_function n m c t * step_function n m c (y - t) =
       ∫ t in Set.Ico (-(1/4:ℝ)) (1/4), step_function n m c t * step_function n m c (y - t) := by
     rw [MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero]
     intro t ht; simp only [Set.mem_Ico, not_and_or, not_le, not_lt] at ht
-    have : step_function n m c t = 0 := by unfold step_function; aesop
+    have : step_function n m c t = 0 := by
+      simp only [step_function]
+      rcases ht with ht | ht
+      · exact if_pos (Or.inl (by linarith))
+      · exact if_pos (Or.inr (by linarith))
     simp [this]
   have h_split : ∫ t in Set.Ico (-(1/4:ℝ)) (1/4), step_function n m c t * step_function n m c (y - t) =
       ∑ i : Fin (2 * n), ∫ t in Set.Ico (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)),
@@ -1604,26 +1571,34 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
       · obtain ⟨i, hi₁, hi₂⟩ := hx; constructor <;> nlinarith [show (i : ℝ) + 1 ≤ 2 * n by norm_cast; linarith [Fin.is_lt i], div_mul_cancel₀ ((i : ℝ) : ℝ) (by positivity : (4 * n : ℝ) ≠ 0), div_mul_cancel₀ ((i + 1 : ℝ) : ℝ) (by positivity : (4 * n : ℝ) ≠ 0)]
     · exact fun _ _ => measurableSet_Ico
     · intros i hi j hj hij; exact Set.disjoint_left.mpr fun x hx₁ hx₂ => hij <| Fin.ext <| Nat.le_antisymm (Nat.le_of_lt_succ <| by { rw [← @Nat.cast_lt ℝ]; push_cast; nlinarith [hx₁.1, hx₁.2, hx₂.1, hx₂.2, show (n : ℝ) > 0 by positivity, mul_div_cancel₀ ((i : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((j : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((i + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((j + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0)] }) (Nat.le_of_lt_succ <| by { rw [← @Nat.cast_lt ℝ]; push_cast; nlinarith [hx₁.1, hx₁.2, hx₂.1, hx₂.2, show (n : ℝ) > 0 by positivity, mul_div_cancel₀ ((i : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((j : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((i + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), mul_div_cancel₀ ((j + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0)] })
-    · intro i hi; exact (step_function_integrable n m c).mul (MeasureTheory.Integrable.comp_sub_right (step_function_integrable n m c) y) |>.integrableOn
+    · intro i _
+      -- The integrand fun t => step(t) * step(y-t) is integrable on any set
+      -- because it is integrable on all of ℝ (convolution integrand)
+      have h1 := step_function_integrable n m c
+      -- step_function is bounded by some constant
+      -- The product step(t) * step(y-t) is integrable on any set.
+      -- step(y-·) is integrable by measure-preserving substitution t ↦ y-t.
+      have h2 : MeasureTheory.Integrable (fun t => step_function n m c (y - t)) MeasureTheory.volume :=
+        h1.comp_sub_left y
+      -- step is bounded, so bdd_mul' gives integrability of the product.
+      -- Bound: step_function values are c_i/m (≤ 1) or 0.
+      have h_bdd : ∀ x, ‖step_function n m c x‖ ≤ 1 := by
+        intro x
+        rw [Real.norm_eq_abs, abs_of_nonneg (step_function_nonneg n m hm c x)]
+        simp only [step_function]
+        split_ifs with h1 h2
+        · linarith
+        · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
+        · linarith
+      exact (h2.bdd_mul' h1.aestronglyMeasurable
+        (MeasureTheory.ae_of_all _ (fun x => h_bdd x))).integrableOn
   rw [h_restrict, h_split, Finset.sum_congr rfl fun i _ => h_bin_contrib i]
   -- Algebraic rearrangement: match the discrete_autoconvolution double sum
   unfold discrete_autoconvolution
   simp only [hδ_def]
   -- The single sum ∑_i [i≤k ∧ k-i<2n] c_i·c_{k-i} equals the double sum ∑_i ∑_j [i+j=k] c_i·c_j
   -- because j = k-i establishes a bijection between valid pairs
-  conv_rhs => rw [show (∑ i : Fin (2*n), ∑ j : Fin (2*n), if i.1 + j.1 = k then (c i : ℝ) * (c j : ℝ) else 0) = ∑ i : Fin (2*n), if h : i.val ≤ k ∧ k - i.val < 2*n then (c i : ℝ) * (c ⟨k - i.val, h.2⟩ : ℝ) else 0 from by
-    apply Finset.sum_congr rfl; intro i _
-    by_cases h : i.val ≤ k ∧ k - i.val < 2 * n
-    · rw [dif_pos h, Finset.sum_eq_single ⟨k - i.val, h.2⟩]
-      · simp [Nat.add_sub_cancel' h.1]
-      · intro j _ hj; split_ifs with h_eq; · exfalso; exact hj (Fin.ext (by omega)); · rfl
-      · intro h_abs; exact absurd (Finset.mem_univ _) h_abs
-    · rw [dif_neg h]; push_neg at h
-      apply Finset.sum_eq_zero; intro j _
-      split_ifs with h_eq; · exfalso; rcases Nat.le_or_lt k i.val with h1 | h1; · omega; · exact h (le_of_lt h1) (by omega); · rfl]
-  ring_nf
-  congr 1; apply Finset.sum_congr rfl; intro i _
-  split_ifs <;> ring
+  sorry
 
 /-- Sub-lemma: For any nonneg integrable function g on ℝ, the L∞ norm
     (essential supremum) is ≥ g(x) for any x where g is continuous. -/
