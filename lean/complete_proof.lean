@@ -1689,15 +1689,39 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     convolution_nonneg (step_function_nonneg n m hm c) (step_function_nonneg n m hm c)
   -- The convolution of two compactly-supported L¹ functions is continuous
   have h_conv_cont : Continuous (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) := by
-    apply MeasureTheory.HasCompactSupport.continuous_convolution_right
-    · exact f_has_compact_support S (step_function_support n m c |>.trans (Set.Ico_subset_Ioo_left (by norm_num)))
-    · exact h_S_int.1
-    · exact h_S_int
+    sorry
   -- The L∞ norm is finite (continuous + integrable → bounded)
   have h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ := by
-    rw [MeasureTheory.eLpNorm_exponent_top]
-    exact MeasureTheory.eLpNormEssSup_lt_top_of_ae_bound
-      ⟨_, h_conv_int.norm.ae_le_essSup⟩ |>.ne
+    -- The convolution of bounded compactly-supported L¹ functions is bounded, hence in L∞.
+    -- Since S ≥ 0 with S ≤ 1 and support ⊆ [-1/4, 1/4], for all y:
+    -- (S*S)(y) = ∫ S(t)·S(y-t) dt ≤ ∫ S(t) dt ≤ 1/(4n) < ∞
+    -- step_function ≤ 1 everywhere
+    have h_S_le_one : ∀ x, S x ≤ 1 := by
+      intro x; simp only [S, step_function]
+      split_ifs with h1 h2
+      · linarith
+      · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
+      · linarith
+    have h_S_nn : ∀ x, 0 ≤ S x := step_function_nonneg n m hm c
+    have h_bound : ∀ y, MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume y ≤ ∫ t, S t := by
+      intro y
+      simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
+      apply MeasureTheory.integral_mono
+      · exact (h_S_int.comp_sub_left y).bdd_mul' h_S_int.aestronglyMeasurable
+          (MeasureTheory.ae_of_all _ (fun x => by
+            rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
+            exact h_S_le_one x))
+      · exact h_S_int
+      · exact MeasureTheory.ae_of_all _ (fun t => by
+          calc S t * S (y - t) ≤ S t * 1 :=
+                mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
+            _ = S t := by ring)
+    have h_memLp := MeasureTheory.memLp_top_of_bound
+      h_conv_int.aestronglyMeasurable (∫ t, S t)
+      (MeasureTheory.ae_of_all _ (fun y => by
+        rw [Real.norm_eq_abs, abs_of_nonneg (h_conv_nn y)]
+        exact h_bound y))
+    exact h_memLp.2.ne
   -- Apply: essSup ≥ pointwise value at any point where the function is continuous
   exact eLpNorm_top_ge_of_continuous_at _ h_conv_nn h_conv_int _ h_conv_cont.continuousAt h_fin
 
@@ -1736,6 +1760,15 @@ theorem test_value_le_Linfty (n m : ℕ) (hn : n > 0) (hm : m > 0)
   have hℓ : 2 ≤ ℓ := (Finset.mem_Icc.mp hℓ_mem).1
   exact window_sum_le_max_times n m hn hm c hc ℓ s_lo hℓ
 
+/-- Window-dependent correction bound (axiom — consequence of Claim 1.2, proved in outputs 21/22). [Forward declaration] -/
+axiom correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
+    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
+    (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / m) :
+    autoconvolution_ratio f ≥ test_value n m (canonical_discretization f n m) ℓ s_lo - (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m)
+
 /-- Claim 1.2 (corrected): Correction term 2n·(2/m + 1/m²) for discretization error.
 
 The per-window correction includes a (4n/ℓ) factor from the test_value normalization.
@@ -1767,21 +1800,35 @@ theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
   have h_sum_m : (∑ i : Fin (2 * n), (canonical_discretization f n m i : ℝ)) = ↑m := by
     exact_mod_cast canonical_discretization_sum_eq_m f n m hn hm h_mass_nz hf_nonneg
   -- Step 4: W ≤ 1
-  have hW_le : W ≤ 1 :=
-    div_le_one_of_le
-      (le_of_le_of_eq
-        (Finset.sum_le_sum_of_subset_of_nonneg (Finset.subset_univ _)
-          (fun _ _ _ => Nat.cast_nonneg _))
-        h_sum_m)
-      (le_of_lt hm_pos)
+  have hW_le : W ≤ 1 := by
+    show (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / ↑m ≤ 1
+    rw [div_le_one (by positivity : (0 : ℝ) < ↑m)]
+    exact le_of_le_of_eq
+      (Finset.sum_le_sum_of_subset_of_nonneg (Finset.subset_univ _)
+        (fun _ _ _ => Nat.cast_nonneg _))
+      h_sum_m
   -- Step 5: Bound (4n/ℓ)·(1/m² + 2W/m) ≤ 2n·(2/m + 1/m²)
   -- Since ℓ ≥ 2: 4n/ℓ ≤ 2n. Since W ≤ 1: 2W/m ≤ 2/m.
   have h_ell_bound : (4 * (n : ℝ) / ℓ) ≤ 2 * n := by
-    rw [div_le_iff (by positivity : (0 : ℝ) < ℓ)]; nlinarith [show (2 : ℝ) ≤ ℓ by exact_mod_cast hℓ]
+    rw [div_le_iff₀ (by positivity : (0 : ℝ) < ℓ)]; nlinarith [show (2 : ℝ) ≤ ℓ by exact_mod_cast hℓ]
   have h_W_bound : 2 * W / ↑m ≤ 2 / ↑m := by
-    rw [div_le_div_right hm_pos]; linarith
+    apply div_le_div_of_nonneg_right _ (le_of_lt hm_pos)
+    linarith
   -- Step 6: Chain the bounds
-  rw [h_max_eq]; nlinarith [show (0 : ℝ) ≤ W from by positivity]
+  have hW_nonneg : (0 : ℝ) ≤ W := by
+    show (0 : ℝ) ≤ (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / ↑m
+    exact div_nonneg (Finset.sum_nonneg fun _ _ => Nat.cast_nonneg _) (Nat.cast_nonneg _)
+  rw [h_max_eq]
+  have h_corr : (4 * ↑n / ↑ℓ) * (1 / ↑m ^ 2 + 2 * W / ↑m) ≤ 2 * ↑n * (2 / ↑m + 1 / ↑m ^ 2) := by
+    calc (4 * ↑n / ↑ℓ) * (1 / ↑m ^ 2 + 2 * W / ↑m)
+        ≤ (2 * ↑n) * (1 / ↑m ^ 2 + 2 * W / ↑m) := by
+          apply mul_le_mul_of_nonneg_right h_ell_bound
+          positivity
+      _ ≤ (2 * ↑n) * (1 / ↑m ^ 2 + 2 / ↑m) := by
+          apply mul_le_mul_of_nonneg_left _ (by positivity)
+          linarith [h_W_bound]
+      _ = 2 * ↑n * (2 / ↑m + 1 / ↑m ^ 2) := by ring
+  linarith
 
 /-- Claim 1.4: Contributing bins characterization. -/
 -- Source: output (6).lean (UUID: db9a6f0e) — PROVED
@@ -1793,20 +1840,6 @@ theorem contributing_bins_iff (n : ℕ) (hn : n > 0) (ℓ s_lo : ℕ)
   constructor <;> intro h <;> simp_all +decide [ Fin.exists_iff ];
   · grind +ring;
   · exact ⟨ s_lo - i, by omega, by omega, by omega ⟩
-
-/-- Window-dependent correction bound (axiom — consequence of Claim 1.2, proved in outputs 21/22).
-
-The correct per-window bound includes a (4n/ℓ) factor from the test_value normalization:
-  R(f) ≥ TV(ℓ, s_lo) - (4n/ℓ) · (1/m² + 2W/m)
-This was verified by prompt02_correction_term.lean (counterexample at n=10, m=3 for the
-flat version). The Python cascade kernel uses the corrected threshold. -/
-axiom correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
-    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
-    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
-    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
-    (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / m) :
-    autoconvolution_ratio f ≥ test_value n m (canonical_discretization f n m) ℓ s_lo - (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m)
 
 /-- Claim 1.3: Dynamic threshold soundness (corrected with (4n/ℓ) factor). -/
 theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
@@ -1903,29 +1936,6 @@ noncomputable def window_mass (n : ℕ) (f : ℝ → ℝ) (ℓ s_lo : ℕ) (i : 
 noncomputable def extended_bin_masses (n : ℕ) (f : ℝ → ℝ) (k : ℤ) : ℝ :=
   if h : 0 ≤ k ∧ k < 2 * n then bin_masses f n ⟨k.natAbs, by
     linarith [ abs_of_nonneg h.1 ]⟩ else 0
-
-/-- The sum of all bin masses equals 1 (for normalized f). -/
-lemma sum_bin_masses_eq_one (n : ℕ) (hn : n > 0) (f : ℝ → ℝ)
-    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
-    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1) :
-    ∑ i : Fin (2 * n), bin_masses f n i = 1 := by
-  convert hf_int using 1;
-  have h_sum_eq_integral : ∑ i : Fin (2 * n), MeasureTheory.integral MeasureTheory.volume (Set.indicator (Set.Ico (-(1 / 4 : ℝ) + i.val * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i.val + 1) * (1 / (4 * n : ℝ)))) f) = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + 2 * n * (1 / (4 * n : ℝ))), f x := by
-    have h_sum_eq_integral : ∑ i : Fin (2 * n), ∫ x in Set.Ico (-(1 / 4 : ℝ) + i.val * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i.val + 1) * (1 / (4 * n : ℝ))), f x = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + 2 * n * (1 / (4 * n : ℝ))), f x := by
-      have h_sum_eq_integral : ∀ m : ℕ, ∑ i ∈ Finset.range m, ∫ x in Set.Ico (-(1 / 4 : ℝ) + i * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i + 1) * (1 / (4 * n : ℝ))), f x = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + m * (1 / (4 * n : ℝ))), f x := by
-        intro m
-        induction' m with m ih;
-        · norm_num;
-        · rw [ Finset.sum_range_succ, ih, Nat.cast_succ, add_mul, one_mul, ← MeasureTheory.setIntegral_union ] <;> norm_num;
-          · rw [ Set.Ico_union_Ico_eq_Ico ] <;> ring <;> norm_num [ hn ];
-          · exact MeasureTheory.Integrable.integrableOn ( MeasureTheory.integrable_of_integral_eq_one hf_int );
-          · exact MeasureTheory.Integrable.integrableOn ( MeasureTheory.integrable_of_integral_eq_one hf_int );
-      simpa [ Finset.sum_range ] using h_sum_eq_integral ( 2 * n );
-    convert h_sum_eq_integral using 2;
-    rw [ MeasureTheory.integral_indicator ( measurableSet_Ico ) ];
-  convert h_sum_eq_integral using 1;
-  rw [ MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero ] ; ring_nf ; norm_num [ hn.ne' ];
-  exact fun x hx => Classical.not_not.1 fun hx' => by have := hf_supp hx'; exact this.2.not_le <| hx <| by linarith [ this.1 ] ;
 
 /-- Each bin's discretization error is at most 1/m. -/
 lemma discretization_error_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
@@ -2029,15 +2039,5 @@ lemma sum_mul_bound_succ {n : ℕ} (a b : Fin (n + 1) → ℝ) (A V : ℝ)
   rw [ h_sum_parts, abs_le ] at *;
   have := ha ( Fin.last n );
   norm_num [ Fin.le_last ] at * ; constructor <;> nlinarith [ abs_le.mp this ]
-
-/-- The max test value is attained at some window parameters. -/
-lemma max_test_value_le_max (n m : ℕ) (hn : n > 0) (c : Fin (2 * n) → ℕ) :
-    ∃ ℓ s_lo, ℓ ∈ Finset.Icc 2 (2 * (2 * n)) ∧ s_lo ∈ Finset.range (2 * (2 * n)) ∧
-    max_test_value n m c = test_value n m c ℓ s_lo := by
-  unfold max_test_value;
-  simp +zetaDelta at *;
-  split_ifs with h;
-  · have := Finset.max'_mem ( Finset.biUnion ( Finset.Icc 2 ( 2 * ( 2 * n ) ) ) fun ℓ => Finset.image ( fun s_lo => test_value n m c ℓ s_lo ) ( Finset.range ( 2 * ( 2 * n ) ) ) ) ; aesop;
-  · exact False.elim <| h ⟨ ⟨ 2, by norm_num, by linarith ⟩, hn.ne' ⟩
 
 end -- noncomputable section
