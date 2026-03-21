@@ -1609,15 +1609,22 @@ lemma eLpNorm_top_ge_of_continuous_at (g : ℝ → ℝ)
     (MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume).toReal ≥ g x₀ := by
   by_contra h_lt; push_neg at h_lt
   set M := (MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume).toReal with hM_def
+  -- Convert h_fin from eLpNorm to eLpNormEssSup
+  have h_fin' : MeasureTheory.eLpNormEssSup g MeasureTheory.volume ≠ ⊤ := by
+    rwa [← MeasureTheory.eLpNorm_exponent_top]
   -- ae x, g(x) ≤ M (from essSup bound)
   have h_ae_le : ∀ᵐ x ∂MeasureTheory.volume, g x ≤ M := by
-    filter_upwards [MeasureTheory.ae_le_eLpNormEssSup g MeasureTheory.volume] with x hx
+    filter_upwards [MeasureTheory.enorm_ae_le_eLpNormEssSup g MeasureTheory.volume] with x hx
     rw [← ENNReal.toReal_ofReal (hg_nn x)]
-    exact ENNReal.toReal_mono h_fin (le_trans (by rw [Real.enorm_eq_ofReal (hg_nn x)]) hx)
+    rw [hM_def, MeasureTheory.eLpNorm_exponent_top]
+    exact ENNReal.toReal_mono h_fin' (le_trans (by rw [Real.enorm_eq_ofReal (hg_nn x)]) hx)
   -- The set {g > M} has measure 0
   have h_zero : MeasureTheory.volume {x | M < g x} = 0 := by
-    have : ∀ᵐ x ∂MeasureTheory.volume, ¬(M < g x) := h_ae_le.mono fun x hx h => not_le.mpr h hx
-    rwa [Filter.eventually_iff, ← MeasureTheory.ae_iff] at this
+    have h_ae_neg : ∀ᵐ x ∂MeasureTheory.volume, ¬(M < g x) :=
+      h_ae_le.mono fun x hx h => not_le.mpr h hx
+    rw [MeasureTheory.ae_iff] at h_ae_neg
+    convert h_ae_neg using 2
+    ext x; simp [not_not]
   -- By continuity at x₀, ∃ δ > 0 with g > M on ball(x₀, δ)
   obtain ⟨δ, hδ_pos, hball⟩ := Metric.continuousAt_iff.mp hg_cont (g x₀ - M) (by linarith)
   have h_sub : Metric.ball x₀ δ ⊆ {x | M < g x} := by
@@ -1625,8 +1632,41 @@ lemma eLpNorm_top_ge_of_continuous_at (g : ℝ → ℝ)
     have := hball hx; rw [Real.dist_eq] at this; linarith [(abs_lt.mp this).1]
   -- Ball has positive Lebesgue measure → contradiction
   have h_pos : 0 < MeasureTheory.volume (Metric.ball x₀ δ) :=
-    isOpen_ball.measure_pos MeasureTheory.volume ⟨x₀, Metric.mem_ball_self hδ_pos⟩
+    Metric.isOpen_ball.measure_pos MeasureTheory.volume ⟨x₀, Metric.mem_ball_self hδ_pos⟩
   exact absurd (le_antisymm (le_of_le_of_eq (MeasureTheory.measure_mono h_sub) h_zero) (zero_le _)) (ne_of_gt h_pos)
+
+/-- The sum of all bin masses equals 1 (for normalized f). [Forward declaration] -/
+lemma sum_bin_masses_eq_one (n : ℕ) (hn : n > 0) (f : ℝ → ℝ)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1) :
+    ∑ i : Fin (2 * n), bin_masses f n i = 1 := by
+  convert hf_int using 1;
+  have h_sum_eq_integral : ∑ i : Fin (2 * n), MeasureTheory.integral MeasureTheory.volume (Set.indicator (Set.Ico (-(1 / 4 : ℝ) + i.val * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i.val + 1) * (1 / (4 * n : ℝ)))) f) = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + 2 * n * (1 / (4 * n : ℝ))), f x := by
+    have h_sum_eq_integral : ∑ i : Fin (2 * n), ∫ x in Set.Ico (-(1 / 4 : ℝ) + i.val * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i.val + 1) * (1 / (4 * n : ℝ))), f x = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + 2 * n * (1 / (4 * n : ℝ))), f x := by
+      have h_sum_eq_integral : ∀ m : ℕ, ∑ i ∈ Finset.range m, ∫ x in Set.Ico (-(1 / 4 : ℝ) + i * (1 / (4 * n : ℝ))) (-(1 / 4 : ℝ) + (i + 1) * (1 / (4 * n : ℝ))), f x = ∫ x in Set.Ico (-(1 / 4 : ℝ)) (-(1 / 4 : ℝ) + m * (1 / (4 * n : ℝ))), f x := by
+        intro m
+        induction' m with m ih;
+        · norm_num;
+        · rw [ Finset.sum_range_succ, ih, Nat.cast_succ, add_mul, one_mul, ← MeasureTheory.setIntegral_union ] <;> norm_num;
+          · rw [ Set.Ico_union_Ico_eq_Ico ] <;> ring <;> norm_num [ hn ];
+          · exact MeasureTheory.Integrable.integrableOn ( MeasureTheory.integrable_of_integral_eq_one hf_int );
+          · exact MeasureTheory.Integrable.integrableOn ( MeasureTheory.integrable_of_integral_eq_one hf_int );
+      simpa [ Finset.sum_range ] using h_sum_eq_integral ( 2 * n );
+    convert h_sum_eq_integral using 2;
+    rw [ MeasureTheory.integral_indicator ( measurableSet_Ico ) ];
+  convert h_sum_eq_integral using 1;
+  rw [ MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero ] ; ring_nf ; norm_num [ hn.ne' ];
+  exact fun x hx => Classical.not_not.1 fun hx' => by have := hf_supp hx'; exact this.2.not_le <| hx <| by linarith [ this.1 ] ;
+
+/-- The max test value is attained at some window parameters. [Forward declaration] -/
+lemma max_test_value_le_max (n m : ℕ) (hn : n > 0) (c : Fin (2 * n) → ℕ) :
+    ∃ ℓ s_lo, ℓ ∈ Finset.Icc 2 (2 * (2 * n)) ∧ s_lo ∈ Finset.range (2 * (2 * n)) ∧
+    max_test_value n m c = test_value n m c ℓ s_lo := by
+  unfold max_test_value;
+  simp +zetaDelta at *;
+  split_ifs with h;
+  · have := Finset.max'_mem ( Finset.biUnion ( Finset.Icc 2 ( 2 * ( 2 * n ) ) ) fun ℓ => Finset.image ( fun s_lo => test_value n m c ℓ s_lo ) ( Finset.range ( 2 * ( 2 * n ) ) ) ) ; aesop;
+  · exact False.elim <| h ⟨ ⟨ 2, by norm_num, by linarith ⟩, hn.ne' ⟩
 
 lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
