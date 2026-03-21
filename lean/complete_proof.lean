@@ -804,7 +804,26 @@ lemma lintegral_le_norm_mul_vol (g : ℝ → ℝ) (hg : 0 ≤ g)
     MeasureTheory.lintegral MeasureTheory.volume (fun x => ENNReal.ofReal (g x)) ≤
     MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume * MeasureTheory.volume S := by
       by_cases hS_finite : MeasureTheory.volume S < ⊤;
-      · exact?;
+      · -- Restrict integral to S (g = 0 outside S) then bound by essSup * vol(S)
+        have h_supp : Function.support (fun x => ENNReal.ofReal (g x)) ⊆ S := by
+          intro x hx
+          rw [Function.mem_support] at hx
+          apply hS
+          rw [Function.mem_support]
+          intro h; exact hx (by simp [h])
+        calc ∫⁻ x, ENNReal.ofReal (g x)
+            = ∫⁻ x in S, ENNReal.ofReal (g x) :=
+              (MeasureTheory.setLIntegral_eq_of_support_subset h_supp).symm
+          _ ≤ ∫⁻ _ in S, MeasureTheory.eLpNormEssSup g MeasureTheory.volume := by
+              apply MeasureTheory.setLIntegral_mono_ae measurable_const.aemeasurable
+              filter_upwards [MeasureTheory.enorm_ae_le_eLpNormEssSup g MeasureTheory.volume] with x hx
+              intro _
+              rw [← Real.enorm_eq_ofReal (hg x)]
+              exact hx
+          _ = MeasureTheory.eLpNormEssSup g MeasureTheory.volume * MeasureTheory.volume S := by
+              rw [MeasureTheory.setLIntegral_const]
+          _ = MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume * MeasureTheory.volume S := by
+              rw [MeasureTheory.eLpNorm_exponent_top]
       · by_cases h : MeasureTheory.eLpNorm g ⊤ MeasureTheory.MeasureSpace.volume = 0 <;> simp_all +decide;
         rw [ MeasureTheory.lintegral_congr_ae ( h.mono fun x hx => by aesop ) ] ; norm_num
 
