@@ -304,7 +304,7 @@ theorem autoconv_reversal_symmetry {d : ℕ} (hd : d > 0) (a : Fin d → ℝ)
     · exact fun b _ => ⟨ ⟨ d - 1 - b, by omega ⟩, Finset.mem_univ _, by simp +decide [ tsub_tsub_cancel_of_le ( show b.val ≤ d - 1 from Nat.le_sub_one_of_lt b.2 ) ] ⟩;
     · intro i hi;
       apply Finset.sum_bij (fun j _ => Fin.mk (d - 1 - j.val) (by
-      exact?))
+      exact lt_of_le_of_lt (Nat.sub_le _ _) (Nat.pred_lt hd.ne')))
       all_goals generalize_proofs at *;
       · exact fun _ _ => Finset.mem_univ _;
       · grind;
@@ -772,7 +772,7 @@ lemma convolution_mono_ae_fbin (f : ℝ → ℝ) (hf : 0 ≤ f) (n : ℕ) (i : F
       exact hf_int.prod_mul hf_int;
     have h_int_f : MeasureTheory.Integrable (fun (p : ℝ × ℝ) => f p.1 * f (p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
       have h_int_f : MeasureTheory.MeasurePreserving (fun p : ℝ × ℝ => (p.1, p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
-        exact?;
+        exact MeasureTheory.measurePreserving_prod_sub MeasureTheory.volume MeasureTheory.volume;
       have h_int_f : MeasureTheory.Integrable (fun (p : ℝ × ℝ) => f p.1 * f p.2) (MeasureTheory.Measure.map (fun p : ℝ × ℝ => (p.1, p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume)) := by
         rw [ h_int_f.map_eq ] ; assumption;
       convert h_int_f.comp_measurable ( measurable_fst.prodMk ( measurable_snd.sub measurable_fst ) ) using 1;
@@ -1109,7 +1109,7 @@ theorem convolution_mono_ae (f g : ℝ → ℝ)
       exact MeasureTheory.Integrable.mul_prod hg_int hg_int;
     have h_ae_conv : MeasureTheory.Integrable (fun p : ℝ × ℝ => g p.1 * g (p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
       have h_ae_conv : MeasureTheory.MeasurePreserving (fun p : ℝ × ℝ => (p.1, p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
-        exact?;
+        exact MeasureTheory.measurePreserving_prod_sub MeasureTheory.volume MeasureTheory.volume;
       have h_ae_conv : MeasureTheory.Integrable (fun p : ℝ × ℝ => g p.1 * g p.2) (MeasureTheory.Measure.map (fun p : ℝ × ℝ => (p.1, p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume)) := by
         rw [ h_ae_conv.map_eq ] ; assumption;
       rw [ MeasureTheory.integrable_map_measure ] at h_ae_conv ; aesop;
@@ -1137,7 +1137,7 @@ theorem averaging_principle (g : ℝ → ℝ) (hg : ∀ x, 0 ≤ g x)
     have h_integral_bound : ∀ᵐ x ∂MeasureTheory.Measure.restrict MeasureTheory.volume S, ENNReal.ofReal (g x) ≤ MeasureTheory.eLpNorm g ⊤ MeasureTheory.MeasureSpace.volume := by
       have h_integral_bound : ∀ᵐ x ∂MeasureTheory.MeasureSpace.volume, ENNReal.ofReal (g x) ≤ MeasureTheory.eLpNorm g ⊤ MeasureTheory.MeasureSpace.volume := by
         have h_integral_bound : ∀ᵐ x ∂MeasureTheory.MeasureSpace.volume, ‖g x‖ₑ ≤ essSup (fun x => ‖g x‖ₑ) MeasureTheory.MeasureSpace.volume := by
-          exact?;
+          exact MeasureTheory.enorm_ae_le_eLpNormEssSup g MeasureTheory.MeasureSpace.volume;
         filter_upwards [ h_integral_bound ] with x hx using le_trans ( by simp +decide [ Real.enorm_eq_ofReal ( hg x ) ] ) hx;
       exact MeasureTheory.ae_restrict_of_ae h_integral_bound;
     refine' le_trans ( MeasureTheory.lintegral_mono_ae h_integral_bound ) _ ; aesop;
@@ -1376,10 +1376,10 @@ theorem lintegral_le_essSup_mul_measure_ennreal {α : Type*} [MeasureTheory.Meas
     (essSup f MeasureTheory.volume) * (MeasureTheory.volume S) := by
   have h_integral_le_essSup_mul_measure : ∫⁻ x, f x ∂MeasureTheory.MeasureSpace.volume ≤ essSup f MeasureTheory.MeasureSpace.volume * MeasureTheory.MeasureSpace.volume (Function.support f) := by
     have h_integral_le_essSup_mul_measure : ∀ᵐ x ∂MeasureTheory.MeasureSpace.volume, f x ≤ essSup f MeasureTheory.MeasureSpace.volume := by
-      exact?
+      exact ENNReal.ae_le_essSup f
     generalize_proofs at *; (
     have h_integral_restrict : ∫⁻ x, f x ∂MeasureTheory.MeasureSpace.volume = ∫⁻ x in Function.support f, f x ∂MeasureTheory.MeasureSpace.volume := by
-      exact?
+      exact (MeasureTheory.setLIntegral_eq_of_support_subset (Subset.refl _)).symm
     generalize_proofs at *; (
     have h_integral_le_essSup_mul_measure : ∫⁻ x in Function.support f, f x ∂MeasureTheory.MeasureSpace.volume ≤ ∫⁻ x in Function.support f, essSup f MeasureTheory.MeasureSpace.volume ∂MeasureTheory.MeasureSpace.volume := by
       apply_rules [ MeasureTheory.lintegral_mono_ae ];
@@ -1491,7 +1491,7 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
     · intros i hi j hj hij; exact Set.disjoint_left.mpr fun x hx₁ hx₂ => hij <| Fin.ext <| Nat.le_antisymm ( Nat.le_of_lt_succ <| by { rw [ ← @Nat.cast_lt ℝ ] ; push_cast; nlinarith [ hx₁.1, hx₁.2, hx₂.1, hx₂.2, show ( n : ℝ ) > 0 by positivity, mul_div_cancel₀ ( ( i : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( i + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] } ) ( Nat.le_of_lt_succ <| by { rw [ ← @Nat.cast_lt ℝ ] ; push_cast; nlinarith [ hx₁.1, hx₁.2, hx₂.1, hx₂.2, show ( n : ℝ ) > 0 by positivity, mul_div_cancel₀ ( ( i : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( i + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] } ) ;
     · intro i hi; specialize h_const i; contrapose! h_const; rw [ MeasureTheory.integral_undef h_const ] ; ring; norm_num [ hn.ne', hm.ne' ] ;
       intro H; simp_all +decide [ Finset.sum_eq_zero_iff_of_nonneg ] ;
-      exact h_const <| MeasureTheory.Integrable.integrableOn <| by exact?;
+      exact h_const <| MeasureTheory.Integrable.integrableOn <| step_function_integrable n m c;
   simp_all +decide [ ← Finset.sum_mul _ _ _, ← Finset.sum_div ];
   rw [ ← Nat.cast_sum, hc, div_self ( by positivity ), one_mul ]
 
@@ -1516,7 +1516,13 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
   -- The step function is constant (c_i / m) on each bin [-1/4 + i·δ, -1/4 + (i+1)·δ).
   -- This was proved in integral_step_function as h_const_interval.
   have h_const : ∀ i : Fin (2 * n), ∀ x ∈ Set.Ico (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m := by
-    sorry
+    unfold step_function
+    field_simp
+    intro i x hx; split_ifs <;> simp_all +decide [ne_of_gt, div_lt_iff₀, le_div_iff₀]
+    · cases ‹_› <;> nlinarith [show (i : ℝ) + 1 ≤ 2 * n by norm_cast; linarith [Fin.is_lt i], div_mul_cancel₀ (-n + (i : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), div_mul_cancel₀ (-n + (i + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0)]
+    · rw [mul_div_cancel₀ _ (by positivity)]; congr; ring
+      rw [div_le_iff₀ (by positivity), lt_div_iff₀ (by positivity)] at hx; norm_num [show ⌊(n : ℝ) + n * x * 4⌋ = i from Int.floor_eq_iff.mpr ⟨by norm_num; linarith, by norm_num; linarith⟩] at *
+    · rw [Int.le_floor] at *; norm_num at *; nlinarith [(by norm_cast : (1 : ℝ) ≤ n), mul_div_cancel₀ (-n + (i + 1) : ℝ) (by positivity : (4 * n : ℝ) ≠ 0)]
   -- For t ∈ interior of bin_i, y-t lands in bin_{k-i} (when valid), giving step(y-t) = c_{k-i}/m.
   -- The integral decomposes into bin contributions: each valid (i, k-i) contributes δ·c_i·c_{k-i}/m².
   have h_n_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
@@ -1529,7 +1535,59 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
       if h : i.val ≤ k ∧ k - i.val < 2 * n then
         (c ⟨k - i.val, h.2⟩ : ℝ) / m
       else 0 := by
-    sorry
+    intro i t ht
+    have ht1 := ht.1
+    have ht2 := ht.2
+    have h4n_pos : (4 * n : ℝ) > 0 := by positivity
+    have h4n_ne : (4 * n : ℝ) ≠ 0 := ne_of_gt h4n_pos
+    have hyt_upper : y - t < -(1/4 : ℝ) + ((↑k - ↑i : ℝ) + 1) / (4 * n) := by
+      have h1 : t > -(1/4 : ℝ) + (↑i : ℝ) / (4 * n) := ht1
+      have hkey : -(1/4 : ℝ) + ((↑k - ↑i : ℝ) + 1) / (4 * n) - (y - t) =
+                  t - (-(1/4 : ℝ) + (↑i : ℝ) / (4 * n)) := by
+        simp only [hy_def, hδ_def]; field_simp; ring
+      linarith
+    have hyt_lower : y - t > -(1/4 : ℝ) + (↑k - ↑i : ℝ) / (4 * n) := by
+      have h2 : t < -(1/4 : ℝ) + ((↑i : ℝ) + 1) / (4 * n) := ht2
+      have hkey : (y - t) - (-(1/4 : ℝ) + (↑k - ↑i : ℝ) / (4 * n)) =
+                  (-(1/4 : ℝ) + ((↑i : ℝ) + 1) / (4 * n)) - t := by
+        simp only [hy_def, hδ_def]; field_simp; ring
+      linarith
+    split_ifs with hik
+    · obtain ⟨hle, hlt⟩ := hik
+      have hki_nat : (k - i.val : ℝ) = (↑(k - i.val) : ℝ) := by
+        rw [Nat.cast_sub hle]
+      apply h_const ⟨k - i.val, hlt⟩ (y - t)
+      simp only [Fin.val_mk]
+      constructor
+      · rw [hki_nat] at hyt_lower; linarith
+      · rw [hki_nat] at hyt_upper
+        have : ((↑(k - i.val) : ℝ) + 1) = (↑(k - i.val) + 1 : ℝ) := by ring
+        linarith
+    · push_neg at hik
+      simp only [step_function]
+      by_cases hle : i.val ≤ k
+      · have h2n_le : 2 * n ≤ k - i.val := hik hle
+        have : y - t ≥ 1/4 := by
+          have hcast : (↑k - ↑i.val : ℝ) ≥ 2 * n := by
+            rw [← Nat.cast_sub hle]; exact_mod_cast h2n_le
+          have hdiv : (↑k - ↑i.val : ℝ) / (4 * n) ≥ 1 / 2 := by
+            rw [ge_iff_le, le_div_iff₀ h4n_pos]
+            linarith
+          have : y - t > -(1/4 : ℝ) + (↑k - ↑i.val : ℝ) / (4 * n) :=
+            hyt_lower
+          linarith
+        exact if_pos (Or.inr (by linarith))
+      · push_neg at hle
+        have : (↑k : ℝ) - (↑i.val : ℝ) + 1 ≤ 0 := by
+          have : (↑i.val : ℝ) ≥ ↑k + 1 := by exact_mod_cast hle
+          linarith
+        have : y - t < -(1/4 : ℝ) := by
+          have : (↑k - ↑i.val : ℝ) + 1 ≤ 0 := this
+          have hbound : -(1/4 : ℝ) + ((↑k - ↑i.val : ℝ) + 1) / (4 * n) ≤ -(1/4 : ℝ) := by
+            have : ((↑k - ↑i.val : ℝ) + 1) / (4 * n) ≤ 0 := div_nonpos_of_nonpos_of_nonneg (by linarith) (by positivity)
+            linarith
+          linarith
+        exact if_pos (Or.inl (by linarith))
   -- Product on Ioo: step(t)·step(y-t) = (c_i/m)(c_{k-i}/m) or 0
   have h_prod_on_Ioo : ∀ (i : Fin (2 * n)),
       ∀ t ∈ Set.Ioo (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)),
@@ -1546,7 +1604,42 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
         step_function n m c t * step_function n m c (y - t) =
       if h : i.val ≤ k ∧ k - i.val < 2 * n then
         (c i : ℝ) / m * ((c ⟨k - i.val, h.2⟩ : ℝ) / m) * δ
-      else 0 := by sorry
+      else 0 := by
+    intro i
+    set a := -(1/4:ℝ) + (i : ℝ) / (4 * n) with ha_def
+    set b := -(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n) with hb_def
+    have hab : a < b := by
+      simp only [ha_def, hb_def]
+      have h2 : (1 : ℝ) / (4 * n) > 0 := by positivity
+      linarith [show ((↑i : ℝ) + 1) / (4 * n) = (↑i : ℝ) / (4 * n) + 1 / (4 * n) by ring]
+    have hab_le : a ≤ b := le_of_lt hab
+    set val := if h : i.val ≤ k ∧ k - i.val < 2 * n then
+        (c i : ℝ) / m * ((c ⟨k - i.val, h.2⟩ : ℝ) / m)
+      else 0 with hval_def
+    have h_ae : ∀ᵐ t ∂(MeasureTheory.volume.restrict (Set.Ico a b)), step_function n m c t * step_function n m c (y - t) = val := by
+      rw [MeasureTheory.ae_restrict_iff' measurableSet_Ico]
+      have h_singleton_null : MeasureTheory.volume ({a} : Set ℝ) = 0 := Real.volume_singleton
+      have h_aenull : ∀ᵐ t ∂MeasureTheory.volume, t ≠ a := by
+        rw [MeasureTheory.ae_iff]
+        convert h_singleton_null using 2
+        ext t; simp
+      filter_upwards [h_aenull] with t hta
+      intro ht_Ico
+      have ht_ioo : t ∈ Set.Ioo a b :=
+        ⟨lt_of_le_of_ne ht_Ico.1 (Ne.symm hta), ht_Ico.2⟩
+      rw [hval_def]
+      exact h_prod_on_Ioo i t ht_ioo
+    have h_int_eq : ∫ t in Set.Ico a b, step_function n m c t * step_function n m c (y - t) = val * (b - a) := by
+      have h_ae_unres := (MeasureTheory.ae_restrict_iff' measurableSet_Ico).mp h_ae
+      calc ∫ t in Set.Ico a b, step_function n m c t * step_function n m c (y - t)
+          = ∫ _ in Set.Ico a b, val := MeasureTheory.setIntegral_congr_ae measurableSet_Ico h_ae_unres
+        _ = val * (b - a) := by
+            rw [MeasureTheory.setIntegral_const, Real.volume_Ico, ENNReal.toReal_ofReal (by linarith : 0 ≤ b - a), smul_eq_mul, mul_comm]
+    rw [h_int_eq]
+    have hba : b - a = δ := by simp [ha_def, hb_def, hδ_def]; field_simp; ring
+    rw [hba]
+    simp only [hval_def]
+    split_ifs <;> ring
   -- Decompose ∫_ℝ into sum of bin integrals (same partition as integral_step_function)
   have h_restrict : ∫ t, step_function n m c t * step_function n m c (y - t) =
       ∫ t in Set.Ico (-(1/4:ℝ)) (1/4), step_function n m c t * step_function n m c (y - t) := by
@@ -1598,7 +1691,38 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
   simp only [hδ_def]
   -- The single sum ∑_i [i≤k ∧ k-i<2n] c_i·c_{k-i} equals the double sum ∑_i ∑_j [i+j=k] c_i·c_j
   -- because j = k-i establishes a bijection between valid pairs
-  sorry
+  have h_inner : ∀ i : Fin (2 * n),
+      ∑ j : Fin (2 * n), (if i.val + j.val = k then (c i : ℝ) * (c j : ℝ) else 0) =
+      if h : i.val ≤ k ∧ k - i.val < 2 * n then (c i : ℝ) * (c ⟨k - i.val, h.2⟩ : ℝ) else 0 := by
+    intro i
+    split_ifs with hik
+    · obtain ⟨hle, hlt⟩ := hik
+      have : ∑ j : Fin (2 * n), (if i.val + j.val = k then (c i : ℝ) * (c j : ℝ) else 0) =
+        ∑ j : Fin (2 * n), (if j = ⟨k - i.val, hlt⟩ then (c i : ℝ) * (c j : ℝ) else 0) := by
+        congr 1; ext j
+        have : (i.val + j.val = k) ↔ (j = ⟨k - i.val, hlt⟩) := by
+          constructor
+          · intro h; exact Fin.ext (by simp; omega)
+          · intro h; have := congr_arg Fin.val h; simp at this; omega
+        simp [this]
+      rw [this]
+      simp [Finset.sum_ite_eq']
+    · push_neg at hik
+      apply Finset.sum_eq_zero
+      intro j _
+      split_ifs with hij
+      · exfalso
+        by_cases hle : i.val ≤ k
+        · have := hik hle
+          have : j.val = k - i.val := by omega
+          exact absurd (by omega : k - i.val < 2 * n) (by omega)
+        · omega
+      · rfl
+  simp only [h_inner]
+  rw [Finset.mul_sum]
+  congr 1; ext i; split_ifs with h
+  · field_simp; ring
+  · simp
 
 /-- Sub-lemma: For any nonneg integrable function g on ℝ, the L∞ norm
     (essential supremum) is ≥ g(x) for any x where g is continuous. -/
@@ -1689,7 +1813,14 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     convolution_nonneg (step_function_nonneg n m hm c) (step_function_nonneg n m hm c)
   -- The convolution of two compactly-supported L¹ functions is continuous
   have h_conv_cont : Continuous (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) := by
-    sorry
+    -- S has compact support (support ⊆ Ico(-1/4, 1/4) ⊆ Icc(-1/4, 1/4) which is compact)
+    have h_compact : HasCompactSupport S := by
+      apply IsCompact.of_isClosed_subset isCompact_Icc isClosed_closure
+      apply closure_minimal (fun x hx => _) isClosed_Icc
+      · intro x hx
+        have := step_function_support n m c hx
+        exact Set.Ico_subset_Icc_self this
+    exact h_compact.continuous_convolution_right (ContinuousLinearMap.mul ℝ ℝ) h_S_int
   -- The L∞ norm is finite (continuous + integrable → bounded)
   have h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ := by
     -- The convolution of bounded compactly-supported L¹ functions is bounded, hence in L∞.
@@ -1760,14 +1891,50 @@ theorem test_value_le_Linfty (n m : ℕ) (hn : n > 0) (hm : m > 0)
   have hℓ : 2 ≤ ℓ := (Finset.mem_Icc.mp hℓ_mem).1
   exact window_sum_le_max_times n m hn hm c hc ℓ s_lo hℓ
 
-/-- Window-dependent correction bound (axiom — consequence of Claim 1.2, proved in outputs 21/22). [Forward declaration] -/
-axiom correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
+/-- **Axiom**: Continuous test value lower bound.
+    R(f) ≥ TV_continuous for admissible f, ℓ ≥ 2.
+    Proof: TV_cont = (4n/ℓ)·∑_k ∑_{i+j=k} μ_i·μ_j. By Fubini, ∑_{i+j=k} μ_i·μ_j =
+    ∫∫_{R_k} f(t)f(u) dtdu where R_k ⊆ {t+u ∈ I_k}. Summing over the window and changing
+    variables z=t+u gives ≤ ∫_Z (f*f)(z) dz ≤ |Z|·‖f*f‖∞ = (ℓ/(4n))·‖f*f‖∞.
+    Multiplying by 4n/ℓ yields TV_cont ≤ ‖f*f‖∞ = R(f). -/
+axiom continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
+    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
+    autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo
+
+/-- **Axiom**: Discretization error bound for the autoconvolution test value.
+    TV(c) - TV_cont ≤ (4n/ℓ)·(1/m² + 2W/m).
+    Proof: Decompose w_i·w_j - μ_i·μ_j = δ_i·μ_j + μ_i·δ_j + δ_i·δ_j where δ_i = c_i/m - μ_i.
+    By discretization_error_bound, |δ_i| ≤ 1/m. The cross terms sum to ≤ 2W/m and the
+    quadratic terms to ≤ 1/m². After the (4n/ℓ) normalization factor, the bound follows. -/
+axiom discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
     (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / m) :
-    autoconvolution_ratio f ≥ test_value n m (canonical_discretization f n m) ℓ s_lo - (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m)
+    test_value n m (canonical_discretization f n m) ℓ s_lo - test_value_continuous n f ℓ s_lo ≤
+      (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m)
+
+/-- Window-dependent correction bound (Claim 1.2).
+    R(f) ≥ TV(c, ℓ, s_lo) - correction.
+    Proved by chaining: R(f) ≥ TV_cont ≥ TV(c) - correction. -/
+theorem correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
+    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
+    (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / m) :
+    autoconvolution_ratio f ≥ test_value n m (canonical_discretization f n m) ℓ s_lo - (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m) := by
+  have h_cont : autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo :=
+    continuous_test_value_le_ratio n hn f hf_nonneg hf_supp hf_int ℓ s_lo hℓ
+  have h_disc : test_value n m (canonical_discretization f n m) ℓ s_lo -
+      test_value_continuous n f ℓ s_lo ≤
+      (4 * ↑n / ↑ℓ) * (1 / ↑m ^ 2 + 2 * W / ↑m) :=
+    discretization_autoconv_error n m hn hm f hf_nonneg hf_supp hf_int ℓ s_lo hℓ W hW
+  linarith
 
 /-- Claim 1.2 (corrected): Correction term 2n·(2/m + 1/m²) for discretization error.
 
@@ -1863,7 +2030,7 @@ theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SECTION 19: Discretization Error Infrastructure (from outputs 21, 22)
 -- Source: output (21).lean (UUID: fd0c8f2e), output (22).lean (UUID: 09b5fd79)
--- Status: Definitions complete, core lemmas proved, some exact? stubs remain
+-- Status: Definitions complete, core lemmas proved, exact? stubs resolved
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Discretization error: δ_i = c_i/m - μ_i. -/
@@ -2039,5 +2206,114 @@ lemma sum_mul_bound_succ {n : ℕ} (a b : Fin (n + 1) → ℝ) (A V : ℝ)
   rw [ h_sum_parts, abs_le ] at *;
   have := ha ( Fin.last n );
   norm_num [ Fin.le_last ] at * ; constructor <;> nlinarith [ abs_le.mp this ]
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- SECTION 20: Final Result — Autoconvolution Constant Lower Bound
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+/-- **Computational axiom**: The branch-and-prune cascade with parameters
+    n_half=2, m=20, c_target=1.4 terminated with zero survivors at level L5.
+
+    This was verified by a 70-hour computation (see data/cpu_cascade_20260319_201644.json).
+    The cascade tested all compositions of m=20 into d=4 bins at successively finer
+    resolutions (d=4,8,16,32,64,128), pruning compositions whose test value exceeds
+    the dynamic threshold. At the finest level (d=128), zero compositions survived,
+    meaning every possible discretization is prunable.
+
+    Verifying this in Lean's kernel would require native_decide over ~10^13 cases,
+    which is infeasible. Instead, we accept the computational result as an axiom
+    backed by the reproducible computation stored in data/. -/
+axiom cascade_all_pruned :
+  ∀ c : Fin (2 * 64) → ℕ, ∑ i, c i = 20 →
+    ∃ ℓ s_lo, 2 ≤ ℓ ∧
+      test_value 64 20 c ℓ s_lo >
+        (7/5 : ℝ) + (4 * (64 : ℝ) / ℓ) *
+          (1 / (20 : ℝ)^2 + 2 * ((∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20) / 20)
+
+/-- Scale invariance of the autoconvolution ratio.
+    R(a·f) = R(f) for a > 0. This is immediate from bilinearity of convolution
+    and linearity of the integral: ‖(af)*(af)‖∞ = a²·‖f*f‖∞ and (∫af)² = a²·(∫f)²,
+    so the a² factors cancel. -/
+theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 0 < a) :
+    autoconvolution_ratio (fun x => a * f x) = autoconvolution_ratio f := by
+  unfold autoconvolution_ratio
+  dsimp only []
+  -- Step 1: convolution of (a*f) with (a*f) = a^2 * convolution of f with f
+  have h_conv : MeasureTheory.convolution (fun x => a * f x) (fun x => a * f x)
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume =
+      fun x => a ^ 2 * MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x := by
+    ext x; simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
+    simp only [mul_comm (a) (f _), ← mul_assoc]
+    rw [← MeasureTheory.integral_mul_left]
+    congr 1; ext t; ring
+  -- Step 2: eLpNorm scales
+  rw [h_conv]
+  have h_norm : (MeasureTheory.eLpNorm (fun x => a ^ 2 * MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x) ⊤ MeasureTheory.volume).toReal =
+      a ^ 2 * (MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal := by
+    rw [show (fun x => a ^ 2 * MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ)
+      MeasureTheory.volume x) = (fun x => a ^ 2 • MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x) from by ext; simp [smul_eq_mul]]
+    rw [MeasureTheory.eLpNorm_const_smul (a ^ 2) _]
+    simp [ENNReal.toReal_mul, Real.toNNReal_sq, NNReal.coe_mul]
+    ring_nf
+    rw [Real.enorm_eq_ofReal (by positivity : 0 ≤ a ^ 2)]
+    rw [ENNReal.toReal_ofReal (by positivity)]
+  -- Step 3: integral scales
+  have h_int : MeasureTheory.integral MeasureTheory.volume (fun x => a * f x) =
+      a * MeasureTheory.integral MeasureTheory.volume f := by
+    exact MeasureTheory.integral_const_mul a f
+  rw [h_norm, h_int]
+  -- Step 4: cancel a^2
+  ring_nf
+  by_cases hI : MeasureTheory.integral MeasureTheory.volume f = 0
+  · simp [hI]
+  · have ha2 : a ^ 2 ≠ 0 := pow_ne_zero 2 (ne_of_gt ha)
+    field_simp
+    ring
+
+/-- **Main theorem**: Every nonneg function f supported on (-1/4, 1/4) with positive
+    integral satisfies ‖f*f‖_∞ / (∫f)² ≥ 7/5 = 1.4.
+
+    Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=64 with m=20,
+    apply cascade_all_pruned to find a killing window (ℓ, s_lo) where TV exceeds the
+    per-window threshold, then apply dynamic_threshold_sound to conclude R(g) ≥ 7/5. -/
+theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0) :
+    autoconvolution_ratio f ≥ 7/5 := by
+  -- Step 1: Normalize f to g with ∫g = 1
+  set I := MeasureTheory.integral MeasureTheory.volume f with hI_def
+  set g := fun x => (1/I) * f x with hg_def
+  have hI_pos : 0 < I := hf_int_pos
+  -- Step 2: R(f) = R(g) by scale invariance
+  have h_ratio_eq : autoconvolution_ratio f = autoconvolution_ratio g := by
+    rw [hg_def]
+    exact (autoconvolution_ratio_scale_invariant f (1/I) (by positivity)).symm
+  rw [h_ratio_eq]
+  -- Step 3: g is admissible with ∫g = 1
+  have hg_nonneg : ∀ x, 0 ≤ g x := fun x => mul_nonneg (by positivity) (hf_nonneg x)
+  have hg_supp : Function.support g ⊆ Set.Ioo (-1/4 : ℝ) (1/4) := by
+    intro x hx; apply hf_supp; rw [Function.mem_support] at hx ⊢
+    intro h; exact hx (by simp [hg_def, h])
+  have hg_int : MeasureTheory.integral MeasureTheory.volume g = 1 := by
+    simp [hg_def, MeasureTheory.integral_mul_left]
+    rw [one_div, inv_mul_cancel₀ (ne_of_gt hI_pos)]
+  -- Step 4: Discretize g at resolution n=64, m=20
+  set c := canonical_discretization g (2 * 64) 20
+  -- Step 5: ∑c_i = 20
+  have h_mass_nz : ∑ j : Fin (2 * 64), bin_masses g 64 j ≠ 0 := by
+    rw [sum_bin_masses_eq_one 64 (by norm_num) g hg_supp hg_int]; exact one_ne_zero
+  have hc_sum : ∑ i, c i = 20 :=
+    canonical_discretization_sum_eq_m g 64 20 (by norm_num) (by norm_num) h_mass_nz hg_nonneg
+  -- Step 6: Get killing window from cascade
+  obtain ⟨ℓ, s_lo, hℓ, h_exceeds⟩ := cascade_all_pruned c hc_sum
+  -- Step 7: Apply dynamic_threshold_sound
+  set W := (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20
+  have h_W_def : W = (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / (20 : ℝ) := rfl
+  exact dynamic_threshold_sound 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
+    c hc_sum ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int rfl
 
 end -- noncomputable section
