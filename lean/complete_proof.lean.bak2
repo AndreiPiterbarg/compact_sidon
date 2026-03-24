@@ -1771,62 +1771,39 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
     continuousAt_const.congr (h.mono fun _ hy => hy.symm)
   -- Case 1: x < -1/4
   by_cases hx_lt : x < -(1/4 : ℝ)
-  · exact Filter.eventually_of_mem (IsOpen.mem_nhds isOpen_Iio hx_lt) fun y hy => by
-      show step_function n m c y = step_function n m c x
+  · exact Filter.eventually_of_mem (isOpen_Iio.mem_nhds hx_lt) fun y hy => by
       have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
       have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
       simp only [step_function, h1, h2, ↓reduceIte]
   · push_neg at hx_lt
     -- Case 2: x ≥ 1/4
     by_cases hx_ge : x ≥ (1/4 : ℝ)
-    · have hx_gt : x > 1/4 := by
-        rcases eq_or_lt_of_le hx_ge with h_eq | h_gt
-        · exfalso
-          have h_bnd := hx ⟨2 * n, by omega⟩
-          apply h_bnd
-          rw [← h_eq]; push_cast
-          have : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (Nat.not_eq_zero_of_lt (Nat.zero_lt_of_lt hn))
-          field_simp
-        · exact h_gt
-      exact Filter.eventually_of_mem (IsOpen.mem_nhds isOpen_Ioi hx_gt) fun y hy => by
-        show step_function n m c y = step_function n m c x
+    · have hx_gt : x > 1/4 := lt_of_le_of_ne hx_ge (Ne.symm
+        (hx ⟨2 * n, by omega⟩ (by field_simp; ring)))
+      exact Filter.eventually_of_mem (isOpen_Ioi.mem_nhds hx_gt) fun y hy => by
         have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
         have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
         simp only [step_function, h1, h2, ↓reduceIte]
     · -- Case 3: -1/4 < x < 1/4, not a boundary
       push_neg at hx_ge
-      have hx_lo : -(1/4 : ℝ) < x := by
-        rcases eq_or_lt_of_le hx_lt with h_eq | h_lt
-        · exfalso; have := hx ⟨0, by omega⟩; apply this; simp [← h_eq]
-        · exact h_lt
+      have hx_lo : -(1/4 : ℝ) < x := lt_of_le_of_ne hx_lt
+        (Ne.symm (hx ⟨0, by omega⟩ (by simp)))
       -- α = (x + 1/4) / δ is in (0, 2n) and not an integer
-      set δ := (1 : ℝ) / (4 * ↑n) with hδ_def
-      have hδ_pos : (0 : ℝ) < δ := by rw [hδ_def]; positivity
-      set α := (x + 1/4) / δ with hα_def
-      have hα_pos : 0 < α := div_pos (by linarith) hδ_pos
-      have h4n_ne : (4 * (↑n : ℝ)) ≠ 0 := by positivity
+      set δ := (1 : ℝ) / (4 * ↑n)
+      set α := (x + 1/4) / δ
       have hα_ne_int : ∀ z : ℤ, α ≠ ↑z := by
         intro z hz
         have hx_eq : x = -(1/4 : ℝ) + (z : ℝ) / (4 * ↑n) := by
-          rw [hα_def, hδ_def] at hz
-          field_simp [h4n_ne] at hz ⊢
-          linarith
+          field_simp [show (4 * (↑n : ℝ)) ≠ 0 from by positivity] at hz ⊢; linarith
         have hz_nn : (0 : ℤ) ≤ z := by
           by_contra h; push_neg at h
-          have : (z : ℝ) < 0 := Int.cast_lt_zero.mpr h
-          linarith [hx_eq]
+          linarith [show 0 < α from by positivity, show α = (z : ℝ) from hz]
         have hz_le : z ≤ 2 * ↑n := by
           by_contra h; push_neg at h
-          have hα_lt : α < 2 * ↑n := by
-            rw [hα_def, hδ_def, div_lt_iff₀ hδ_pos]
-            have hδ_val : 2 * (↑n : ℝ) * δ = 1/2 := by rw [hδ_def]; field_simp; ring
-            linarith
-          have : (↑z : ℝ) > 2 * (↑n : ℝ) := by exact_mod_cast h
-          linarith [hz]
-        have h := hx ⟨z.toNat, by omega⟩
-        apply h; rw [hx_eq]
-        push_cast [Int.toNat_of_nonneg hz_nn]
-        ring
+          have hα_lt : α < 2 * ↑n := by simp [α, δ]; field_simp; nlinarith
+          linarith [show α = (z : ℝ) from hz]
+        exact hx ⟨z.toNat, by omega⟩ (by
+          rw [hx_eq]; congr 1; exact_mod_cast Int.toNat_of_nonneg hz_nn)
       -- Floor is locally constant at non-integer points
       set z := ⌊α⌋
       have hz1 : (↑z : ℝ) < α := lt_of_le_of_ne (Int.floor_le α) (fun h => hα_ne_int z h.symm)
@@ -1837,15 +1814,12 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
           (show (x + 1/4) / δ ∈ Set.Ioo (↑z : ℝ) (↑z + 1) from ⟨hz1, hz2⟩),
         isOpen_Ioo.mem_nhds (show x ∈ Set.Ioo (-(1/4 : ℝ)) (1/4) from ⟨hx_lo, hx_ge⟩)
       ] with y hy_floor hy_range
-      have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z := by
-        apply le_antisymm
-        · have := Int.floor_lt.mpr hy_floor.2; omega
-        · exact Int.le_floor.mpr (le_of_lt hy_floor.1)
-      have hy_cond : ¬(y < (-1:ℝ)/4 ∨ y ≥ 1/4) := by push_neg; constructor <;> linarith [hy_range.1, hy_range.2]
-      have hx_cond : ¬(x < (-1:ℝ)/4 ∨ x ≥ 1/4) := by push_neg; constructor <;> linarith
-      simp only [step_function, hy_cond, hx_cond, ↓reduceIte]
-      simp only [show (1 : ℝ) / (4 * (↑n : ℝ)) = δ from rfl, h_floor_eq]
-      rfl
+      have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z :=
+        le_antisymm (Int.lt_add_one_iff.mp (Int.floor_lt.mpr hy_floor.2))
+          (Int.le_floor.mpr (le_of_lt hy_floor.1))
+      have hy_cond : ¬(y < -(1/4:ℝ) ∨ y ≥ 1/4) := by push_neg; exact ⟨le_of_lt hy_range.1, hy_range.2⟩
+      have hx_cond : ¬(x < -(1/4:ℝ) ∨ x ≥ 1/4) := by push_neg; exact ⟨le_of_lt hx_lo, hx_ge⟩
+      simp only [step_function, hy_cond, hx_cond, ↓reduceIte, h_floor_eq]
 
 lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
@@ -1862,27 +1836,19 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
   -- The convolution of bounded compactly-supported step functions is continuous and bounded
   set S := step_function n m c
   have h_S_int : MeasureTheory.Integrable S MeasureTheory.volume := step_function_integrable n m c
-  have h_S_nn : ∀ x, 0 ≤ S x := step_function_nonneg n m hm c
+  have h_conv_int : MeasureTheory.Integrable (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) MeasureTheory.volume :=
+    MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ) h_S_int h_S_int
   have h_conv_nn : ∀ x, 0 ≤ MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x :=
-    convolution_nonneg h_S_nn h_S_nn
-  -- Step function has compact support: supp(S) ⊆ [-1/4, 1/4) ⊆ [-1/4, 1/4], which is compact
-  have h_S_compact : HasCompactSupport S := by
-    apply CompactIccSpace.isCompact_Icc.of_isClosed_subset isClosed_closure
-    exact (closure_mono ((step_function_support n m c).trans Set.Ico_subset_Icc_self)).trans
-      (by rw [closure_Icc])
-  -- Convolution is continuous: by Mathlib's HasCompactSupport.continuous_convolution_right.
-  -- This replaces the 40-line DCT proof: for compactly-supported L¹ functions,
-  -- the parameterized integral ∫ S(t)·S(y-t) dt is continuous in y.
-  have h_conv_cont : Continuous (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) :=
-    h_S_compact.continuous_convolution_right (ContinuousLinearMap.mul ℝ ℝ) h_S_int
-  -- Step function bounded by 1
+    convolution_nonneg (step_function_nonneg n m hm c) (step_function_nonneg n m hm c)
+  -- The convolution of two compactly-supported L¹ functions is continuous
+  -- The L∞ norm is finite (bounded compactly-supported)
   have h_S_le_one : ∀ x, S x ≤ 1 := by
     intro x; simp only [S, step_function]
     split_ifs with h1 h2
     · linarith
     · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
     · linarith
-  -- Convolution bounded by ∫ S (pointwise)
+  have h_S_nn : ∀ x, 0 ≤ S x := step_function_nonneg n m hm c
   have h_bound : ∀ y, MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume y ≤ ∫ t, S t := by
     intro y
     simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
@@ -1892,14 +1858,10 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
           rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
           exact h_S_le_one x))
     · exact h_S_int
-    · exact MeasureTheory.ae_of_all _ (fun t =>
+    · exact MeasureTheory.ae_of_all MeasureTheory.volume (fun t => by
         calc S t * S (y - t) ≤ S t * 1 :=
               mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
-          _ = S t := mul_one _)
-  -- Convolution is integrable: continuous + compact support → integrable
-  have h_conv_int : MeasureTheory.Integrable (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) MeasureTheory.volume :=
-    h_conv_cont.integrable_of_hasCompactSupport (h_S_compact.convolution h_S_compact)
-  -- eLpNorm is finite (bounded above by ∫ S)
+          _ = S t := by ring)
   have h_memLp := MeasureTheory.memLp_top_of_bound
     h_conv_int.aestronglyMeasurable (∫ t, S t)
     (MeasureTheory.ae_of_all _ (fun y => by
@@ -1907,7 +1869,45 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
       exact h_bound y))
   have h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ :=
     h_memLp.2.ne
-  -- Apply: essSup ≥ pointwise value at the grid point (continuous → ae ≤ essSup holds pointwise)
+  -- Apply: essSup ≥ pointwise value at the grid point.
+  -- The convolution S ⋆ S is continuous: S is piecewise-constant with finitely many
+  -- discontinuities, so S ⋆ S is piecewise-linear (hence continuous).
+  -- Proof: by DCT (continuousAt_of_dominated), the integral ∫ S(t)·S(y-t) dt is
+  -- continuous in y. Domination: |S(t)·S(y-t)| ≤ S(t) ∈ L¹. AE-continuity: for ae t,
+  -- y₀-t is not a bin boundary, so y ↦ S(y-t) is locally constant near y₀.
+  -- The full case analysis on floor-function local constancy is a standard but tedious
+  -- exercise in real analysis. We accept it here to focus on the main proof structure.
+  have h_conv_cont : Continuous (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) := by
+    -- Rewrite convolution as parameterized integral, then apply DCT for continuity.
+    -- S has finitely many discontinuities ⟹ for ae t, y ↦ S(y-t) is ContinuousAt.
+    -- Domination: |S(t)·S(y-t)| ≤ ‖S(t)‖ since S ≤ 1.
+    show Continuous fun y => ∫ t, (ContinuousLinearMap.mul ℝ ℝ) (S t) (S (y - t))
+    simp only [ContinuousLinearMap.mul_apply']
+    rw [continuous_iff_continuousAt]; intro y₀
+    apply MeasureTheory.continuousAt_of_dominated (bound := fun t => ‖S t‖)
+    · -- Measurability
+      exact Filter.Eventually.of_forall fun y =>
+        h_S_int.aestronglyMeasurable.mul (h_S_int.comp_sub_left y).aestronglyMeasurable
+    · -- Domination: ‖S(t)·S(y-t)‖ ≤ ‖S(t)‖
+      exact Filter.Eventually.of_forall fun y => by
+        filter_upwards with t; rw [norm_mul]
+        exact mul_le_mul_of_nonneg_left
+          (by rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn _)]; exact h_S_le_one _) (norm_nonneg _)
+    · exact h_S_int.norm
+    · -- AE continuity: for ae t, y ↦ S(t) · S(y - t) is ContinuousAt y₀.
+      -- The discontinuity set of S is finite (⊆ bin boundaries), so null.
+      have h_disc : Set.Finite {x : ℝ | ¬ContinuousAt S x} :=
+        Set.Finite.subset (Set.finite_range (fun k : Fin (2 * n + 1) =>
+            -(1/4 : ℝ) + ↑k.val / (4 * ↑n)))
+          (fun x hx_disc => by
+            simp only [Set.mem_range]; by_contra h_none; push_neg at h_none
+            exact hx_disc (step_function_continuousAt n m hn c x h_none))
+      have h_null : MeasureTheory.volume {t : ℝ | ¬ContinuousAt S (y₀ - t)} = 0 :=
+        MeasureTheory.measure_mono_null
+          (fun t ht => (Set.mem_image _ _ _).mpr ⟨y₀ - t, ht, by ring⟩)
+          ((h_disc.image _).measure_zero _)
+      filter_upwards [MeasureTheory.ae_iff.mpr h_null] with t ht
+      exact continuousAt_const.mul (ht.comp (continuousAt_id.sub continuousAt_const))
   exact eLpNorm_top_ge_of_continuous_at
     (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
     h_conv_nn h_conv_int _ h_conv_cont.continuousAt h_fin
@@ -2011,9 +2011,9 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
     intro k; rw [Finset.mul_sum]; congr 1; ext i; rw [Finset.mul_sum]; congr 1; ext j
     split_ifs <;> ring
   have h_fac' : ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-      (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-        if i.1 + j.1 = k then ((4 : ℝ) * ↑n * μ i) * ((4 : ℝ) * ↑n * μ j) else (0 : ℝ)) =
-      ((4 : ℝ) * ↑n) ^ 2 * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+      ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+        if i.1 + j.1 = k then (4 * ↑n * μ i) * (4 * ↑n * μ j) else 0 =
+      (4 * ↑n) ^ 2 * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
         ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
           if i.1 + j.1 = k then μ i * μ j else 0 := by
     rw [Finset.mul_sum]; congr 1; ext k; exact h_fac k
@@ -2022,7 +2022,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
     ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
       if i.1 + j.1 = k then μ i * μ j else 0
   have h_simp : (1 / (4 * ↑n * ↑ℓ)) * ((4 * ↑n) ^ 2 * ws) = (4 * ↑n / ↑ℓ) * ws := by
-    field_simp
+    field_simp; ring
   rw [h_simp]
   -- ws <= 1 (window partial sum <= total autoconvolution)
   have h_ws_le : ws ≤ 1 := by
@@ -2045,7 +2045,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
   suffices h_key : ws ≤ N * (↑ℓ / (4 * ↑n)) by
     calc (4 * ↑n / ↑ℓ) * ws ≤ (4 * ↑n / ↑ℓ) * (N * (↑ℓ / (4 * ↑n))) :=
           mul_le_mul_of_nonneg_left h_key (div_nonneg (by positivity) (by positivity))
-      _ = N := by field_simp
+      _ = N := by field_simp; ring
   -- Prove ws <= N * ell/(4n) by the integral chain:
   -- ws = integral(g) where g = sum of cross-bin convolutions (pointwise),
   -- g <= conv_ff (sum_f_bin_le), g >= 0, g supported in Z of vol ell/(4n).
@@ -2153,8 +2153,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
     have hf_compact := f_has_compact_support f hf_supp
     have hconv_cont : Continuous conv_ff :=
       hf_compact.continuous_convolution_right (ContinuousLinearMap.mul ℝ ℝ) hf_int'
-    have hconv_int : MeasureTheory.Integrable conv_ff MeasureTheory.volume :=
-      hconv_cont.integrable_of_hasCompactSupport (hf_compact.convolution hf_compact)
+    have hconv_int := MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ) hf_int' hf_int'
     -- conv_ff is bounded: eLpNorm < top
     have hconv_fin : MeasureTheory.eLpNorm conv_ff ⊤ MeasureTheory.volume ≠ ⊤ := by
       exact (MeasureTheory.memLp_top_of_bound hconv_int.aestronglyMeasurable (∫ t, f t)
@@ -2586,7 +2585,7 @@ private lemma range_sum_delta_le (n m : ℕ) (hn : n > 0) (hm : m > 0)
   rw [h_sum_eq]
   have h_upper := cumulative_delta_upper n m hn hm f hf_nonneg hf_supp hf_int b hb
   have h_lower := cumulative_delta_lower n m hn hm f hf_nonneg hf_supp hf_int a (le_trans hab hb)
-  linarith
+  exact sub_le_iff_le_add.mpr (le_trans h_upper (by linarith))
 
 -- Range sum bound (lower): Σ_{a≤i<b} δ_i ≥ -1/m
 private lemma range_sum_delta_ge (n m : ℕ) (hn : n > 0) (hm : m > 0)
@@ -2738,30 +2737,15 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         if i.1 + j.1 = k then w i * w j - μ i * μ j else 0 with hQ_def
     have h_diff_eq : test_value n m (canonical_discretization f n m) ℓ s_lo -
         test_value_continuous n f ℓ s_lo = (4 * ↑n / ↑ℓ) * Q := by
-      -- From LaTeX §3 (Discretization Error): both test values share the form
-      -- (1/(4nℓ)) × Σ_k autoconv(weights)(k). Their difference factors as (4n/ℓ) × Q
-      -- via the summand identity: (4n/m)²·c_i·c_j - (4n)²·μ_i·μ_j = (4n)²·(w_i·w_j - μ_i·μ_j).
-      --
-      -- Strategy: prove each summand factors, then reassemble.
-      have h_inner : ∀ k, (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            if i.1 + j.1 = k then 4 * ↑n / ↑m * ↑(canonical_discretization f n m i) *
-              (4 * ↑n / ↑m * ↑(canonical_discretization f n m j)) else 0) -
-          (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            if i.1 + j.1 = k then 4 * ↑n * bin_masses f n i *
-              (4 * ↑n * bin_masses f n j) else 0) =
-          (4 * ↑n) ^ 2 * (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            if i.1 + j.1 = k then w i * w j - μ i * μ j else 0) := by
-        intro k
-        rw [← Finset.sum_sub_distrib, Finset.mul_sum]
-        congr 1; ext i
-        rw [← Finset.sum_sub_distrib, Finset.mul_sum]
-        congr 1; ext j
-        rw [hw_def, hμ_def]; split_ifs <;> ring
-      unfold test_value test_value_continuous discrete_autoconvolution
-      simp only []
-      rw [← mul_sub, ← Finset.sum_sub_distrib]
-      simp_rw [h_inner, ← Finset.mul_sum]
-      rw [hQ_def]; ring
+      rw [hQ_def]; unfold test_value test_value_continuous discrete_autoconvolution; simp only []
+      rw [show (1 / (4 * ↑n * ↑ℓ)) * _ - (1 / (4 * ↑n * ↑ℓ)) * _ =
+          (1 / (4 * ↑n * ↑ℓ)) * (_ - _) from by ring]
+      rw [← Finset.sum_sub_distrib]; congr 1
+      · rw [show 4 * (↑n : ℝ) / ↑ℓ = 1 / (4 * ↑n * ↑ℓ) * (4 * ↑n) ^ 2 from by field_simp; ring]
+      · apply Finset.sum_congr rfl; intro k _; rw [← Finset.sum_sub_distrib]
+        apply Finset.sum_congr rfl; intro i _; rw [← Finset.sum_sub_distrib]
+        apply Finset.sum_congr rfl; intro j _
+        split_ifs with heq; · rw [h_aw i, h_aw j]; ring; · ring
     suffices hQ_bound : Q ≤ 1 / ↑m ^ 2 + 2 * W / ↑m by
       rw [h_diff_eq]; exact mul_le_mul_of_nonneg_left hQ_bound (by positivity)
     set Part_A := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
@@ -2771,48 +2755,36 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
           if i.1 + j.1 = k then μ i * δ_i j else 0
     have hQ_eq : Q = Part_A + Part_B := by
-      -- From LaTeX §3: using the algebraic identity w·w - μ·μ = δ·w + μ·δ,
-      -- split Q = Σ (w_i*w_j - μ_i*μ_j) into Part_A = Σ δ_i*w_j + Part_B = Σ μ_i*δ_j.
       simp only [hQ_def, Part_A, Part_B, ← Finset.sum_add_distrib]
-      congr 1; ext k; rw [← Finset.sum_add_distrib]
-      congr 1; ext i; rw [← Finset.sum_add_distrib]
-      congr 1; ext j
-      split_ifs with h
-      · exact h_two_term i j
-      · simp
+      apply Finset.sum_congr rfl; intro k _; rw [← Finset.sum_add_distrib]
+      apply Finset.sum_congr rfl; intro i _; rw [← Finset.sum_add_distrib]
+      apply Finset.sum_congr rfl; intro j _
+      split_ifs with heq; · rw [h_two_term]; · ring
     -- Part A: exchange sums, bound range sums by 1/m, restrict to CB
     have hPartA_exch : Part_A = ∑ j : Fin (2 * n), w j *
         (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ i : Fin (2 * n),
-          if i.1 + j.1 = k then δ_i i else (0 : ℝ)) := by
-      simp only [Part_A]
-      simp_rw [show ∀ (k : ℕ) (i j : Fin (2 * n)),
-          (if i.1 + j.1 = k then δ_i i * w j else (0 : ℝ)) =
-          w j * (if i.1 + j.1 = k then δ_i i else 0) from
-        fun _ _ _ => by split_ifs <;> ring]
-      conv_lhs => arg 2; ext k; rw [Finset.sum_comm]
-      rw [Finset.sum_comm]
-      congr 1; ext j; simp_rw [← Finset.mul_sum]
+          if i.1 + j.1 = k then δ_i i else 0) := by
+      show _ = _; rw [show ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+          if i.1 + j.1 = k then δ_i i * w j else 0 =
+        ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+        ∑ j : Fin (2 * n), w j * ∑ i : Fin (2 * n),
+          if i.1 + j.1 = k then δ_i i else 0 from by
+        congr 1; ext k; rw [Finset.sum_comm]; congr 1; ext j
+        rw [← Finset.mul_sum]; congr 1; ext i; split_ifs <;> ring]
+      rw [Finset.sum_comm]; congr 1; ext j; rw [Finset.mul_sum]
     set g_fn : Fin (2 * n) → ℝ := fun j =>
       ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ i : Fin (2 * n),
         if i.1 + j.1 = k then δ_i i else 0
     have hg_eq : ∀ j : Fin (2 * n), g_fn j = ∑ i ∈ Finset.filter
         (fun i : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
         Finset.univ, δ_i i := by
-      intro j; simp only [g_fn]
-      -- Exchange order of summation: Σ_k Σ_i → Σ_i Σ_k
-      rw [Finset.sum_comm]
-      -- Commute equality in the if-condition, then apply Finset.sum_ite_eq'
-      simp_rw [show ∀ (i : Fin (2 * n)) (k : ℕ),
-          (if i.1 + j.1 = k then δ_i i else (0 : ℝ)) =
-          (if k = i.1 + j.1 then δ_i i else 0) from
-        fun i k => by split_ifs with h1 h2 <;> simp_all]
-      simp_rw [Finset.sum_ite_eq', Finset.mem_Icc]
-      rw [← Finset.sum_filter]
-      congr 1
-      ext i; simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-      constructor
-      · intro ⟨h1, h2⟩; exact ⟨h1, by omega⟩
-      · intro ⟨h1, h2⟩; exact ⟨h1, by omega⟩
+      intro j; show _ = _; rw [Finset.sum_comm]
+      apply Finset.sum_congr rfl; intro i _
+      rw [Finset.sum_ite_eq']; simp only [Finset.mem_Icc, Finset.mem_filter, Finset.mem_univ, true_and]
+      split_ifs with h1 h2 h2
+      · rfl; · exfalso; exact h2 ⟨h1.1, by omega⟩
+      · exfalso; exact h1 ⟨h2.1, by omega⟩; · rfl
     have hg_le : ∀ j, g_fn j ≤ 1 / ↑m := by
       intro j; rw [hg_eq j]
       have h_eq : Finset.filter
@@ -2822,22 +2794,17 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
           (if s_lo ≥ j.1 then s_lo - j.1 else 0) ≤ i.1 ∧
           i.1 < (if s_lo + ℓ ≥ j.1 + 2 then s_lo + ℓ - j.1 - 2 + 1 else 0))
           Finset.univ := by
-        ext i; simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-        constructor <;> intro ⟨h1, h2⟩ <;> (constructor <;> (split_ifs at * <;> omega))
+        ext i; simp [Finset.mem_filter]
+        constructor <;> intro ⟨h1, h2⟩ <;> (constructor <;> split_ifs <;> omega)
       rw [h_eq]; set a := if s_lo ≥ j.1 then s_lo - j.1 else 0
       set b := if s_lo + ℓ ≥ j.1 + 2 then s_lo + ℓ - j.1 - 2 + 1 else 0
       by_cases hab : a ≤ b
       · by_cases hb2n : b ≤ 2 * n
         · exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a b hab hb2n
-        · by_cases ha2n : a ≤ 2 * n
-          · have h_clip : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ =
-                Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < 2 * n) Finset.univ := by
-              ext i; simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-              constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
-            rw [h_clip]; exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) ha2n le_rfl
-          · have : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ = ∅ := by
-              rw [Finset.filter_eq_empty_iff]; intro i _; simp; omega
-            rw [this, Finset.sum_empty]; positivity
+        · have h_clip : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ =
+              Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < 2 * n) Finset.univ := by
+            ext i; simp [Finset.mem_filter]; constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
+          rw [h_clip]; exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) (by omega) le_rfl
       · have : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ = ∅ := by
           rw [Finset.filter_eq_empty_iff]; intro i _; simp; omega
         rw [this, Finset.sum_empty]; positivity
@@ -2868,43 +2835,26 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
     have hPartB_exch : Part_B = ∑ i : Fin (2 * n), μ i *
         (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
           if i.1 + j.1 = k then δ_i j else 0) := by
-      have h_factor : ∀ (i j : Fin (2 * n)) (k : ℕ),
-          (if i.1 + j.1 = k then μ i * δ_i j else (0 : ℝ)) =
-          μ i * (if i.1 + j.1 = k then δ_i j else 0) := by
-        intros; split_ifs <;> ring
-      calc Part_B
-          = ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-              ∑ i : Fin (2 * n), μ i * ∑ j : Fin (2 * n),
-                if i.1 + j.1 = k then δ_i j else 0 := by
-            apply Finset.sum_congr rfl; intro k _
-            apply Finset.sum_congr rfl; intro i _
-            conv_lhs => arg 2; ext j; rw [h_factor]
-            rw [← Finset.mul_sum]
-        _ = ∑ i : Fin (2 * n), μ i *
-              (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
-                if i.1 + j.1 = k then δ_i j else 0) := by
-            rw [Finset.sum_comm]
-            congr 1; ext i; rw [Finset.mul_sum]
+      show _ = _; rw [show ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+          if i.1 + j.1 = k then μ i * δ_i j else 0 =
+        ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+        ∑ i : Fin (2 * n), μ i * ∑ j : Fin (2 * n),
+          if i.1 + j.1 = k then δ_i j else 0 from by
+        congr 1; ext k; congr 1; ext i; rw [← Finset.mul_sum]; congr 1; ext j; split_ifs <;> ring]
+      rw [Finset.sum_comm]; congr 1; ext i; rw [Finset.mul_sum]
     set h_fn : Fin (2 * n) → ℝ := fun i =>
       ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
         if i.1 + j.1 = k then δ_i j else 0
     have hh_eq : ∀ i : Fin (2 * n), h_fn i = ∑ j ∈ Finset.filter
         (fun j : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
         Finset.univ, δ_i j := by
-      intro i
-      show (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
-        if i.1 + j.1 = k then δ_i j else 0) = _
-      rw [Finset.sum_comm]
-      have key : ∀ (j : Fin (2*n)) (k : ℕ),
-          (if i.1 + j.1 = k then δ_i j else (0:ℝ)) = (if k = i.1 + j.1 then δ_i j else 0) := by
-        intros j k; split_ifs with h1 h2 <;> simp_all
-      simp_rw [key, Finset.sum_ite_eq', Finset.mem_Icc]
-      rw [← Finset.sum_filter]
-      congr 1; ext j
-      simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-      constructor
-      · intro ⟨h1, h2⟩; exact ⟨h1, by omega⟩
-      · intro ⟨h1, h2⟩; exact ⟨h1, by omega⟩
+      intro i; show _ = _; rw [Finset.sum_comm]
+      apply Finset.sum_congr rfl; intro j _
+      rw [Finset.sum_ite_eq']; simp only [Finset.mem_Icc, Finset.mem_filter, Finset.mem_univ, true_and]
+      split_ifs with h1 h2 h2
+      · rfl; · exfalso; exact h2 ⟨h1.1, by omega⟩
+      · exfalso; exact h1 ⟨h2.1, by omega⟩; · rfl
     have hh_le : ∀ i, h_fn i ≤ 1 / ↑m := by
       intro i; rw [hh_eq i]
       have h_eq : Finset.filter
@@ -2914,10 +2864,8 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
           (if s_lo ≥ i.1 then s_lo - i.1 else 0) ≤ j.1 ∧
           j.1 < (if s_lo + ℓ ≥ i.1 + 2 then s_lo + ℓ - i.1 - 2 + 1 else 0))
           Finset.univ := by
-        ext j; simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-        constructor
-        · intro ⟨h1, h2⟩; constructor <;> split_ifs <;> omega
-        · intro ⟨h1, h2⟩; constructor <;> (split_ifs at h1 h2 <;> omega)
+        ext j; simp [Finset.mem_filter]
+        constructor <;> intro ⟨h1, h2⟩ <;> (constructor <;> split_ifs <;> omega)
       rw [h_eq]; set a := if s_lo ≥ i.1 then s_lo - i.1 else 0
       set b := if s_lo + ℓ ≥ i.1 + 2 then s_lo + ℓ - i.1 - 2 + 1 else 0
       by_cases hab : a ≤ b
@@ -2925,16 +2873,10 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         · exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a b hab hb2n
         · have h_clip : Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < b) Finset.univ =
               Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < 2 * n) Finset.univ := by
-            ext j; simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-            constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
-          rw [h_clip]
-          by_cases ha2n : a ≤ 2 * n
-          · exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) ha2n le_rfl
-          · have : Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < 2 * n) Finset.univ = ∅ := by
-              rw [Finset.filter_eq_empty_iff]; intro j _; omega
-            rw [this, Finset.sum_empty]; positivity
+            ext j; simp [Finset.mem_filter]; constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
+          rw [h_clip]; exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) (by omega) le_rfl
       · have : Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < b) Finset.univ = ∅ := by
-          rw [Finset.filter_eq_empty_iff]; intro j _; omega
+          rw [Finset.filter_eq_empty_iff]; intro j _; simp; omega
         rw [this, Finset.sum_empty]; positivity
     have hh_zero : ∀ i : Fin (2 * n), i ∉ contributing_bins n ℓ s_lo → h_fn i = 0 := by
       intro i hi; rw [hh_eq i, Finset.sum_eq_zero]; intro j hj
@@ -2949,23 +2891,19 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
           rw [← Finset.sum_sub_distrib]; congr 1; ext i; rw [hδ_def]; ring
         rw [this, hW, hw_def, Finset.sum_div]
       rw [h_mu_eq]
-      suffices hd : ∑ i ∈ contributing_bins n ℓ s_lo, δ_i i ≥ -1 / ↑m by
-        have : (-1 : ℝ) / ↑m = -(1 / ↑m) := by ring
-        linarith
+      suffices hd : ∑ i ∈ contributing_bins n ℓ s_lo, δ_i i ≥ -1 / ↑m by linarith
       set cb_lo := Nat.max 0 (s_lo - (2 * n - 1))
       set cb_hi := Nat.min (2 * n - 1) (s_lo + ℓ - 2)
       have hCB_eq : contributing_bins n ℓ s_lo =
           Finset.filter (fun i : Fin (2 * n) => cb_lo ≤ i.1 ∧ i.1 < cb_hi + 1) Finset.univ := by
         ext i; rw [contributing_bins_iff n hn ℓ s_lo hℓ i]
-        simp only [Finset.mem_filter, Finset.mem_univ, true_and]
-        constructor <;> intro ⟨h1, h2⟩ <;> exact ⟨h1, by omega⟩
+        simp [Finset.mem_filter]; omega
       rw [hCB_eq]
       by_cases h_ne : cb_lo ≤ cb_hi
-      · have hcb_hi_bound : cb_hi ≤ 2 * n - 1 := Nat.min_le_left _ _
-        exact range_sum_delta_ge n m hn hm f hf_nonneg hf_supp hf_int cb_lo (cb_hi + 1) (by omega) (by omega)
+      · exact range_sum_delta_ge n m hn hm f hf_nonneg hf_supp hf_int cb_lo (cb_hi + 1) (by omega) (by simp [cb_hi]; omega)
       · have : Finset.filter (fun i : Fin (2 * n) => cb_lo ≤ i.1 ∧ i.1 < cb_hi + 1) Finset.univ = ∅ := by
           rw [Finset.filter_eq_empty_iff]; intro i _; omega
-        rw [this, Finset.sum_empty]; simp only [ge_iff_le, neg_div, Left.neg_nonpos_iff]; positivity
+        rw [this, Finset.sum_empty]; linarith [show (0:ℝ) < 1/↑m from by positivity]
     have hPartB_le : Part_B ≤ W / ↑m + 1 / ↑m ^ 2 := by
       rw [hPartB_exch]
       rw [show ∑ i : Fin (2 * n), μ i * h_fn i =
@@ -2987,11 +2925,7 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         _ ≤ (1/↑m) * (W + 1/↑m) := mul_le_mul_of_nonneg_left hCB_mu_le (by positivity)
         _ = W / ↑m + 1 / ↑m ^ 2 := by ring
     -- Combine: Q = Part_A + Part_B <= W/m + W/m + 1/m^2 = 1/m^2 + 2W/m
-    rw [hQ_eq]
-    have h_sum_le : Part_A + Part_B ≤ W / ↑m + (W / ↑m + 1 / ↑m ^ 2) :=
-      add_le_add hPartA_le hPartB_le
-    have h_rearr : W / ↑m + (W / ↑m + 1 / ↑m ^ 2) = 1 / ↑m ^ 2 + 2 * W / ↑m := by ring
-    linarith
+    rw [hQ_eq]; linarith
 /-- Window-dependent correction bound (Claim 1.2).
     R(f) ≥ TV(c, ℓ, s_lo) - correction.
     Proved by chaining: R(f) ≥ TV_cont ≥ TV(c) - correction. -/
@@ -3150,9 +3084,8 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
     have ha2 : 0 < a ^ 2 := by positivity
     have ha2_ne : a ^ 2 ≠ 0 := ne_of_gt ha2
     have : (fun x => a ^ 2 * MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ)
-        MeasureTheory.volume x) = a ^ 2 • (MeasureTheory.convolution f f
-        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) := by
-      ext x; simp [Pi.smul_apply, smul_eq_mul]
+        MeasureTheory.volume x) = (fun x => a ^ 2 • MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x) := by ext x; rfl
     rw [this, MeasureTheory.eLpNorm_const_smul, ENNReal.toReal_mul,
         Real.enorm_eq_ofReal (le_of_lt ha2), ENNReal.toReal_ofReal (le_of_lt ha2)]
   -- Step 3: integral scales
