@@ -1,9 +1,11 @@
-\documentclass[12pt, a4paper]{article}
+\documentclass[11pt, letterpaper]{article}
 
 % ── Packages ──
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{microtype}
+\usepackage{newtxtext,newtxmath}
 \usepackage{geometry}
 \usepackage{hyperref}
 \usepackage{enumitem}
@@ -12,17 +14,51 @@
 \usepackage{caption}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage[svgnames]{xcolor}
+\usepackage{titling}
+\usepackage{titlesec}
 
-\geometry{margin=1in}
-\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+\geometry{margin=1.05in}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MidnightBlue,
+  citecolor=MidnightBlue,
+  urlcolor=MidnightBlue
+}
+\captionsetup{font=small, labelfont=bf}
+\setlist{topsep=4pt, itemsep=2pt, parsep=0pt}
+\setlength{\parindent}{1.1em}
+\setlength{\parskip}{0pt}
+\allowdisplaybreaks
+\setlength{\droptitle}{-2.8em}
+\pretitle{\begin{center}\LARGE}
+\posttitle{\par\end{center}\vspace{-0.65em}}
+\preauthor{\begin{center}\normalsize}
+\postauthor{\par\end{center}\vspace{-0.45em}}
+\predate{\begin{center}\small}
+\postdate{\par\end{center}\vspace{0.6em}}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries}
+  {\thesection.}{0.55em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries}
+  {\thesubsection.}{0.5em}{}
+\titlespacing*{\section}{0pt}{2.2ex plus 0.8ex minus 0.3ex}{1.0ex}
+\titlespacing*{\subsection}{0pt}{1.6ex plus 0.5ex minus 0.2ex}{0.7ex}
 
 % ── Theorem environments ──
+\newtheoremstyle{paperplain}
+  {8pt}{8pt}{\itshape}{}{\bfseries}{.}{0.5em}{}
+\newtheoremstyle{paperdef}
+  {8pt}{8pt}{\normalfont}{}{\bfseries}{.}{0.5em}{}
+\theoremstyle{paperplain}
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{proposition}[theorem]{Proposition}
 \newtheorem{corollary}[theorem]{Corollary}
 \newtheorem{claim}[theorem]{Claim}
-\theoremstyle{definition}
+\theoremstyle{paperdef}
 \newtheorem{definition}[theorem]{Definition}
 \newtheorem{remark}[theorem]{Remark}
 \newtheorem{example}[theorem]{Example}
@@ -39,12 +75,12 @@
 
 % ══════════════════════════════════════════════════════════════════════
 \title{%
-  A Rigorous Proof Framework for Lower Bounds on the\\
-  Autoconvolution Constant $C_{1a}$\\[6pt]
+  \bfseries A Rigorous Proof Framework for Lower Bounds on the\\
+  \bfseries Autoconvolution Constant $C_{1a}$\\[5pt]
   \large Via the Cloninger--Steinerberger Branch-and-Prune Algorithm
 }
 \author{Jai Bajaj}
-\date{\today}
+\date{March 2026}
 
 \begin{document}
 \maketitle
@@ -66,9 +102,10 @@ Section~\ref{sec:correctness} addresses the invariants that keep the
 computation honest.  Throughout, we emphasize intuition alongside formal
 statements.
 \end{abstract}
+\noindent\textbf{Keywords.} Autoconvolution, Sidon sets, branch-and-prune,
+computer-assisted proof, Lean formalization.
 
-\tableofcontents
-\newpage
+\medskip
 
 % ======================================================================
 \section{Introduction}\label{sec:intro}
@@ -1295,8 +1332,7 @@ E.~Boyer and Z.~Li,
 
 \bibitem{Tao}
 T.~Tao et al.,
-\emph{Optimization Problems Repository},
-\url{https://teorth.github.io/optimizationproblems/constants/1a.html}.
+\href{https://teorth.github.io/optimizationproblems/constants/1a.html}{Optimization Problems Repository, constant C1a page}.
 
 \end{thebibliography}
 
