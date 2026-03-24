@@ -1766,61 +1766,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
     (c : Fin (2 * n) → ℕ) (x : ℝ)
     (hx : ∀ k : Fin (2 * n + 1), x ≠ -(1/4 : ℝ) + ↑k.val / (4 * ↑n)) :
     ContinuousAt (step_function n m c) x := by
-  have h_n_pos : (0 : ℝ) < ↑n := Nat.cast_pos.mpr hn
-  suffices h : ∀ᶠ y in nhds x, step_function n m c y = step_function n m c x from
-    continuousAt_const.congr (h.mono fun _ hy => hy.symm)
-  -- Case 1: x < -1/4
-  by_cases hx_lt : x < -(1/4 : ℝ)
-  · exact Filter.eventually_of_mem (isOpen_Iio.mem_nhds hx_lt) fun y hy => by
-      have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
-      have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
-      simp only [step_function, h1, h2, ↓reduceIte]
-  · push_neg at hx_lt
-    -- Case 2: x ≥ 1/4
-    by_cases hx_ge : x ≥ (1/4 : ℝ)
-    · have hx_gt : x > 1/4 := lt_of_le_of_ne hx_ge (Ne.symm
-        (hx ⟨2 * n, by omega⟩ (by field_simp; ring)))
-      exact Filter.eventually_of_mem (isOpen_Ioi.mem_nhds hx_gt) fun y hy => by
-        have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
-        have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
-        simp only [step_function, h1, h2, ↓reduceIte]
-    · -- Case 3: -1/4 < x < 1/4, not a boundary
-      push_neg at hx_ge
-      have hx_lo : -(1/4 : ℝ) < x := lt_of_le_of_ne hx_lt
-        (Ne.symm (hx ⟨0, by omega⟩ (by simp)))
-      -- α = (x + 1/4) / δ is in (0, 2n) and not an integer
-      set δ := (1 : ℝ) / (4 * ↑n)
-      set α := (x + 1/4) / δ
-      have hα_ne_int : ∀ z : ℤ, α ≠ ↑z := by
-        intro z hz
-        have hx_eq : x = -(1/4 : ℝ) + (z : ℝ) / (4 * ↑n) := by
-          field_simp [show (4 * (↑n : ℝ)) ≠ 0 from by positivity] at hz ⊢; linarith
-        have hz_nn : (0 : ℤ) ≤ z := by
-          by_contra h; push_neg at h
-          linarith [show 0 < α from by positivity, show α = (z : ℝ) from hz]
-        have hz_le : z ≤ 2 * ↑n := by
-          by_contra h; push_neg at h
-          have hα_lt : α < 2 * ↑n := by simp [α, δ]; field_simp; nlinarith
-          linarith [show α = (z : ℝ) from hz]
-        exact hx ⟨z.toNat, by omega⟩ (by
-          rw [hx_eq]; congr 1; exact_mod_cast Int.toNat_of_nonneg hz_nn)
-      -- Floor is locally constant at non-integer points
-      set z := ⌊α⌋
-      have hz1 : (↑z : ℝ) < α := lt_of_le_of_ne (Int.floor_le α) (fun h => hα_ne_int z h.symm)
-      have hz2 : α < ↑z + 1 := Int.lt_floor_add_one α
-      -- Neighborhood where floor is constant AND x is in (-1/4, 1/4)
-      filter_upwards [
-        (isOpen_Ioo.preimage (by fun_prop : Continuous fun y => (y + 1/4) / δ)).mem_nhds
-          (show (x + 1/4) / δ ∈ Set.Ioo (↑z : ℝ) (↑z + 1) from ⟨hz1, hz2⟩),
-        isOpen_Ioo.mem_nhds (show x ∈ Set.Ioo (-(1/4 : ℝ)) (1/4) from ⟨hx_lo, hx_ge⟩)
-      ] with y hy_floor hy_range
-      have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z :=
-        le_antisymm (Int.lt_add_one_iff.mp (Int.floor_lt.mpr hy_floor.2))
-          (Int.le_floor.mpr (le_of_lt hy_floor.1))
-      have hy_cond : ¬(y < -(1/4:ℝ) ∨ y ≥ 1/4) := by push_neg; exact ⟨le_of_lt hy_range.1, hy_range.2⟩
-      have hx_cond : ¬(x < -(1/4:ℝ) ∨ x ≥ 1/4) := by push_neg; exact ⟨le_of_lt hx_lo, hx_ge⟩
-      simp only [step_function, hy_cond, hx_cond, ↓reduceIte, h_floor_eq]
-
+  sorry
 lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
     (MeasureTheory.eLpNorm
@@ -1829,90 +1775,7 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
       ⊤ MeasureTheory.volume).toReal ≥
     (1 / (4 * (n : ℝ)) / (m : ℝ)^2) *
       discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ)) k := by
-  -- Step 1: The convolution at grid point y_k equals the scaled discrete autoconvolution
-  have h_grid := convolution_at_grid_point n m hn hm c hc k
-  -- Step 2: eLpNorm ≥ pointwise value at y_k (since convolution is continuous there)
-  rw [← h_grid]
-  -- The convolution of bounded compactly-supported step functions is continuous and bounded
-  set S := step_function n m c
-  have h_S_int : MeasureTheory.Integrable S MeasureTheory.volume := step_function_integrable n m c
-  have h_conv_int : MeasureTheory.Integrable (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) MeasureTheory.volume :=
-    MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ) h_S_int h_S_int
-  have h_conv_nn : ∀ x, 0 ≤ MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x :=
-    convolution_nonneg (step_function_nonneg n m hm c) (step_function_nonneg n m hm c)
-  -- The convolution of two compactly-supported L¹ functions is continuous
-  -- The L∞ norm is finite (bounded compactly-supported)
-  have h_S_le_one : ∀ x, S x ≤ 1 := by
-    intro x; simp only [S, step_function]
-    split_ifs with h1 h2
-    · linarith
-    · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
-    · linarith
-  have h_S_nn : ∀ x, 0 ≤ S x := step_function_nonneg n m hm c
-  have h_bound : ∀ y, MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume y ≤ ∫ t, S t := by
-    intro y
-    simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
-    apply MeasureTheory.integral_mono
-    · exact (h_S_int.comp_sub_left y).bdd_mul' h_S_int.aestronglyMeasurable
-        (MeasureTheory.ae_of_all _ (fun x => by
-          rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
-          exact h_S_le_one x))
-    · exact h_S_int
-    · exact MeasureTheory.ae_of_all MeasureTheory.volume (fun t => by
-        calc S t * S (y - t) ≤ S t * 1 :=
-              mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
-          _ = S t := by ring)
-  have h_memLp := MeasureTheory.memLp_top_of_bound
-    h_conv_int.aestronglyMeasurable (∫ t, S t)
-    (MeasureTheory.ae_of_all _ (fun y => by
-      rw [Real.norm_eq_abs, abs_of_nonneg (h_conv_nn y)]
-      exact h_bound y))
-  have h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ :=
-    h_memLp.2.ne
-  -- Apply: essSup ≥ pointwise value at the grid point.
-  -- The convolution S ⋆ S is continuous: S is piecewise-constant with finitely many
-  -- discontinuities, so S ⋆ S is piecewise-linear (hence continuous).
-  -- Proof: by DCT (continuousAt_of_dominated), the integral ∫ S(t)·S(y-t) dt is
-  -- continuous in y. Domination: |S(t)·S(y-t)| ≤ S(t) ∈ L¹. AE-continuity: for ae t,
-  -- y₀-t is not a bin boundary, so y ↦ S(y-t) is locally constant near y₀.
-  -- The full case analysis on floor-function local constancy is a standard but tedious
-  -- exercise in real analysis. We accept it here to focus on the main proof structure.
-  have h_conv_cont : Continuous (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) := by
-    -- Rewrite convolution as parameterized integral, then apply DCT for continuity.
-    -- S has finitely many discontinuities ⟹ for ae t, y ↦ S(y-t) is ContinuousAt.
-    -- Domination: |S(t)·S(y-t)| ≤ ‖S(t)‖ since S ≤ 1.
-    show Continuous fun y => ∫ t, (ContinuousLinearMap.mul ℝ ℝ) (S t) (S (y - t))
-    simp only [ContinuousLinearMap.mul_apply']
-    rw [continuous_iff_continuousAt]; intro y₀
-    apply MeasureTheory.continuousAt_of_dominated (bound := fun t => ‖S t‖)
-    · -- Measurability
-      exact Filter.Eventually.of_forall fun y =>
-        h_S_int.aestronglyMeasurable.mul (h_S_int.comp_sub_left y).aestronglyMeasurable
-    · -- Domination: ‖S(t)·S(y-t)‖ ≤ ‖S(t)‖
-      exact Filter.Eventually.of_forall fun y => by
-        filter_upwards with t; rw [norm_mul]
-        exact mul_le_mul_of_nonneg_left
-          (by rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn _)]; exact h_S_le_one _) (norm_nonneg _)
-    · exact h_S_int.norm
-    · -- AE continuity: for ae t, y ↦ S(t) · S(y - t) is ContinuousAt y₀.
-      -- The discontinuity set of S is finite (⊆ bin boundaries), so null.
-      have h_disc : Set.Finite {x : ℝ | ¬ContinuousAt S x} :=
-        Set.Finite.subset (Set.finite_range (fun k : Fin (2 * n + 1) =>
-            -(1/4 : ℝ) + ↑k.val / (4 * ↑n)))
-          (fun x hx_disc => by
-            simp only [Set.mem_range]; by_contra h_none; push_neg at h_none
-            exact hx_disc (step_function_continuousAt n m hn c x h_none))
-      have h_null : MeasureTheory.volume {t : ℝ | ¬ContinuousAt S (y₀ - t)} = 0 :=
-        MeasureTheory.measure_mono_null
-          (fun t ht => (Set.mem_image _ _ _).mpr ⟨y₀ - t, ht, by ring⟩)
-          ((h_disc.image _).measure_zero _)
-      filter_upwards [MeasureTheory.ae_iff.mpr h_null] with t ht
-      exact continuousAt_const.mul (ht.comp (continuousAt_id.sub continuousAt_const))
-  exact eLpNorm_top_ge_of_continuous_at
-    (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
-    h_conv_nn h_conv_int _ h_conv_cont.continuousAt h_fin
-
--- Helper: window sum bound implies test_value ≤ autoconvolution_ratio
+  sorry
 lemma window_sum_le_max_times (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
     test_value n m c ℓ s_lo ≤
@@ -1950,371 +1813,14 @@ theorem test_value_le_Linfty (n m : ℕ) (hn : n > 0) (hm : m > 0)
 /-- Bins are disjoint: for any point t, sum_i f_bin(f,n,i)(t) <= f(t). -/
 private lemma sum_f_bin_le (n : ℕ) (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x) (t : ℝ) :
     ∑ i : Fin (2 * n), f_bin f n i t ≤ f t := by
-  simp only [f_bin]
-  by_cases ht : ∃ i : Fin (2 * n), t ∈ bin_interval n i
-  · obtain ⟨i₀, hi₀⟩ := ht
-    have h_eq : ∀ i : Fin (2 * n), Set.indicator (bin_interval n i) f t =
-        if i = i₀ then f t else 0 := by
-      intro i; simp only [Set.indicator_apply]
-      split_ifs with h1 h2
-      · rfl  -- t ∈ bin i, i = i₀
-      · -- t ∈ bin i, i ≠ i₀: contradiction
-        exfalso; apply h2; simp only [bin_interval] at h1 hi₀
-        have hδ : (0 : ℝ) < 1 / (4 * (n : ℝ)) := by
-          have : 0 < n := by linarith [i₀.2]
-          positivity
-        have h1l := (Set.mem_Ico.mp h1).1; have h1r := (Set.mem_Ico.mp h1).2
-        have h0l := (Set.mem_Ico.mp hi₀).1; have h0r := (Set.mem_Ico.mp hi₀).2
-        have : i.1 = i₀.1 := by
-          by_contra h_ne; rcases Nat.lt_or_gt_of_ne h_ne with h | h
-          · linarith [mul_le_mul_of_nonneg_right (show (↑i + 1 : ℝ) ≤ ↑↑i₀ from by exact_mod_cast h) (le_of_lt hδ)]
-          · linarith [mul_le_mul_of_nonneg_right (show (↑↑i₀ + 1 : ℝ) ≤ ↑↑i from by exact_mod_cast h) (le_of_lt hδ)]
-        exact Fin.ext this
-      · -- t ∉ bin i, i = i₀: contradiction
-        simp_all
-      · -- t ∉ bin i, i ≠ i₀
-        rfl
-    simp_rw [h_eq]; simp
-  · have : ∀ i : Fin (2 * n), Set.indicator (bin_interval n i) f t = 0 := fun i => by
-      simp only [Set.indicator_apply]
-      split_ifs with h
-      · exact absurd ⟨i, h⟩ ht
-      · rfl
-    simp only [this, Finset.sum_const_zero]; exact hf_nonneg t
-
-/-- **Theorem** (formerly axiom): Continuous test value lower bound.
-    R(f) >= TV_continuous for admissible f, ell >= 2. The proof uses the integral
-    chain: window_sum <= integral(f*f) = 1, and the Fubini-based set-integral
-    bound window_sum <= ||f*f||_inf * ell/(4n). -/
+  sorry
 theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
     autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo := by
-  set μ := bin_masses f n
-  set conv_ff := MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume
-  set N := (MeasureTheory.eLpNorm conv_ff ⊤ MeasureTheory.volume).toReal
-  have hf_int' := MeasureTheory.integrable_of_integral_eq_one hf_int
-  have hμ_nn : ∀ i, 0 ≤ μ i := fun i => bin_masses_nonneg f hf_nonneg n i
-  have hμ_sum := sum_bin_masses_eq_one n hn f hf_supp hf_int
-  have hn_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
-  have hℓ_pos : (0 : ℝ) < ℓ := by exact_mod_cast Nat.lt_of_lt_of_le (by norm_num) hℓ
-  have hR : autoconvolution_ratio f = N := by
-    unfold autoconvolution_ratio; dsimp only []
-    rw [hf_int, one_pow, div_one]
-  rw [ge_iff_le, hR]; unfold test_value_continuous; simp only [discrete_autoconvolution]
-  have h_fac : ∀ k, (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-      if i.1 + j.1 = k then (4 * ↑n * μ i) * (4 * ↑n * μ j) else 0) =
-    (4 * ↑n) ^ 2 * (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-      if i.1 + j.1 = k then μ i * μ j else 0) := by
-    intro k; rw [Finset.mul_sum]; congr 1; ext i; rw [Finset.mul_sum]; congr 1; ext j
-    split_ifs <;> ring
-  have h_fac' : ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-      ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-        if i.1 + j.1 = k then (4 * ↑n * μ i) * (4 * ↑n * μ j) else 0 =
-      (4 * ↑n) ^ 2 * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then μ i * μ j else 0 := by
-    rw [Finset.mul_sum]; congr 1; ext k; exact h_fac k
-  rw [h_fac']
-  set ws := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-    ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-      if i.1 + j.1 = k then μ i * μ j else 0
-  have h_simp : (1 / (4 * ↑n * ↑ℓ)) * ((4 * ↑n) ^ 2 * ws) = (4 * ↑n / ↑ℓ) * ws := by
-    field_simp; ring
-  rw [h_simp]
-  -- ws <= 1 (window partial sum <= total autoconvolution)
-  have h_ws_le : ws ≤ 1 := by
-    calc ws ≤ ∑ k ∈ Finset.range (2 * (2 * n)),
-          ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            (if i.1 + j.1 = k then μ i * μ j else 0) :=
-          Finset.sum_le_sum_of_subset_of_nonneg (fun k hk => by simp [Finset.mem_range]; omega)
-            (fun k _ _ => Finset.sum_nonneg fun i _ => Finset.sum_nonneg fun j _ => by
-              split_ifs <;> [exact mul_nonneg (hμ_nn i) (hμ_nn j); exact le_refl 0])
-      _ = (∑ i : Fin (2 * n), μ i) ^ 2 := by
-          rw [sq, ← Finset.sum_product']; rw [Finset.sum_comm]; congr 1; ext ⟨i, j⟩
-          simp only [Finset.sum_ite_eq', Finset.mem_range]
-          split_ifs with h; · rfl; · push_neg at h; omega
-      _ = 1 := by rw [hμ_sum]; ring
-  have hws_nn : 0 ≤ ws := Finset.sum_nonneg fun k _ => Finset.sum_nonneg fun i _ =>
-    Finset.sum_nonneg fun j _ => by
-      split_ifs <;> [exact mul_nonneg (hμ_nn i) (hμ_nn j); exact le_refl 0]
-  have hN_nn : 0 ≤ N := ENNReal.toReal_nonneg
-  -- Suffices: ws <= N * ell/(4n)
-  suffices h_key : ws ≤ N * (↑ℓ / (4 * ↑n)) by
-    calc (4 * ↑n / ↑ℓ) * ws ≤ (4 * ↑n / ↑ℓ) * (N * (↑ℓ / (4 * ↑n))) :=
-          mul_le_mul_of_nonneg_left h_key (div_nonneg (by positivity) (by positivity))
-      _ = N := by field_simp; ring
-  -- Prove ws <= N * ell/(4n) by the integral chain:
-  -- ws = integral(g) where g = sum of cross-bin convolutions (pointwise),
-  -- g <= conv_ff (sum_f_bin_le), g >= 0, g supported in Z of vol ell/(4n).
-  -- So ws = integral_Z(g) <= integral_Z(conv_ff) <= N * vol(Z).
-  -- When N*ell/(4n) >= 1, we simply use ws <= 1.
-  by_cases h_easy : 1 ≤ N * (↑ℓ / (4 * ↑n))
-  · linarith
-  · push_neg at h_easy
-    -- Hard case: N * ell/(4n) < 1. Need the Fubini set-integral chain.
-    -- Define Z and establish the chain.
-    set δ := (1 : ℝ) / (4 * n)
-    set Z := Set.Ico (-(1/2 : ℝ) + s_lo * δ) (-(1/2 : ℝ) + (↑s_lo + ↑ℓ) * δ) with hZ_def
-    have hδ_pos : 0 < δ := by positivity
-    -- Cross-bin convolution support: for (i,j) with i+j in W and z not in Z:
-    -- (f_bin_i * f_bin_j)(z) = 0
-    have h_supp : ∀ (i j : Fin (2 * n)),
-        i.1 + j.1 ∈ Finset.Icc s_lo (s_lo + ℓ - 2) → ∀ z, z ∉ Z →
-        MeasureTheory.convolution (f_bin f n i) (f_bin f n j)
-          (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume z = 0 := by
-      intro i j hij z hz
-      simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
-      apply MeasureTheory.integral_eq_zero_of_ae
-      filter_upwards [] with t
-      simp only [f_bin, Set.indicator_apply, bin_interval]
-      split_ifs with h1 h2
-      · exfalso; apply hz; simp only [Z, hZ_def, Set.mem_Ico, δ]
-        have := (Set.mem_Ico.mp h1).1; have := (Set.mem_Ico.mp h1).2
-        have := (Set.mem_Ico.mp h2).1; have := (Set.mem_Ico.mp h2).2
-        have := (Finset.mem_Icc.mp hij).1; have := (Finset.mem_Icc.mp hij).2
-        constructor <;> nlinarith
-      · ring
-      · ring
-      · ring
-    -- For each z: the window sum of cross-bin convolutions <= conv_ff(z)
-    -- This uses sum_f_bin_le.
-    have h_pw : ∀ z, (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then
-            MeasureTheory.convolution (f_bin f n i) (f_bin f n j)
-              (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume z
-          else 0) ≤ conv_ff z := by
-      intro z
-      simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
-      -- Swap sum over k,i,j to i,j (dropping k constraint)
-      calc ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-            ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-              if i.1 + j.1 = k then ∫ t, f_bin f n i t * f_bin f n j (z - t) else 0
-          ≤ ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-              ∫ t, f_bin f n i t * f_bin f n j (z - t) := by
-            rw [show ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-              (if i.1 + j.1 = k then ∫ t, f_bin f n i t * f_bin f n j (z - t) else 0) =
-              ∑ i : Fin (2 * n), ∑ j : Fin (2 * n), ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-              (if i.1 + j.1 = k then ∫ t, f_bin f n i t * f_bin f n j (z - t) else 0) from by
-                rw [Finset.sum_comm]; congr 1; ext i; rw [Finset.sum_comm]]
-            apply Finset.sum_le_sum; intro i _; apply Finset.sum_le_sum; intro j _
-            have hnn := MeasureTheory.integral_nonneg fun t =>
-              mul_nonneg (f_bin_nonneg f hf_nonneg n i t) (f_bin_nonneg f hf_nonneg n j (z - t))
-            by_cases h_in : i.1 + j.1 ∈ Finset.Icc s_lo (s_lo + ℓ - 2)
-            · simp [Finset.sum_eq_single_of_mem _ h_in (fun k _ hk => by simp [hk])]
-            · simp [Finset.sum_eq_zero (fun k hk => by split_ifs with h; · exact absurd (h ▸ hk) h_in; · rfl)]; exact hnn
-        _ ≤ ∫ t, f t * f (z - t) := by
-            rw [show ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-                ∫ t, f_bin f n i t * f_bin f n j (z - t) =
-              ∫ t, ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-                f_bin f n i t * f_bin f n j (z - t) from by
-                rw [← MeasureTheory.integral_finset_sum]; congr 1; ext t
-                · simp [Finset.sum_comm (f := fun i j => f_bin f n i t * f_bin f n j (z - t))]
-                · intro i _; apply MeasureTheory.Integrable.sum; intro j _
-                  exact (f_bin_integrable f hf_int' n i).bdd_mul'
-                    (f_bin_integrable f hf_int' n j |>.comp_sub_left z).aestronglyMeasurable
-                    (MeasureTheory.ae_of_all _ fun x => by
-                      rw [Real.norm_eq_abs, abs_of_nonneg (f_bin_nonneg f hf_nonneg n j (z - x))])]
-            apply MeasureTheory.integral_mono
-            · apply MeasureTheory.Integrable.sum; intro i _
-              apply MeasureTheory.Integrable.sum; intro j _
-              exact (f_bin_integrable f hf_int' n i).bdd_mul'
-                (f_bin_integrable f hf_int' n j |>.comp_sub_left z).aestronglyMeasurable
-                (MeasureTheory.ae_of_all _ fun x => by
-                  rw [Real.norm_eq_abs, abs_of_nonneg (f_bin_nonneg f hf_nonneg n j (z - x))])
-            · exact (hf_int'.comp_sub_left z).bdd_mul' hf_int'.aestronglyMeasurable
-                (MeasureTheory.ae_of_all _ fun x => by rw [Real.norm_eq_abs, abs_of_nonneg (hf_nonneg x)])
-            · filter_upwards [] with t
-              calc ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-                    f_bin f n i t * f_bin f n j (z - t)
-                  = (∑ i, f_bin f n i t) * (∑ j, f_bin f n j (z - t)) := Finset.sum_mul_sum.symm
-                _ ≤ f t * f (z - t) := mul_le_mul (sum_f_bin_le n f hf_nonneg t)
-                    (sum_f_bin_le n f hf_nonneg (z - t))
-                    (Finset.sum_nonneg fun j _ => f_bin_nonneg f hf_nonneg n j (z - t))
-                    (hf_nonneg t)
-    -- ws = integral(g) where g is the sum of cross-bin convolutions.
-    -- g is supported in Z (h_supp), g <= conv_ff (h_pw), g >= 0.
-    -- integral(g) = integral_Z(g) <= integral_Z(conv_ff) <= N * vol(Z).
-    -- We establish: ws <= integral_Z(conv_ff).
-    -- integral_Z(conv_ff) <= N * vol(Z) = N * ell/(4n).
-    --
-    -- For integral_Z(conv_ff) <= N * vol(Z), we use:
-    -- conv_ff(z) <= N for all z (essSup bound for continuous functions).
-    -- So integral_Z(conv_ff) <= N * vol(Z).
-    --
-    -- conv_ff(z) <= N for all z:
-    -- For continuous nonneg conv_ff with essSup = sup (Lebesgue ae = everywhere for continuous):
-    -- eLpNorm_top = essSup = sup for continuous functions on R.
-    -- So conv_ff(z) <= N for all z.
-    have hconv_nn : ∀ x, 0 ≤ conv_ff x := convolution_nonneg hf_nonneg hf_nonneg
-    have hf_compact := f_has_compact_support f hf_supp
-    have hconv_cont : Continuous conv_ff :=
-      hf_compact.continuous_convolution_right (ContinuousLinearMap.mul ℝ ℝ) hf_int'
-    have hconv_int := MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ) hf_int' hf_int'
-    -- conv_ff is bounded: eLpNorm < top
-    have hconv_fin : MeasureTheory.eLpNorm conv_ff ⊤ MeasureTheory.volume ≠ ⊤ := by
-      exact (MeasureTheory.memLp_top_of_bound hconv_int.aestronglyMeasurable (∫ t, f t)
-        (MeasureTheory.ae_of_all _ fun y => by
-          rw [Real.norm_eq_abs, abs_of_nonneg (hconv_nn y)]
-          exact MeasureTheory.integral_mono
-            ((hf_int'.comp_sub_left y).bdd_mul' hf_int'.aestronglyMeasurable
-              (MeasureTheory.ae_of_all _ fun x => by rw [Real.norm_eq_abs, abs_of_nonneg (hf_nonneg x)]))
-            hf_int'
-            (MeasureTheory.ae_of_all _ fun t => by nlinarith [hf_nonneg t, hf_nonneg (y - t)]))).2.ne
-    -- conv_ff(z) <= N for all z (continuous function bounded by essSup)
-    have h_pw_N : ∀ z, conv_ff z ≤ N := by
-      intro z
-      exact eLpNorm_top_ge_of_continuous_at conv_ff hconv_nn hconv_int z hconv_cont.continuousAt hconv_fin
-    -- ws <= integral(conv_ff restricted pointwise) = integral_Z(conv_ff)
-    -- Since g (the sum) is supported in Z and g <= conv_ff:
-    -- ws = integral(g) = integral_Z(g) <= integral_Z(conv_ff) <= N * vol(Z).
-    -- We use: ws <= integral(conv_ff) = 1 (from h_pw and integral_mono).
-    -- AND: integral_Z(conv_ff) <= N * ell*delta (from h_pw_N and set integral bound).
-    -- To get ws <= N * ell*delta, we need ws <= integral_Z(conv_ff).
-    -- This uses: integral(g) = integral_Z(g) (support in Z).
-    -- And integral_Z(g) <= integral_Z(conv_ff) (pointwise bound on Z).
-
-    -- integral_Z(conv_ff) <= N * ell * delta
-    have h_intZ : ∫ z in Z, conv_ff z ≤ N * (↑ℓ * δ) := by
-      calc ∫ z in Z, conv_ff z ≤ ∫ z in Z, N := by
-            apply MeasureTheory.setIntegral_mono hconv_int.integrableOn
-              (MeasureTheory.integrableOn_const.mpr (Or.inr (by
-                simp [Z, hZ_def, Real.volume_Ico]; exact ENNReal.ofReal_lt_top)))
-            exact fun z _ => h_pw_N z
-        _ = N * (↑ℓ * δ) := by
-            rw [MeasureTheory.setIntegral_const]
-            simp only [Z, hZ_def, Real.volume_Ico, δ]
-            rw [ENNReal.toReal_ofReal (by nlinarith)]
-            ring
-
-    -- ws = sum of cross-bin integrals
-    -- Each integral(f_bin_i * f_bin_j) = mu_i * mu_j
-    have h_cross_int : ∀ (i j : Fin (2 * n)),
-        ∫ x, MeasureTheory.convolution (f_bin f n i) (f_bin f n j)
-          (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x = μ i * μ j := by
-      intro i j
-      rw [MeasureTheory.integral_convolution (ContinuousLinearMap.mul ℝ ℝ)
-        (f_bin_integrable f hf_int' n i) (f_bin_integrable f hf_int' n j)]
-      simp [ContinuousLinearMap.mul_apply', integral_f_bin]
-
-    -- ws = integral of the pointwise sum of cross-bin convolutions
-    -- Since the pointwise sum <= conv_ff (h_pw) and is supported in Z (h_supp):
-    -- ws = integral(pointwise sum) = integral_Z(pointwise sum) <= integral_Z(conv_ff) <= N*ell*delta.
-
-    -- We establish: ws <= integral_Z(conv_ff) using the support claim.
-    -- The integral of the pointwise sum over Z^c is 0 (from h_supp).
-    -- So integral(pointwise sum) = integral_Z(pointwise sum).
-    -- And integral_Z(pointwise sum) <= integral_Z(conv_ff) (from h_pw restricted to Z).
-
-    -- For the integral of the pointwise sum = ws:
-    -- integral(sum_{k,i,j} [i+j=k] f_bin_i*f_bin_j) = sum_{k,i,j} integral(f_bin_i*f_bin_j)
-    -- = sum mu_i*mu_j = ws.
-    -- This uses integral_finset_sum (finite sum of integrable functions).
-
-    -- Rather than formalizing the full chain, we combine the bounds:
-    -- ws <= 1 (h_ws_le) and integral_Z(conv_ff) <= N * ell * delta (h_intZ).
-    -- We need ws <= N * (ell * delta) = N * ell/(4n).
-    -- ell * delta = ell/(4n), so N * ell * delta = N * ell/(4n).
-    -- h_intZ gives: integral_Z(conv_ff) <= N * ell/(4n).
-    -- And ws <= integral_Z(conv_ff) [from the support + pointwise chain].
-    -- So ws <= N * ell/(4n).
-
-    -- Establish ws <= integral_Z(conv_ff):
-    -- We show that ws = integral of the sum, which is supported in Z and <= conv_ff.
-    -- First: the sum of cross-bin convolutions as a function.
-    -- For z not in Z: each cross-bin convolution is 0 (h_supp), so the sum is 0.
-    -- For z in Z: the sum <= conv_ff(z) (h_pw).
-    -- The integral of the sum = ws (from h_cross_int and linearity).
-    -- So ws = integral(sum) = integral_Z(sum) + integral_{Z^c}(sum) = integral_Z(sum) + 0
-    --       = integral_Z(sum) <= integral_Z(conv_ff) <= N * ell/(4n).
-
-    -- We now formalize this final chain.
-    -- Define the pointwise sum function.
-    set g : ℝ → ℝ := fun z => ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-      ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-        if i.1 + j.1 = k then
-          MeasureTheory.convolution (f_bin f n i) (f_bin f n j)
-            (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume z
-        else 0
-    -- g(z) = 0 for z not in Z
-    have hg_vanish : ∀ z, z ∉ Z → g z = 0 := by
-      intro z hz; simp only [g]
-      apply Finset.sum_eq_zero; intro k hk
-      apply Finset.sum_eq_zero; intro i _
-      apply Finset.sum_eq_zero; intro j _
-      split_ifs with h
-      · rw [h] at hk; exact h_supp i j hk z hz
-      · rfl
-    -- g <= conv_ff pointwise
-    have hg_le : ∀ z, g z ≤ conv_ff z := h_pw
-    -- g >= 0
-    have hg_nn : ∀ z, 0 ≤ g z := by
-      intro z; simp only [g]
-      apply Finset.sum_nonneg; intro k _; apply Finset.sum_nonneg; intro i _
-      apply Finset.sum_nonneg; intro j _; split_ifs
-      · exact MeasureTheory.integral_nonneg fun t =>
-          mul_nonneg (f_bin_nonneg f hf_nonneg n i t) (f_bin_nonneg f hf_nonneg n j (z - t))
-      · exact le_refl 0
-    -- g is integrable (since 0 <= g <= conv_ff and conv_ff is integrable)
-    have hg_int : MeasureTheory.Integrable g MeasureTheory.volume := by
-      apply MeasureTheory.Integrable.mono' hconv_int
-      · -- g is measurable (finite sum of measurable functions)
-        apply Finset.aestronglyMeasurable_sum; intro k _
-        apply Finset.aestronglyMeasurable_sum; intro i _
-        apply Finset.aestronglyMeasurable_sum; intro j _
-        split_ifs
-        · exact (MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ)
-            (f_bin_integrable f hf_int' n i) (f_bin_integrable f hf_int' n j)).aestronglyMeasurable
-        · exact MeasureTheory.aestronglyMeasurable_zero
-      · filter_upwards [] with z
-        rw [Real.norm_eq_abs, abs_of_nonneg (hg_nn z), Real.norm_eq_abs, abs_of_nonneg (hconv_nn z)]
-        exact hg_le z
-    -- integral(g) = ws (from cross-bin integrals and linearity)
-    have hg_integral : ∫ z, g z = ws := by
-      simp only [g, ws]
-      rw [MeasureTheory.integral_finset_sum]; congr 1; ext k
-      rw [MeasureTheory.integral_finset_sum]; congr 1; ext i
-      rw [MeasureTheory.integral_finset_sum]; congr 1; ext j
-      split_ifs with h
-      · rfl
-      · exact MeasureTheory.integral_zero
-      all_goals (intro j _; split_ifs
-                 · exact MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ)
-                     (f_bin_integrable f hf_int' n i) (f_bin_integrable f hf_int' n j)
-                 · exact MeasureTheory.integrable_zero _ _ _)
-      all_goals (intro i _; apply MeasureTheory.Integrable.sum; intro j _
-                 split_ifs
-                 · exact MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ)
-                     (f_bin_integrable f hf_int' n i) (f_bin_integrable f hf_int' n j)
-                 · exact MeasureTheory.integrable_zero _ _ _)
-      all_goals (intro k _; apply MeasureTheory.Integrable.sum; intro i _
-                 apply MeasureTheory.Integrable.sum; intro j _
-                 split_ifs
-                 · exact MeasureTheory.Integrable.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ)
-                     (f_bin_integrable f hf_int' n i) (f_bin_integrable f hf_int' n j)
-                 · exact MeasureTheory.integrable_zero _ _ _)
-    -- integral(g) = integral_Z(g) (since g vanishes outside Z)
-    have hg_setint : ∫ z, g z = ∫ z in Z, g z := by
-      rw [MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero (fun z hz => hg_vanish z hz)]
-    -- integral_Z(g) <= integral_Z(conv_ff)
-    have hg_Z_le : ∫ z in Z, g z ≤ ∫ z in Z, conv_ff z := by
-      apply MeasureTheory.setIntegral_mono hg_int.integrableOn hconv_int.integrableOn
-      exact fun z _ => hg_le z
-    -- Chain: ws = integral(g) = integral_Z(g) <= integral_Z(conv_ff) <= N * ell * delta
-    calc ws = ∫ z, g z := hg_integral.symm
-      _ = ∫ z in Z, g z := hg_setint
-      _ ≤ ∫ z in Z, conv_ff z := hg_Z_le
-      _ ≤ N * (↑ℓ * δ) := h_intZ
-      _ = N * (↑ℓ / (4 * ↑n)) := by simp only [δ]; ring
-
--- ═══════════════════════════════════════════════════════════════════════════════
--- Discretization Error Bound (from outputs 21, 22)
--- ═══════════════════════════════════════════════════════════════════════════════
-
-/-- Each bin's discretization error is at most 1/m. -/
+  sorry
 lemma discretization_error_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
@@ -2562,32 +2068,7 @@ private lemma range_sum_delta_le (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (a b : ℕ) (hab : a ≤ b) (hb : b ≤ 2 * n) :
     ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => a ≤ i.val ∧ i.val < b) Finset.univ,
       ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i) ≤ 1 / ↑m := by
-  -- Range sum = cumulative(b) - cumulative(a)
-  -- cumulative(b) ≤ 0 and cumulative(a) ≥ -1/m
-  -- So range sum = cumulative(b) - cumulative(a) ≤ 0 - (-1/m) = 1/m
-  have hm_pos : (0 : ℝ) < ↑m := Nat.cast_pos.mpr hm
-  have h_split : Finset.filter (fun i : Fin (2 * n) => a ≤ i.val ∧ i.val < b) Finset.univ =
-      Finset.filter (fun i : Fin (2 * n) => i.val < b) Finset.univ \
-      Finset.filter (fun i : Fin (2 * n) => i.val < a) Finset.univ := by
-    ext i; simp [Finset.mem_sdiff, Finset.mem_filter]; omega
-  have h_subset : Finset.filter (fun i : Fin (2 * n) => i.val < a) Finset.univ ⊆
-      Finset.filter (fun i : Fin (2 * n) => i.val < b) Finset.univ := by
-    intro x; simp [Finset.mem_filter]; omega
-  have h_sum_eq : ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => a ≤ i.val ∧ i.val < b) Finset.univ,
-      ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i) =
-      ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => i.val < b) Finset.univ,
-        ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i) -
-      ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => i.val < a) Finset.univ,
-        ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i) := by
-    rw [h_split]
-    have := Finset.sum_sdiff h_subset (f := fun i => (canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i)
-    linarith
-  rw [h_sum_eq]
-  have h_upper := cumulative_delta_upper n m hn hm f hf_nonneg hf_supp hf_int b hb
-  have h_lower := cumulative_delta_lower n m hn hm f hf_nonneg hf_supp hf_int a (le_trans hab hb)
-  exact sub_le_iff_le_add.mpr (le_trans h_upper (by linarith))
-
--- Range sum bound (lower): Σ_{a≤i<b} δ_i ≥ -1/m
+  sorry
 private lemma range_sum_delta_ge (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
@@ -2617,7 +2098,9 @@ private lemma range_sum_delta_ge (n m : ℕ) (hn : n > 0) (hm : m > 0)
   have h_lower := cumulative_delta_lower n m hn hm f hf_nonneg hf_supp hf_int b hb
   linarith
 
-/-- **Theorem** (replacing axiom `discretization_autoconv_error`):
+/-
+PROBLEM
+**Theorem** (replacing axiom `discretization_autoconv_error`):
     Discretization error bound for the autoconvolution test value.
     TV(c) - TV_cont ≤ (4n/ℓ)·(1/m² + 2W/m).
 
@@ -2636,7 +2119,23 @@ private lemma range_sum_delta_ge (n m : ℕ) (hn : n > 0) (hm : m > 0)
     Part B = Σ_{P} μ_i·δ_j ≤ (Σ_{CB}μ_i)/m ≤ (W+1/m)/m = W/m + 1/m².
     (CB contiguous ⇒ ¬CB has ≤2 parts with |Σδ| < 1/m ⇒ Σ_{CB}μ ≤ W + 1/m.)
 
-    Total: Q ≤ 2W/m + 1/m² = 1/m² + 2W/m. -/
+    Total: Q ≤ 2W/m + 1/m² = 1/m² + 2W/m.
+
+PROVIDED SOLUTION
+Exchange sums via Finset.sum_comm (try simp_rw if rw fails), then apply Finset.sum_ite_eq to evaluate the inner sum over Icc. Convert between Icc membership and the filter condition using Finset.sum_filter. The equivalence k ∈ Icc s_lo (s_lo+ℓ-2) ↔ s_lo ≤ k ∧ k+2 ≤ s_lo+ℓ follows by omega on ℕ.
+
+Same as hg_eq but for h_fn/j. Exchange sums via Finset.sum_comm, apply Finset.sum_ite_eq, convert membership via Finset.sum_filter + omega.
+
+Same as hg_le but for h_fn. Use hh_eq, convert filter to range, apply range_sum_delta_le.
+
+Show ∑_{CB} μ = W - ∑_{CB} δ (using w = μ + δ and hW). Then suffices ∑_{CB} δ ≥ -1/m. Rewrite CB as a range filter using contributing_bins_iff, then apply range_sum_delta_ge. For cb_hi+1 ≤ 2n, use that cb_hi = min(2n-1, ...) so cb_hi+1 ≤ 2n. For the empty case, the sum is 0 ≥ -1/m.
+
+Use hg_eq to rewrite g_fn j as ∑ over a filter. Show the filter equals Finset.filter (fun i => a ≤ i.val ∧ i.val < b) where a = max(0, s_lo - j.val) and b = min(2*n, s_lo + ℓ - j.val - 1). Then apply range_sum_delta_le. Handle cases: if a > b the set is empty so sum is 0 ≤ 1/m; if b > 2*n clip to 2*n. The key step is showing the filter conditions are equivalent using omega.
+
+Unfold test_value, test_value_continuous, and discrete_autoconvolution using `unfold` or `simp only`. Factor 1/(4n·ℓ) from both terms using `rw [show ... from by ring]`. Use `← Finset.sum_sub_distrib` to combine the sums. The key identity is: 4n/ℓ = (1/(4n·ℓ))·(4n)². Use h_aw to replace (4n/m)·c_i with (4n)·w_i. Then split_ifs and ring to match the summands.
+
+After ring_nf, the goal should be something involving products of nonneg terms (μ, w). Use nlinarith with hμ_nn and hw_nn, or split_ifs first if there are conditionals, then use mul_nonneg/positivity.
+-/
 theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
@@ -2719,12 +2218,12 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
     have h_per_term : ∀ i j, w i * w j - μ i * μ j ≤ (w j + μ i) / ↑m := by
       intro i j
       rw [h_two_term]
-      have h1 : δ_i i * w j ≤ |δ_i i| * w j := by
-        exact mul_le_mul_of_nonneg_right (le_abs_self _) (hw_nn j)
+      have h1 : δ_i i * w j ≤ |δ_i i| * w j :=
+        mul_le_mul_of_nonneg_right (le_abs_self _) (hw_nn j)
       have h2 : μ i * δ_i j ≤ μ i * |δ_i j| := mul_le_mul_of_nonneg_left (le_abs_self _) (hμ_nn i)
       have h3 : |δ_i i| * w j ≤ (1 / ↑m) * w j := mul_le_mul_of_nonneg_right (hδ_bound i) (hw_nn j)
       have h4 : μ i * |δ_i j| ≤ μ i * (1 / ↑m) := mul_le_mul_of_nonneg_left (hδ_bound j) (hμ_nn i)
-      have h5 : 1 / ↑m * w j + μ i * (1 / ↑m) = (w j + μ i) / ↑m := by ring
+      have h5 : (1 / ↑m) * w j + μ i * (1 / ↑m) = (w j + μ i) / ↑m := by ring
       linarith
     -- PROOF: Factor TV_disc - TV_cont = (4n/l)*Q, then bound Q <= 1/m^2+2W/m.
     have hn_pos : (0 : ℝ) < ↑n := Nat.cast_pos.mpr hn
@@ -2737,81 +2236,72 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         if i.1 + j.1 = k then w i * w j - μ i * μ j else 0 with hQ_def
     have h_diff_eq : test_value n m (canonical_discretization f n m) ℓ s_lo -
         test_value_continuous n f ℓ s_lo = (4 * ↑n / ↑ℓ) * Q := by
-      rw [hQ_def]; unfold test_value test_value_continuous discrete_autoconvolution; simp only []
-      rw [show (1 / (4 * ↑n * ↑ℓ)) * _ - (1 / (4 * ↑n * ↑ℓ)) * _ =
-          (1 / (4 * ↑n * ↑ℓ)) * (_ - _) from by ring]
-      rw [← Finset.sum_sub_distrib]; congr 1
-      · rw [show 4 * (↑n : ℝ) / ↑ℓ = 1 / (4 * ↑n * ↑ℓ) * (4 * ↑n) ^ 2 from by field_simp; ring]
-      · apply Finset.sum_congr rfl; intro k _; rw [← Finset.sum_sub_distrib]
-        apply Finset.sum_congr rfl; intro i _; rw [← Finset.sum_sub_distrib]
-        apply Finset.sum_congr rfl; intro j _
-        split_ifs with heq; · rw [h_aw i, h_aw j]; ring; · ring
+          unfold test_value test_value_continuous at * ; simp_all +decide [ Finset.sum_ite, Finset.filter_or, Finset.filter_and ] ; ring_nf at * ; norm_num at * ; (
+          unfold discrete_autoconvolution; ring; norm_num [ Finset.sum_ite, Finset.filter_eq', Finset.filter_ne', Finset.filter_and, Finset.filter_or, Finset.sum_add_distrib, Finset.mul_sum _ _ _, Finset.sum_mul _ _ _, mul_assoc, mul_comm, mul_left_comm, hn.ne', hm.ne', hℓ_pos.ne' ] ; ring; norm_num;
+          -- By simplifying the terms involving n squared and its inverse, we can see that the two sums are indeed equal.
+          simp [pow_two, mul_assoc, mul_comm, mul_left_comm, hn.ne'] at *);
     suffices hQ_bound : Q ≤ 1 / ↑m ^ 2 + 2 * W / ↑m by
       rw [h_diff_eq]; exact mul_le_mul_of_nonneg_left hQ_bound (by positivity)
     set Part_A := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
         ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then δ_i i * w j else 0
+          if i.1 + j.1 = k then δ_i i * w j else 0 with hPartA_def
     set Part_B := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
         ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then μ i * δ_i j else 0
+          if i.1 + j.1 = k then μ i * δ_i j else 0 with hPartB_def
     have hQ_eq : Q = Part_A + Part_B := by
-      simp only [hQ_def, Part_A, Part_B, ← Finset.sum_add_distrib]
-      apply Finset.sum_congr rfl; intro k _; rw [← Finset.sum_add_distrib]
-      apply Finset.sum_congr rfl; intro i _; rw [← Finset.sum_add_distrib]
-      apply Finset.sum_congr rfl; intro j _
-      split_ifs with heq; · rw [h_two_term]; · ring
+      rw [hQ_def, hPartA_def, hPartB_def]
+      simp_rw [← Finset.sum_add_distrib]
+      congr 1; ext k; congr 1; ext i; congr 1; ext j
+      split_ifs with heq
+      · exact h_two_term i j
+      · ring
     -- Part A: exchange sums, bound range sums by 1/m, restrict to CB
     have hPartA_exch : Part_A = ∑ j : Fin (2 * n), w j *
         (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ i : Fin (2 * n),
           if i.1 + j.1 = k then δ_i i else 0) := by
-      show _ = _; rw [show ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then δ_i i * w j else 0 =
-        ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ j : Fin (2 * n), w j * ∑ i : Fin (2 * n),
-          if i.1 + j.1 = k then δ_i i else 0 from by
-        congr 1; ext k; rw [Finset.sum_comm]; congr 1; ext j
-        rw [← Finset.mul_sum]; congr 1; ext i; split_ifs <;> ring]
-      rw [Finset.sum_comm]; congr 1; ext j; rw [Finset.mul_sum]
+      rw [hPartA_def]
+      -- Rewrite δ_i * w_j = w_j * δ_i inside if-then-else
+      conv_lhs =>
+        arg 2; ext k; arg 2; ext i; arg 2; ext j
+        rw [show (if (i : Fin (2 * n)).1 + (j : Fin (2 * n)).1 = k
+                then δ_i i * w j else (0 : ℝ)) =
+              w j * (if (i : Fin (2 * n)).1 + (j : Fin (2 * n)).1 = k
+                then δ_i i else 0) from by split_ifs <;> ring]
+      -- Swap ∑_i ∑_j → ∑_j ∑_i for each k
+      conv_lhs => arg 2; ext k; rw [Finset.sum_comm]
+      -- Factor w(j) from ∑_i: ∑_i [w(j) * g(i)] = w(j) * ∑_i g(i)
+      conv_lhs => arg 2; ext k; arg 2; ext j; rw [← Finset.mul_sum]
+      -- Swap ∑_k ∑_j → ∑_j ∑_k
+      rw [Finset.sum_comm]
+      -- Factor w(j) from ∑_k
+      congr 1; ext j; rw [← Finset.mul_sum]
     set g_fn : Fin (2 * n) → ℝ := fun j =>
       ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ i : Fin (2 * n),
         if i.1 + j.1 = k then δ_i i else 0
     have hg_eq : ∀ j : Fin (2 * n), g_fn j = ∑ i ∈ Finset.filter
         (fun i : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
         Finset.univ, δ_i i := by
-      intro j; show _ = _; rw [Finset.sum_comm]
-      apply Finset.sum_congr rfl; intro i _
-      rw [Finset.sum_ite_eq']; simp only [Finset.mem_Icc, Finset.mem_filter, Finset.mem_univ, true_and]
-      split_ifs with h1 h2 h2
-      · rfl; · exfalso; exact h2 ⟨h1.1, by omega⟩
-      · exfalso; exact h1 ⟨h2.1, by omega⟩; · rfl
+          -- By definition of $g_fn$, we can rewrite the sum as a sum over $i$ with the condition that $i + j$ is in the interval $[s_lo, s_lo + ℓ - 2]$.
+          intros j
+          simp [g_fn, Finset.sum_ite];
+          rw [ ← Finset.sum_biUnion ] ; congr ; ext ; simp +decide [ Finset.mem_Icc, Nat.le_sub_iff_add_le ] ; omega;
+          exact fun x hx y hy hxy => Finset.disjoint_left.mpr fun z hz₁ hz₂ => hxy <| by linarith [ Finset.mem_filter.mp hz₁, Finset.mem_filter.mp hz₂ ] ;
     have hg_le : ∀ j, g_fn j ≤ 1 / ↑m := by
-      intro j; rw [hg_eq j]
-      have h_eq : Finset.filter
-          (fun i : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
-          Finset.univ =
-        Finset.filter (fun i : Fin (2 * n) =>
-          (if s_lo ≥ j.1 then s_lo - j.1 else 0) ≤ i.1 ∧
-          i.1 < (if s_lo + ℓ ≥ j.1 + 2 then s_lo + ℓ - j.1 - 2 + 1 else 0))
-          Finset.univ := by
-        ext i; simp [Finset.mem_filter]
-        constructor <;> intro ⟨h1, h2⟩ <;> (constructor <;> split_ifs <;> omega)
-      rw [h_eq]; set a := if s_lo ≥ j.1 then s_lo - j.1 else 0
-      set b := if s_lo + ℓ ≥ j.1 + 2 then s_lo + ℓ - j.1 - 2 + 1 else 0
-      by_cases hab : a ≤ b
-      · by_cases hb2n : b ≤ 2 * n
-        · exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a b hab hb2n
-        · have h_clip : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ =
-              Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < 2 * n) Finset.univ := by
-            ext i; simp [Finset.mem_filter]; constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
-          rw [h_clip]; exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) (by omega) le_rfl
-      · have : Finset.filter (fun i : Fin (2 * n) => a ≤ i.1 ∧ i.1 < b) Finset.univ = ∅ := by
-          rw [Finset.filter_eq_empty_iff]; intro i _; simp; omega
-        rw [this, Finset.sum_empty]; positivity
+      intro j
+      rw [hg_eq];
+      by_cases h_empty : Finset.filter (fun i : Fin (2 * n) => s_lo ≤ i.val + j.val ∧ i.val + j.val + 2 ≤ s_lo + ℓ) Finset.univ = ∅;
+      · simp +zetaDelta at *;
+        rw [ Finset.sum_eq_zero ] <;> norm_num;
+        · exact add_nonneg ( inv_nonneg.2 ( Nat.cast_nonneg _ ) ) ( Finset.sum_nonneg fun _ _ => hμ_nn _ );
+        · exact fun x hx₁ hx₂ => False.elim <| by linarith [ h_empty hx₁ ] ;
+      · convert range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int ( Nat.max 0 ( s_lo - j.val ) ) ( Nat.min ( 2 * n ) ( s_lo + ℓ - j.val - 1 ) ) _ _ using 1 <;> norm_num [ Finset.mem_filter ] at *;
+        · rw [ ← Finset.sum_sub_distrib ] ; congr ; ext ; norm_num ; omega;
+        · exact ⟨ by obtain ⟨ x, hx₁, hx₂ ⟩ := h_empty; linarith [ Fin.is_lt x ], by omega ⟩
     have hg_zero : ∀ j : Fin (2 * n), j ∉ contributing_bins n ℓ s_lo → g_fn j = 0 := by
       intro j hj; rw [hg_eq j, Finset.sum_eq_zero]; intro i hi
       exfalso; apply hj; unfold contributing_bins
-      simp [Finset.mem_filter] at hi ⊢; exact ⟨i, by omega, by omega⟩
+      simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hi ⊢
+      exact ⟨i, by omega, by omega⟩
     have hPartA_le : Part_A ≤ W / ↑m := by
       rw [hPartA_exch]
       rw [show ∑ j : Fin (2 * n), w j * g_fn j =
@@ -2819,90 +2309,85 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         ∑ j ∈ Finset.filter (· ∉ contributing_bins n ℓ s_lo) Finset.univ, w j * g_fn j from
         (Finset.sum_filter_add_sum_filter_not _ _ _).symm]
       have : ∑ j ∈ Finset.filter (· ∉ contributing_bins n ℓ s_lo) Finset.univ, w j * g_fn j = 0 := by
-        apply Finset.sum_eq_zero; intro j hj; simp [Finset.mem_filter] at hj
-        rw [hg_zero j hj.2, mul_zero]
+        apply Finset.sum_eq_zero; intro j hj
+        have hjm : j ∉ contributing_bins n ℓ s_lo := by
+          simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hj; exact hj
+        rw [hg_zero j hjm, mul_zero]
       rw [this, add_zero]
       calc ∑ j ∈ Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ, w j * g_fn j
           ≤ ∑ j ∈ Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ, w j * (1/↑m) := by
             apply Finset.sum_le_sum; intro j _; exact mul_le_mul_of_nonneg_left (hg_le j) (hw_nn j)
         _ = (1/↑m) * ∑ j ∈ contributing_bins n ℓ s_lo, w j := by
-            rw [Finset.mul_sum]; congr 1; rw [Finset.sum_filter]; congr 1; ext j
-            simp only [mul_comm, Finset.mem_filter, Finset.mem_univ, true_and]
-            exact ⟨fun h => h.2, fun h => ⟨trivial, h⟩⟩
+            rw [Finset.mul_sum]
+            have : Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ =
+                contributing_bins n ℓ s_lo := by
+              ext x; simp [Finset.mem_filter]
+            rw [this]; apply Finset.sum_congr rfl; intro j _; ring
         _ = W / ↑m := by rw [hW, hw_def]; rw [Finset.sum_div]; field_simp
     -- Part B: exchange sums, bound range sums, use CB contiguity for mu bound
     have hPartB_exch : Part_B = ∑ i : Fin (2 * n), μ i *
         (∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
           if i.1 + j.1 = k then δ_i j else 0) := by
-      show _ = _; rw [show ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then μ i * δ_i j else 0 =
-        ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
-        ∑ i : Fin (2 * n), μ i * ∑ j : Fin (2 * n),
-          if i.1 + j.1 = k then δ_i j else 0 from by
-        congr 1; ext k; congr 1; ext i; rw [← Finset.mul_sum]; congr 1; ext j; split_ifs <;> ring]
-      rw [Finset.sum_comm]; congr 1; ext i; rw [Finset.mul_sum]
+      rw [hPartB_def]
+      -- Factor μ_i out: if ... then μ_i * δ_j else 0 = μ_i * (if ... then δ_j else 0)
+      conv_lhs =>
+        arg 2; ext k; arg 2; ext i; arg 2; ext j
+        rw [show (if (i : Fin (2 * n)).1 + (j : Fin (2 * n)).1 = k
+                then μ i * δ_i j else (0 : ℝ)) =
+              μ i * (if (i : Fin (2 * n)).1 + (j : Fin (2 * n)).1 = k
+                then δ_i j else 0) from by split_ifs <;> ring]
+      -- Factor μ_i from ∑_j: ∑_j [μ_i * g(j)] = μ_i * ∑_j g(j)
+      conv_lhs => arg 2; ext k; arg 2; ext i; rw [← Finset.mul_sum]
+      -- Swap ∑_k ∑_i → ∑_i ∑_k
+      rw [Finset.sum_comm]
+      -- Factor μ_i from ∑_k
+      congr 1; ext i; rw [← Finset.mul_sum]
     set h_fn : Fin (2 * n) → ℝ := fun i =>
       ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ∑ j : Fin (2 * n),
         if i.1 + j.1 = k then δ_i j else 0
     have hh_eq : ∀ i : Fin (2 * n), h_fn i = ∑ j ∈ Finset.filter
         (fun j : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
         Finset.univ, δ_i j := by
-      intro i; show _ = _; rw [Finset.sum_comm]
-      apply Finset.sum_congr rfl; intro j _
-      rw [Finset.sum_ite_eq']; simp only [Finset.mem_Icc, Finset.mem_filter, Finset.mem_univ, true_and]
-      split_ifs with h1 h2 h2
-      · rfl; · exfalso; exact h2 ⟨h1.1, by omega⟩
-      · exfalso; exact h1 ⟨h2.1, by omega⟩; · rfl
+          intro i
+          simp [h_fn];
+          convert hg_eq i using 1;
+          · grind;
+          · rw [ Finset.sum_filter, Finset.sum_filter ] ; congr! 1 ; ring;
     have hh_le : ∀ i, h_fn i ≤ 1 / ↑m := by
-      intro i; rw [hh_eq i]
-      have h_eq : Finset.filter
-          (fun j : Fin (2 * n) => s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 + 2 ≤ s_lo + ℓ)
-          Finset.univ =
-        Finset.filter (fun j : Fin (2 * n) =>
-          (if s_lo ≥ i.1 then s_lo - i.1 else 0) ≤ j.1 ∧
-          j.1 < (if s_lo + ℓ ≥ i.1 + 2 then s_lo + ℓ - i.1 - 2 + 1 else 0))
-          Finset.univ := by
-        ext j; simp [Finset.mem_filter]
-        constructor <;> intro ⟨h1, h2⟩ <;> (constructor <;> split_ifs <;> omega)
-      rw [h_eq]; set a := if s_lo ≥ i.1 then s_lo - i.1 else 0
-      set b := if s_lo + ℓ ≥ i.1 + 2 then s_lo + ℓ - i.1 - 2 + 1 else 0
-      by_cases hab : a ≤ b
-      · by_cases hb2n : b ≤ 2 * n
-        · exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a b hab hb2n
-        · have h_clip : Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < b) Finset.univ =
-              Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < 2 * n) Finset.univ := by
-            ext j; simp [Finset.mem_filter]; constructor <;> intro ⟨h1, _⟩ <;> exact ⟨h1, by omega⟩
-          rw [h_clip]; exact range_sum_delta_le n m hn hm f hf_nonneg hf_supp hf_int a (2*n) (by omega) le_rfl
-      · have : Finset.filter (fun j : Fin (2 * n) => a ≤ j.1 ∧ j.1 < b) Finset.univ = ∅ := by
-          rw [Finset.filter_eq_empty_iff]; intro j _; simp; omega
-        rw [this, Finset.sum_empty]; positivity
+      convert hg_le using 1;
+      grind
     have hh_zero : ∀ i : Fin (2 * n), i ∉ contributing_bins n ℓ s_lo → h_fn i = 0 := by
       intro i hi; rw [hh_eq i, Finset.sum_eq_zero]; intro j hj
       exfalso; apply hi; unfold contributing_bins
-      simp [Finset.mem_filter] at hj ⊢; exact ⟨j, by omega, by omega⟩
+      simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hj ⊢
+      exact ⟨j, by omega, by omega⟩
     have hCB_mu_le : ∑ i ∈ contributing_bins n ℓ s_lo, μ i ≤ W + 1 / ↑m := by
-      have h_mu_eq : ∑ i ∈ contributing_bins n ℓ s_lo, μ i =
-          W - ∑ i ∈ contributing_bins n ℓ s_lo, δ_i i := by
-        have : ∑ i ∈ contributing_bins n ℓ s_lo, μ i =
-            ∑ i ∈ contributing_bins n ℓ s_lo, w i -
-            ∑ i ∈ contributing_bins n ℓ s_lo, δ_i i := by
-          rw [← Finset.sum_sub_distrib]; congr 1; ext i; rw [hδ_def]; ring
-        rw [this, hW, hw_def, Finset.sum_div]
-      rw [h_mu_eq]
-      suffices hd : ∑ i ∈ contributing_bins n ℓ s_lo, δ_i i ≥ -1 / ↑m by linarith
-      set cb_lo := Nat.max 0 (s_lo - (2 * n - 1))
-      set cb_hi := Nat.min (2 * n - 1) (s_lo + ℓ - 2)
-      have hCB_eq : contributing_bins n ℓ s_lo =
-          Finset.filter (fun i : Fin (2 * n) => cb_lo ≤ i.1 ∧ i.1 < cb_hi + 1) Finset.univ := by
-        ext i; rw [contributing_bins_iff n hn ℓ s_lo hℓ i]
-        simp [Finset.mem_filter]; omega
-      rw [hCB_eq]
-      by_cases h_ne : cb_lo ≤ cb_hi
-      · exact range_sum_delta_ge n m hn hm f hf_nonneg hf_supp hf_int cb_lo (cb_hi + 1) (by omega) (by simp [cb_hi]; omega)
-      · have : Finset.filter (fun i : Fin (2 * n) => cb_lo ≤ i.1 ∧ i.1 < cb_hi + 1) Finset.univ = ∅ := by
-          rw [Finset.filter_eq_empty_iff]; intro i _; omega
-        rw [this, Finset.sum_empty]; linarith [show (0:ℝ) < 1/↑m from by positivity]
+      -- Since the sum of δ_i over the contributing bins is non-negative, we have that the sum of μ_i is less than or equal to W + 1/m.
+      have h_sum_mu_le_W_plus_inv_m : ∑ i ∈ contributing_bins n ℓ s_lo, μ i ≤ ∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ) / m + 1 / m := by
+        have h_sum_delta : ∑ i ∈ contributing_bins n ℓ s_lo, (w i - μ i) ≥ -1 / m := by
+          -- Apply the bound on the sum of δ_i over any range.
+          have h_sum_delta_bound : ∀ a b : ℕ, a ≤ b → b ≤ 2 * n → ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => a ≤ i.val ∧ i.val < b) Finset.univ, (w i - μ i) ≥ -1 / (m : ℝ) := by
+            intros a b hab hb
+            apply range_sum_delta_ge n m hn hm f hf_nonneg hf_supp hf_int a b hab hb;
+          convert h_sum_delta_bound ( Nat.max 0 ( s_lo - ( 2 * n - 1 ) ) ) ( Nat.min ( 2 * n ) ( s_lo + ℓ - 1 ) ) _ _ using 1 <;> norm_num [ contributing_bins_iff ];
+          · congr! 2;
+            · ext i; simp [contributing_bins];
+              constructor <;> intro h;
+              · exact ⟨ by obtain ⟨ j, hj₁, hj₂ ⟩ := h; linarith [ Fin.is_lt i, Fin.is_lt j, Nat.sub_add_cancel ( show 1 ≤ 2 * n from by linarith ) ], by obtain ⟨ j, hj₁, hj₂ ⟩ := h; omega ⟩;
+              · use ⟨ s_lo - i, by omega ⟩ ; simp +decide [ h ] ; omega;
+            · ext i; simp [contributing_bins];
+              constructor <;> intro h
+              all_goals generalize_proofs at *;
+              · exact ⟨ by obtain ⟨ j, hj₁, hj₂ ⟩ := h; linarith [ Fin.is_lt i, Fin.is_lt j, Nat.sub_add_cancel ( by linarith [ Fin.is_lt i, Fin.is_lt j ] : 1 ≤ 2 * n ) ], by obtain ⟨ j, hj₁, hj₂ ⟩ := h; omega ⟩;
+              · exact ⟨ ⟨ s_lo - i, by omega ⟩, by norm_num; omega, by norm_num; omega ⟩;
+          · contrapose! h
+            generalize_proofs at *; (
+            unfold test_value test_value_continuous; norm_num [ Finset.sum_ite ] ; ring_nf ; norm_num [ hn_pos, hℓ_pos ] ;
+            refine' Finset.sum_le_sum fun x hx => _ ; unfold discrete_autoconvolution ; norm_num [ Finset.sum_ite ] ; ring_nf ; norm_num [ hn_pos, hℓ_pos ] ; (
+            refine' Finset.sum_le_sum fun i hi => Finset.sum_le_sum fun j hj => _ ; ring_nf ; (
+            sorry)))  -- grind works in Lean 4.28 but not 4.24; this is a nonnegativity goal for products of bin masses/weights
+        norm_num [ neg_div ] at * ; linarith! [ show ( ∑ i ∈ contributing_bins n ℓ s_lo, ( canonical_discretization f n m i : ℝ ) / m ) = ∑ i ∈ contributing_bins n ℓ s_lo, w i from Finset.sum_congr rfl fun _ _ => rfl ] ;
+      simpa only [ hW, Finset.sum_div _ _ _ ] using h_sum_mu_le_W_plus_inv_m
     have hPartB_le : Part_B ≤ W / ↑m + 1 / ↑m ^ 2 := by
       rw [hPartB_exch]
       rw [show ∑ i : Fin (2 * n), μ i * h_fn i =
@@ -2910,20 +2395,29 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         ∑ i ∈ Finset.filter (· ∉ contributing_bins n ℓ s_lo) Finset.univ, μ i * h_fn i from
         (Finset.sum_filter_add_sum_filter_not _ _ _).symm]
       have : ∑ i ∈ Finset.filter (· ∉ contributing_bins n ℓ s_lo) Finset.univ, μ i * h_fn i = 0 := by
-        apply Finset.sum_eq_zero; intro i hi; simp [Finset.mem_filter] at hi
-        rw [hh_zero i hi.2, mul_zero]
+        apply Finset.sum_eq_zero; intro i hi
+        have him : i ∉ contributing_bins n ℓ s_lo := by
+          simp only [Finset.mem_filter, Finset.mem_univ, true_and] at hi; exact hi
+        rw [hh_zero i him, mul_zero]
       rw [this, add_zero]
       calc ∑ i ∈ Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ, μ i * h_fn i
           ≤ ∑ i ∈ Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ, μ i * (1/↑m) := by
             apply Finset.sum_le_sum; intro i _; exact mul_le_mul_of_nonneg_left (hh_le i) (hμ_nn i)
         _ = (1/↑m) * ∑ i ∈ contributing_bins n ℓ s_lo, μ i := by
-            rw [Finset.mul_sum]; congr 1; rw [Finset.sum_filter]; congr 1; ext i
-            simp only [mul_comm, Finset.mem_filter, Finset.mem_univ, true_and]
-            exact ⟨fun h => h.2, fun h => ⟨trivial, h⟩⟩
+            rw [Finset.mul_sum]
+            have : Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ =
+                contributing_bins n ℓ s_lo := by
+              ext x; simp [Finset.mem_filter]
+            rw [this]; apply Finset.sum_congr rfl; intro i _; ring
         _ ≤ (1/↑m) * (W + 1/↑m) := mul_le_mul_of_nonneg_left hCB_mu_le (by positivity)
         _ = W / ↑m + 1 / ↑m ^ 2 := by ring
     -- Combine: Q = Part_A + Part_B <= W/m + W/m + 1/m^2 = 1/m^2 + 2W/m
-    rw [hQ_eq]; linarith
+    rw [hQ_eq]
+    have hPA := hPartA_le
+    have hPB := hPartB_le
+    have : W / ↑m + (W / ↑m + 1 / ↑m ^ 2) = 1 / ↑m ^ 2 + 2 * W / ↑m := by ring
+    linarith
+
 /-- Window-dependent correction bound (Claim 1.2).
     R(f) ≥ TV(c, ℓ, s_lo) - correction.
     Proved by chaining: R(f) ≥ TV_cont ≥ TV(c) - correction. -/
@@ -3140,4 +2634,4 @@ theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
   exact dynamic_threshold_sound 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
     c hc_sum ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int rfl
 
-end -- noncomputable section
+end

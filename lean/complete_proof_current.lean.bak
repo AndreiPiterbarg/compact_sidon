@@ -1771,39 +1771,68 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
     continuousAt_const.congr (h.mono fun _ hy => hy.symm)
   -- Case 1: x < -1/4
   by_cases hx_lt : x < -(1/4 : ℝ)
-  · exact Filter.eventually_of_mem (isOpen_Iio.mem_nhds hx_lt) fun y hy => by
+  · exact (IsOpen.mem_nhds isOpen_Iio hx_lt).mono fun y hy => by
       have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
       have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
       simp only [step_function, h1, h2, ↓reduceIte]
   · push_neg at hx_lt
     -- Case 2: x ≥ 1/4
     by_cases hx_ge : x ≥ (1/4 : ℝ)
-    · have hx_gt : x > 1/4 := lt_of_le_of_ne hx_ge (Ne.symm
-        (hx ⟨2 * n, by omega⟩ (by field_simp; ring)))
-      exact Filter.eventually_of_mem (isOpen_Ioi.mem_nhds hx_gt) fun y hy => by
+    · have hx_gt : x > 1/4 := by
+        apply lt_of_le_of_ne hx_ge
+        intro heq
+        have := hx ⟨2 * n, by omega⟩
+        apply this
+        simp only [Fin.val_mk]
+        push_cast
+        field_simp
+        linarith
+      exact (IsOpen.mem_nhds isOpen_Ioi hx_gt).mono fun y hy => by
         have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
         have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
         simp only [step_function, h1, h2, ↓reduceIte]
     · -- Case 3: -1/4 < x < 1/4, not a boundary
       push_neg at hx_ge
-      have hx_lo : -(1/4 : ℝ) < x := lt_of_le_of_ne hx_lt
-        (Ne.symm (hx ⟨0, by omega⟩ (by simp)))
+      have hx_lo : -(1/4 : ℝ) < x := by
+        apply lt_of_le_of_ne hx_lt
+        intro heq
+        have := hx ⟨0, by omega⟩
+        apply this
+        simp [Fin.val_mk]
       -- α = (x + 1/4) / δ is in (0, 2n) and not an integer
       set δ := (1 : ℝ) / (4 * ↑n)
       set α := (x + 1/4) / δ
+      have hδ_pos : (0 : ℝ) < δ := by positivity
       have hα_ne_int : ∀ z : ℤ, α ≠ ↑z := by
         intro z hz
+        have h4n_ne : (4 * (↑n : ℝ)) ≠ 0 := ne_of_gt (by positivity)
         have hx_eq : x = -(1/4 : ℝ) + (z : ℝ) / (4 * ↑n) := by
-          field_simp [show (4 * (↑n : ℝ)) ≠ 0 from by positivity] at hz ⊢; linarith
+          have : α = (x + 1 / 4) / (1 / (4 * ↑n)) := rfl
+          rw [hz] at this
+          field_simp [h4n_ne] at this
+          linarith
+        have hx_pos : (0 : ℝ) < x + 1/4 := by linarith
+        have hα_pos : (0 : ℝ) < α := div_pos hx_pos hδ_pos
         have hz_nn : (0 : ℤ) ≤ z := by
           by_contra h; push_neg at h
-          linarith [show 0 < α from by positivity, show α = (z : ℝ) from hz]
+          have : (z : ℝ) < 0 := Int.cast_lt_zero.mpr h
+          linarith [hz]
         have hz_le : z ≤ 2 * ↑n := by
           by_contra h; push_neg at h
-          have hα_lt : α < 2 * ↑n := by simp [α, δ]; field_simp; nlinarith
-          linarith [show α = (z : ℝ) from hz]
+          have hα_lt : α < 2 * ↑n := by
+            simp only [α, δ]
+            rw [div_div]
+            have : x < 1/4 := hx_ge
+            have : x + 1/4 < 1/2 := by linarith
+            rw [div_lt_iff (by positivity : (0:ℝ) < 1 / (4 * ↑n))]
+            simp [h4n_ne]
+            linarith
+          have : (z : ℝ) > 2 * ↑n := by exact_mod_cast h
+          linarith [hz]
         exact hx ⟨z.toNat, by omega⟩ (by
-          rw [hx_eq]; congr 1; exact_mod_cast Int.toNat_of_nonneg hz_nn)
+          rw [hx_eq]; congr 1
+          simp only [Fin.val_mk]
+          push_cast [Int.toNat_of_nonneg hz_nn])
       -- Floor is locally constant at non-integer points
       set z := ⌊α⌋
       have hz1 : (↑z : ℝ) < α := lt_of_le_of_ne (Int.floor_le α) (fun h => hα_ne_int z h.symm)
@@ -1812,14 +1841,22 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       filter_upwards [
         (isOpen_Ioo.preimage (by fun_prop : Continuous fun y => (y + 1/4) / δ)).mem_nhds
           (show (x + 1/4) / δ ∈ Set.Ioo (↑z : ℝ) (↑z + 1) from ⟨hz1, hz2⟩),
-        isOpen_Ioo.mem_nhds (show x ∈ Set.Ioo (-(1/4 : ℝ)) (1/4) from ⟨hx_lo, hx_ge⟩)
+        IsOpen.mem_nhds isOpen_Ioo (show x ∈ Set.Ioo (-(1/4 : ℝ)) (1/4) from ⟨hx_lo, hx_ge⟩)
       ] with y hy_floor hy_range
-      have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z :=
-        le_antisymm (Int.lt_add_one_iff.mp (Int.floor_lt.mpr hy_floor.2))
-          (Int.le_floor.mpr (le_of_lt hy_floor.1))
-      have hy_cond : ¬(y < -(1/4:ℝ) ∨ y ≥ 1/4) := by push_neg; exact ⟨le_of_lt hy_range.1, hy_range.2⟩
-      have hx_cond : ¬(x < -(1/4:ℝ) ∨ x ≥ 1/4) := by push_neg; exact ⟨le_of_lt hx_lo, hx_ge⟩
-      simp only [step_function, hy_cond, hx_cond, ↓reduceIte, h_floor_eq]
+      have hy_floor_mem : (y + 1/4) / δ ∈ Set.Ioo (↑z : ℝ) (↑z + 1) := hy_floor
+      have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z := by
+        apply le_antisymm
+        · have h2 : (y + 1/4) / δ < ↑z + 1 := hy_floor_mem.2
+          have : (↑z + 1 : ℝ) = ((z + 1 : ℤ) : ℝ) := by push_cast; ring
+          rw [this] at h2
+          exact Int.lt_add_one_iff.mp (Int.floor_lt.mpr h2)
+        · exact Int.le_floor.mpr (le_of_lt hy_floor_mem.1)
+      show step_function n m c y = step_function n m c x
+      have hx_not : ¬(x < -1/4 ∨ x ≥ 1/4) := by push_neg; exact ⟨le_of_lt hx_lo, hx_ge⟩
+      have hy_not : ¬(y < -1/4 ∨ y ≥ 1/4) := by push_neg; exact ⟨le_of_lt hy_range.1, hy_range.2⟩
+      simp only [step_function, hx_not, hy_not, if_false, dite_eq_ite]
+      simp only [δ] at h_floor_eq
+      rw [h_floor_eq]
 
 lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
@@ -1858,7 +1895,7 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
           rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
           exact h_S_le_one x))
     · exact h_S_int
-    · exact MeasureTheory.ae_of_all MeasureTheory.volume (fun t => by
+    · exact MeasureTheory.ae_of_all _ (fun t => by
         calc S t * S (y - t) ≤ S t * 1 :=
               mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
           _ = S t := by ring)
@@ -2724,7 +2761,6 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
       have h2 : μ i * δ_i j ≤ μ i * |δ_i j| := mul_le_mul_of_nonneg_left (le_abs_self _) (hμ_nn i)
       have h3 : |δ_i i| * w j ≤ (1 / ↑m) * w j := mul_le_mul_of_nonneg_right (hδ_bound i) (hw_nn j)
       have h4 : μ i * |δ_i j| ≤ μ i * (1 / ↑m) := mul_le_mul_of_nonneg_left (hδ_bound j) (hμ_nn i)
-      have h5 : 1 / ↑m * w j + μ i * (1 / ↑m) = (w j + μ i) / ↑m := by ring
       linarith
     -- PROOF: Factor TV_disc - TV_cont = (4n/l)*Q, then bound Q <= 1/m^2+2W/m.
     have hn_pos : (0 : ℝ) < ↑n := Nat.cast_pos.mpr hn
