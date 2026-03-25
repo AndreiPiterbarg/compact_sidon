@@ -23,9 +23,11 @@ noncomputable section
 -- Source: prompt14_gray_code_kernel.lean
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-/-- Claim 4.9: Gray code is a complete bijection over the Cartesian product. -/
+/-- Claim 4.9: There exists a bijection between Fin(∏ rᵢ) and the dependent product
+    ∀ i, Fin(rᵢ). The computational code uses a Gray code traversal; here we prove only
+    the existence via cardinality matching (Fintype.equivOfCardEq). -/
 -- Source: output (15).lean (UUID: 7753e964) — PROVED
-theorem gray_code_bijection {k : ℕ} (r : Fin k → ℕ) (_hr : ∀ i, 0 < r i) :
+theorem dependent_product_bijection {k : ℕ} (r : Fin k → ℕ) :
     ∃ (f : Fin (∏ i, r i) → (∀ i : Fin k, Fin (r i))),
       Function.Bijective f := by
   have h_equiv : Nonempty (Fin (∏ i, r i) ≃ (∀ i, Fin (r i))) := by
