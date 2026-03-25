@@ -1775,7 +1775,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       show step_function n m c y = step_function n m c x
       have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
       have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
-      simp [step_function, h1, h2]
+      simp only [step_function, h1, h2, ↓reduceIte]
   · push_neg at hx_lt
     -- Case 2: x ≥ 1/4
     by_cases hx_ge : x ≥ (1/4 : ℝ)
@@ -1793,16 +1793,16 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
         show step_function n m c y = step_function n m c x
         have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
         have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
-        simp [step_function, h1, h2]
+        simp only [step_function, h1, h2, ↓reduceIte]
     · -- Case 3: -1/4 < x < 1/4, not a boundary
       push_neg at hx_ge
       have hx_lo : -(1/4 : ℝ) < x := by
-        refine lt_of_le_of_ne hx_lt ?_
-        intro h_eq
-        have h_bnd := hx ⟨0, by omega⟩
-        apply h_bnd
-        rw [h_eq]
-        simp
+        rcases eq_or_lt_of_le hx_lt with h_eq | h_lt
+        · exfalso
+          have := hx ⟨0, by omega⟩
+          apply this
+          simp [← h_eq]
+        · exact h_lt
       -- α = (x + 1/4) / δ is in (0, 2n) and not an integer
       set δ := (1 : ℝ) / (4 * ↑n) with hδ_def
       have hδ_pos : (0 : ℝ) < δ := by rw [hδ_def]; positivity
@@ -1831,7 +1831,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
         apply h
         rw [hx_eq]
         push_cast [Int.toNat_of_nonneg hz_nn]
-        simpa [mul_comm, mul_left_comm, mul_assoc]
+        ring
       -- Floor is locally constant at non-integer points
       set z := ⌊α⌋
       have hz1 : (↑z : ℝ) < α := lt_of_le_of_ne (Int.floor_le α) (fun h => hα_ne_int z h.symm)
@@ -1844,11 +1844,8 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       ] with y hy_floor hy_range
       have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z := by
         apply le_antisymm
-        · have hlt : ⌊(y + 1/4) / δ⌋ < z + 1 := by
-            have hy_floor' : (y + 1 / 4) / δ < ↑(z + 1) := by
-              simpa [Int.cast_add] using hy_floor.2
-            exact Int.floor_lt.mpr hy_floor'
-          exact Int.lt_add_one_iff.mp hlt
+        · have := Int.floor_lt.mpr hy_floor.2
+          omega
         · exact Int.le_floor.mpr (le_of_lt hy_floor.1)
       have hy_cond : ¬(y < (-1:ℝ)/4 ∨ y ≥ 1/4) := by push_neg; constructor <;> linarith [hy_range.1, hy_range.2]
       have hx_cond : ¬(x < (-1:ℝ)/4 ∨ x ≥ 1/4) := by push_neg; constructor <;> linarith
