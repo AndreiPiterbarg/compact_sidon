@@ -33,16 +33,16 @@ theorem support_convolution_subset_add {f : ℝ → ℝ} {s : Set ℝ} (hf : Fun
   exact ⟨ y, hf hy1, x - y, hf hy2, by ring ⟩
 
 /-- The boundary between the first n bins and the last n bins is exactly at x = 0. -/
-theorem left_frac_exact (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) :
+theorem left_frac_exact (n m : ℕ) (hn : n > 0) (_hm : m > 0)
+    (c : Fin (2 * n) → ℕ) (_hc : ∑ i, c i = m) :
     let δ := (1 : ℝ) / (4 * n)
     (-1/4 : ℝ) + n * δ = 0 := by
   field_simp [hn]
   ring
 
 /-- Asymmetry threshold can be compared directly — no margin needed. -/
-theorem asymmetry_no_margin (c_target : ℝ) (hct : 0 < c_target)
-    (L : ℝ) (hL : L ≥ Real.sqrt (c_target / 2))
+theorem asymmetry_no_margin (c_target : ℝ) (_hct : 0 < c_target)
+    (L : ℝ) (_hL : L ≥ Real.sqrt (c_target / 2))
     (h_bound : ∀ L', 2 * L' ^ 2 ≤ c_target → L' < L) :
     2 * L ^ 2 ≥ c_target := by
   contrapose! h_bound;
@@ -62,7 +62,7 @@ theorem integral_convolution_le {f g : ℝ → ℝ} (x : ℝ)
   apply_rules [ MeasureTheory.integral_mono ]
 
 /-- Measure of support of autoconvolution bounded by 2δ. -/
-theorem measure_support_convolution_bound {g : ℝ → ℝ} {a δ : ℝ} (hδ : 0 < δ)
+theorem measure_support_convolution_bound {g : ℝ → ℝ} {a δ : ℝ} (_hδ : 0 < δ)
     (hg_supp : Function.support g ⊆ Set.Ioo a (a + δ)) :
     MeasureTheory.volume (Function.support (MeasureTheory.convolution g g (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)) ≤ ENNReal.ofReal (2 * δ) := by
   have h_support : Function.support (MeasureTheory.convolution g g (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊆ Set.Ioo (a + a) (a + a + 2 * δ) := by

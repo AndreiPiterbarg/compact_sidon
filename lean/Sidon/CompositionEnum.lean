@@ -41,10 +41,10 @@ theorem composition_count (m d : ℕ) (hd : d > 0) :
           exact ⟨ fun i => by cases i using Fin.inductionOn <;> [ exact Nat.le_of_lt_succ ha; exact le_trans ( hb₁ _ ) ( Nat.sub_le _ _ ) ], Nat.add_sub_of_le ( Nat.le_of_lt_succ ha ) ⟩;
       rw [ h_split, Finset.card_biUnion ];
       · rcases d with ( _ | d ) <;> simp_all +decide [ Finset.card_image_of_injective, Function.Injective ];
-        · rw [ Finset.sum_eq_single m ] <;> simp +decide [ Finset.card_range ];
+        · rw [ Finset.sum_eq_single m ] <;> simp +decide;
           intros; omega;
         · exact Nat.recOn m ( by simp +arith +decide ) fun n ih => by simp +arith +decide [ Nat.choose, Finset.sum_range_succ' ] at * ; linarith;
-      · intro k hk l hl hkl; simp_all +decide [ Finset.disjoint_left ] ;
+      · intro k hk l hl hkl; simp_all +decide [ Finset.disjoint_left ];
         intro a x hx₁ hx₂ hx₃ y hy₁ hy₂ hy₃; contrapose! hkl; aesop;
   convert h_stars_and_bars m d hd using 1;
   refine' Finset.card_bij ( fun c hc => fun i => c i ) _ _ _ <;> simp +decide [ funext_iff ];

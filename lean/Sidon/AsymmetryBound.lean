@@ -50,7 +50,7 @@ theorem f_L_conv_supp (f : ℝ → ℝ) :
 /-- Monotonicity of convolution for nonneg functions. -/
 theorem convolution_mono_ae (f g : ℝ → ℝ)
     (hf : ∀ x, 0 ≤ f x) (hg : ∀ x, 0 ≤ g x) (hfg : ∀ x, f x ≤ g x)
-    (hf_int : MeasureTheory.Integrable f MeasureTheory.volume)
+    (_hf_int : MeasureTheory.Integrable f MeasureTheory.volume)
     (hg_int : MeasureTheory.Integrable g MeasureTheory.volume) :
     ∀ᵐ x ∂MeasureTheory.volume,
       MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x ≤
@@ -131,7 +131,7 @@ theorem volume_Ioo_half :
     Proof chain: restrict f to left half, use convolution monotonicity,
     then averaging principle on the support of f_L * f_L ⊆ (-1/2, 0). -/
 theorem asymmetry_bound (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
-    (hf_supp : Function.support f ⊆ Set.Icc (-1/4 : ℝ) (1/4))
+    (_hf_supp : Function.support f ⊆ Set.Icc (-1/4 : ℝ) (1/4))
     (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
     (h_bdd : MeasureTheory.eLpNorm (MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
     let L := MeasureTheory.integral MeasureTheory.volume (Set.indicator (Set.Ioo (-1/4 : ℝ) 0) f)

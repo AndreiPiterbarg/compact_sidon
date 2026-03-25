@@ -45,7 +45,7 @@ theorem merge_pairs_sum {d m : ℕ} (child : Fin (2 * d) → ℕ) (hc : ∑ i, c
 -- Source: output (11).lean (UUID: 06748927) — PROVED (with explicit pruning/discretization hypotheses)
 theorem cascade_completeness_step
   (n m : ℕ) (c_target : ℝ)
-  (hn : n > 0) (hm : m > 0) (hct : 0 < c_target)
+  (_hn : n > 0) (_hm : m > 0) (_hct : 0 < c_target)
   (L : ℕ)
   (tv : (d : ℕ) → (m : ℕ) → (Fin (2 * d) → ℕ) → ℕ → ℕ → ℝ)
   (discretize : (ℝ → ℝ) → (d : ℕ) → (m : ℕ) → Fin d → ℕ)

@@ -88,7 +88,7 @@ lemma support_f_bin (f : ℝ → ℝ) (n : ℕ) (i : Fin (2 * n)) :
   Function.support (f_bin f n i) ⊆ bin_interval n i := by
     simp [f_bin, Function.support]
 
-lemma measure_support_convolution_f_bin (f : ℝ → ℝ) (n : ℕ) (hn : n > 0) (i : Fin (2 * n)) :
+lemma measure_support_convolution_f_bin (f : ℝ → ℝ) (n : ℕ) (_hn : n > 0) (i : Fin (2 * n)) :
   MeasureTheory.volume (Function.support (MeasureTheory.convolution (f_bin f n i) (f_bin f n i) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)) ≤ ENNReal.ofReal (1 / (2 * n : ℝ)) := by
   have h_support_convolution : ∀ x, x ∉ (bin_interval n i + bin_interval n i) → (MeasureTheory.convolution (f_bin f n i) (f_bin f n i) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.MeasureSpace.volume) x = 0 := by
     intro x hx
@@ -99,7 +99,7 @@ lemma measure_support_convolution_f_bin (f : ℝ → ℝ) (n : ℕ) (hn : n > 0)
   refine' le_trans ( MeasureTheory.measure_mono ( show Function.support ( MeasureTheory.convolution ( f_bin f n i ) ( f_bin f n i ) ( ContinuousLinearMap.mul ℝ ℝ ) MeasureTheory.MeasureSpace.volume ) ⊆ bin_interval n i + bin_interval n i from fun x hx => by contrapose! hx; aesop ) ) _;
   have h_support_convolution : bin_interval n i + bin_interval n i ⊆ Set.Ico (-(1/4 : ℝ) + i * (1 / (4 * n : ℝ)) + (-(1/4 : ℝ) + i * (1 / (4 * n : ℝ)))) (-(1/4 : ℝ) + (i + 1) * (1 / (4 * n : ℝ)) + (-(1/4 : ℝ) + (i + 1) * (1 / (4 * n : ℝ)))) := by
     intro x hx; obtain ⟨ a, ha, b, hb, rfl ⟩ := hx; constructor <;> linarith [ Set.mem_Ico.mp ha, Set.mem_Ico.mp hb ] ;
-  refine' le_trans ( MeasureTheory.measure_mono h_support_convolution ) _ ; norm_num ; ring ; norm_num [ hn.ne' ]
+  refine' le_trans ( MeasureTheory.measure_mono h_support_convolution ) _ ; norm_num ; ring ; norm_num [ _hn.ne' ]
 
 lemma integral_convolution_f_bin (f : ℝ → ℝ) (n : ℕ) (i : Fin (2 * n))
     (hf : MeasureTheory.Integrable f MeasureTheory.volume) :
@@ -122,7 +122,7 @@ lemma convolution_mono_ae_fbin (f : ℝ → ℝ) (hf : 0 ≤ f) (n : ℕ) (i : F
   have h_bin_int : MeasureTheory.Integrable (f_bin f n i) MeasureTheory.volume := f_bin_integrable f hf_int n i
   have h_conv_exists_f : ∀ᵐ x ∂MeasureTheory.volume, MeasureTheory.Integrable (fun t => f t * f (x - t)) MeasureTheory.volume := by
     have h_int_f : MeasureTheory.Integrable (fun (p : ℝ × ℝ) => f p.1 * f p.2) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
-      exact hf_int.prod_mul hf_int;
+      exact hf_int.mul_prod hf_int;
     have h_int_f : MeasureTheory.Integrable (fun (p : ℝ × ℝ) => f p.1 * f (p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
       have h_int_f : MeasureTheory.MeasurePreserving (fun p : ℝ × ℝ => (p.1, p.2 - p.1)) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) (MeasureTheory.Measure.prod MeasureTheory.volume MeasureTheory.volume) := by
         exact MeasureTheory.measurePreserving_prod_sub MeasureTheory.volume MeasureTheory.volume;
@@ -153,7 +153,7 @@ lemma lintegral_convolution_f_bin (f : ℝ → ℝ) (n : ℕ) (i : Fin (2 * n))
 
 lemma lintegral_le_norm_mul_vol (g : ℝ → ℝ) (hg : 0 ≤ g)
     (S : Set ℝ) (hS : Function.support g ⊆ S)
-    (hS_meas : MeasurableSet S) :
+    (_hS_meas : MeasurableSet S) :
     MeasureTheory.lintegral MeasureTheory.volume (fun x => ENNReal.ofReal (g x)) ≤
     MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume * MeasureTheory.volume S := by
       by_cases hS_finite : MeasureTheory.volume S < ⊤;
@@ -181,7 +181,7 @@ lemma lintegral_le_norm_mul_vol (g : ℝ → ℝ) (hg : 0 ≤ g)
 
 lemma single_bin_bound_ennreal (n : ℕ) (hn : n > 0)
     (f : ℝ → ℝ) (hf : ∀ x, 0 ≤ f x)
-    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (_hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (i : Fin (2 * n)) (M_i : ℝ) (hM : M_i = bin_masses f n i)
     (hf_int : MeasureTheory.Integrable f MeasureTheory.volume) :
     MeasureTheory.eLpNorm (MeasureTheory.convolution f f

@@ -38,7 +38,7 @@ noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
 
 /-- Claim 2.4: Computed threshold is conservative (≥ exact threshold). -/
 theorem dyn_it_conservative (c_target : ℝ) (m n ℓ W_int : ℕ)
-    (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
+    (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (_hct : 0 ≤ c_target)
     (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) :
     let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
     let B := (c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *

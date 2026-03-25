@@ -69,7 +69,7 @@ theorem delta_three_way_split {d : ℕ} (c c' : Fin d → ℤ)
 /-- Cross-terms factor when one index is unchanged. -/
 theorem cross_term_simplify {d : ℕ} (c c' : Fin d → ℤ)
     (S : Finset (Fin d)) (hS : ∀ i : Fin d, i ∉ S → c' i = c i)
-    (i j : Fin d) (hi : i ∈ S) (hj : j ∉ S) :
+    (i j : Fin d) (_hi : i ∈ S) (hj : j ∉ S) :
     c' i * c' j - c i * c j = (c' i - c i) * c j := by
   rw [hS j hj];
   ring

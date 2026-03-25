@@ -30,7 +30,7 @@ lemma nat_floor_approx (x : ℝ) (m : ℕ) (hm : m > 0) (h : 0 ≤ x) :
   cases abs_cases ( ( x - Nat.floor x ) / ( m : ℝ ) ) <;> nlinarith [ Nat.floor_le h, Nat.lt_floor_add_one x, mul_div_cancel₀ ( x - Nat.floor x ) ( by positivity : ( m : ℝ ) ≠ 0 ) ]
 
 /-- Product approximation error bound. -/
-lemma product_approx_error (x1 x2 y1 y2 : ℝ) (hx1 : 0 ≤ x1) (hx2 : 0 ≤ x2) (hy1 : 0 ≤ y1) (hy2 : 0 ≤ y2)
+lemma product_approx_error (x1 x2 y1 y2 : ℝ) (_hx1 : 0 ≤ x1) (hx2 : 0 ≤ x2) (hy1 : 0 ≤ y1) (_hy2 : 0 ≤ y2)
     (h1 : |x1 - y1| ≤ 1) (h2 : |x2 - y2| ≤ 1) :
     |x1 * x2 - y1 * y2| ≤ y1 + y2 + 1 := by
   exact abs_le.mpr ⟨ by nlinarith [ abs_le.mp h1, abs_le.mp h2 ], by nlinarith [ abs_le.mp h1, abs_le.mp h2 ] ⟩

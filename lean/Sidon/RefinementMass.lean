@@ -24,7 +24,7 @@ noncomputable section
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Each parent bin splits into an even-odd child pair summing to the parent. -/
-theorem child_bin_pair_sum (d : ℕ) (hd : d > 0)
+theorem child_bin_pair_sum (d : ℕ) (_hd : d > 0)
     (parent : Fin d → ℕ) (a : Fin d → ℕ)
     (ha : ∀ i, a i ≤ parent i)
     (child : Fin (2 * d) → ℕ)

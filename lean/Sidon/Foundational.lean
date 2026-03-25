@@ -40,7 +40,7 @@ theorem canonical_cumulative_distribution_zero (f : ℝ → ℝ) (n m : ℕ) :
       unfold canonical_cumulative_distribution; aesop;
 
 -- F3: D(2n) = m
-theorem canonical_cumulative_distribution_2n (f : ℝ → ℝ) (n m : ℕ) (hn : n > 0) (hm : m > 0)
+theorem canonical_cumulative_distribution_2n (f : ℝ → ℝ) (n m : ℕ) (_hn : n > 0) (_hm : m > 0)
     (h_mass_pos : ∑ j : Fin (2 * n), bin_masses f n j ≠ 0) :
     canonical_cumulative_distribution f n m (2 * n) = m := by
       unfold canonical_cumulative_distribution; aesop;
@@ -51,12 +51,12 @@ theorem bin_masses_nonneg (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x) (n : 
       apply_rules [ MeasureTheory.integral_nonneg, Set.indicator_nonneg ] ; aesop
 
 -- F5: ∑ c_i = m (zero mass edge case)
-theorem canonical_discretization_sum_zero_mass (f : ℝ → ℝ) (n m : ℕ) (hn : n > 0) (hm : m > 0)
+theorem canonical_discretization_sum_zero_mass (f : ℝ → ℝ) (n m : ℕ) (hn : n > 0) (_hm : m > 0)
     (h_mass_zero : ∑ j : Fin (2 * n), bin_masses f n j = 0) :
     ∑ i : Fin (2 * n), canonical_discretization f n m i = m := by
       rw [ Finset.sum_eq_single ⟨ 2 * n - 1, Nat.sub_lt ( by positivity ) ( by positivity ) ⟩ ] <;> norm_num [ canonical_discretization ];
       · rw [ Nat.sub_add_cancel ( by linarith ) ] ; aesop;
-      · simp_all +decide [ Finset.sum_eq_zero_iff_of_nonneg, bin_masses_nonneg ];
+      · simp_all +decide;
         exact fun i hi₁ hi₂ => False.elim <| hi₁ <| Fin.ext <| by linarith [ Fin.is_lt i, Nat.sub_add_cancel <| show 1 ≤ 2 * n from by linarith ] ;
 
 -- F6: c_i = D(i+1) - D(i) (alt hypothesis, given D(2n) = m)

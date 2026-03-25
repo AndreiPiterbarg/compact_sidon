@@ -74,7 +74,7 @@ theorem left_sum_reversal (n : ℕ) (hn : n > 0) (m : ℕ)
     have h_disjoint : ∀ i j : Fin n, i.val ≠ 2 * n - 1 - j.val := by
       intro i j; omega;
     generalize_proofs at *; (
-    simp +decide [ Finset.disjoint_left, h_disjoint ];
+    simp +decide [ Finset.disjoint_left ];
     exact fun i j => Ne.symm ( h_disjoint i j )));
   rw [ h_split, Finset.sum_image, Finset.sum_image ] <;> simp +decide [ Fin.ext_iff ];
   exact fun i _ j _ hij => Fin.ext <| by injection hij with hij; rw [ tsub_right_inj ] at hij <;> linarith [ Fin.is_lt i, Fin.is_lt j, Nat.sub_add_cancel ( by linarith [ Fin.is_lt i, Fin.is_lt j ] : 1 ≤ 2 * n ) ] ;

@@ -24,7 +24,7 @@ noncomputable section
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Claim 4.1: Odometer iteration visits every Cartesian product element exactly once. -/
-theorem odometer_bijection {d : ℕ} (lo hi : Fin d → ℕ) (h_valid : ∀ i, lo i ≤ hi i) :
+theorem odometer_bijection {d : ℕ} (lo hi : Fin d → ℕ) (_h_valid : ∀ i, lo i ≤ hi i) :
     ∃ (f : Fin (∏ i, (hi i - lo i + 1)) → (∀ i : Fin d, Fin (hi i - lo i + 1))),
       Function.Bijective f := by
   have h_bij : Nonempty (Fin (∏ i, (hi i - lo i + 1)) ≃ (∀ i, Fin (hi i - lo i + 1))) := by
@@ -32,7 +32,7 @@ theorem odometer_bijection {d : ℕ} (lo hi : Fin d → ℕ) (h_valid : ∀ i, l
   exact ⟨ _, Equiv.bijective h_bij.some ⟩
 
 /-- Claim 4.3: Quick-check soundness — if quick-check finds a killing window, child is prunable. -/
-theorem quickcheck_sound {d : ℕ} (ws : ℕ → ℕ → ℤ) (dyn : ℕ → ℕ → ℤ)
+theorem quickcheck_sound {_d : ℕ} (ws : ℕ → ℕ → ℤ) (dyn : ℕ → ℕ → ℤ)
     (ℓ_star s_star : ℕ) (h : ws ℓ_star s_star > dyn ℓ_star s_star) :
     ∃ ℓ s, ws ℓ s > dyn ℓ s :=
   ⟨ℓ_star, s_star, h⟩

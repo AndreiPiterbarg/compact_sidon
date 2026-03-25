@@ -74,7 +74,7 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
       fun x => a ^ 2 * MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x := by
     ext x; simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
     simp only [mul_comm (a) (f _), ← mul_assoc]
-    rw [← MeasureTheory.integral_mul_left]
+    rw [← MeasureTheory.integral_const_mul]
     congr 1; ext t; ring
   rw [h_conv]
   have h_norm : (MeasureTheory.eLpNorm (fun x => a ^ 2 * MeasureTheory.convolution f f
@@ -143,7 +143,7 @@ theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
     intro x hx; apply hf_supp; rw [Function.mem_support] at hx ⊢
     intro h; exact hx (by simp only [hg_def, h, mul_zero])
   have hg_int : MeasureTheory.integral MeasureTheory.volume g = 1 := by
-    simp only [hg_def, MeasureTheory.integral_mul_left]
+    simp only [hg_def, MeasureTheory.integral_const_mul]
     rw [← hI_def]; exact div_mul_cancel₀ 1 (ne_of_gt hI_pos)
   set c := canonical_discretization g 64 20
   have h_mass_nz : ∑ j : Fin (2 * 64), bin_masses g 64 j ≠ 0 := by

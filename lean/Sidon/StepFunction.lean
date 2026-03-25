@@ -96,7 +96,7 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
     have h_const_interval : ∀ x ∈ Set.Ico (-1 / 4 + (i : ℝ) / (4 * n)) (-1 / 4 + (i + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m := by
       unfold step_function;
       field_simp;
-      intro x hx; split_ifs <;> simp_all +decide [ ne_of_gt, div_lt_iff₀, le_div_iff₀ ] ;
+      intro x hx; split_ifs <;> simp_all +decide ;
       · cases ‹_› <;> nlinarith [ show ( i : ℝ ) + 1 ≤ 2 * n by norm_cast; linarith [ Fin.is_lt i ], div_mul_cancel₀ ( -n + ( i : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), div_mul_cancel₀ ( -n + ( i + 1 : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] ;
       · rw [ mul_div_cancel₀ _ ( by positivity ) ] ; congr ; ring;
         rw [ div_le_iff₀ ( by positivity ), lt_div_iff₀ ( by positivity ) ] at hx ; norm_num [ show ⌊ ( n : ℝ ) + n * x * 4⌋ = i from Int.floor_eq_iff.mpr ⟨ by norm_num; linarith, by norm_num; linarith ⟩ ] at *;
@@ -114,7 +114,7 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
     · exact fun _ _ => measurableSet_Ico;
     · intros i hi j hj hij; exact Set.disjoint_left.mpr fun x hx₁ hx₂ => hij <| Fin.ext <| Nat.le_antisymm ( Nat.le_of_lt_succ <| by { rw [ ← @Nat.cast_lt ℝ ] ; push_cast; nlinarith [ hx₁.1, hx₁.2, hx₂.1, hx₂.2, show ( n : ℝ ) > 0 by positivity, mul_div_cancel₀ ( ( i : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( i + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] } ) ( Nat.le_of_lt_succ <| by { rw [ ← @Nat.cast_lt ℝ ] ; push_cast; nlinarith [ hx₁.1, hx₁.2, hx₂.1, hx₂.2, show ( n : ℝ ) > 0 by positivity, mul_div_cancel₀ ( ( i : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( i + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), mul_div_cancel₀ ( ( j + 1 : ℝ ) : ℝ ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] } ) ;
     · intro i hi; specialize h_const i; contrapose! h_const; rw [ MeasureTheory.integral_undef h_const ] ; ring; norm_num [ hn.ne', hm.ne' ] ;
-      intro H; simp_all +decide [ Finset.sum_eq_zero_iff_of_nonneg ] ;
+      intro H; simp_all +decide;
       exact h_const <| MeasureTheory.Integrable.integrableOn <| step_function_integrable n m c;
   simp_all +decide [ ← Finset.sum_mul _ _ _, ← Finset.sum_div ];
   rw [ ← Nat.cast_sum, hc, div_self ( by positivity ), one_mul ]
@@ -122,7 +122,7 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
 -- Helper: discrete autoconvolution nonneg
 lemma discrete_autoconvolution_nonneg (n m : ℕ) (c : Fin (2 * n) → ℕ) (k : ℕ) :
     0 ≤ discrete_autoconvolution (fun i : Fin (2 * n) => (4 * (n : ℝ)) / m * (c i : ℝ)) k := by
-  exact Finset.sum_nonneg fun i hi => Finset.sum_nonneg fun j hj => by positivity;
+  exact Finset.sum_nonneg fun i _hi => Finset.sum_nonneg fun j _hj => by positivity;
 
 /-- Sub-lemma: the convolution of the step function with itself, evaluated at
     grid point y_k, equals (1/(4nm²)) · conv_c[k].
@@ -140,7 +140,7 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
   have h_const : ∀ i : Fin (2 * n), ∀ x ∈ Set.Ico (-(1/4:ℝ) + (i : ℝ) / (4 * n)) (-(1/4:ℝ) + ((i : ℝ) + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m := by
     unfold step_function
     field_simp
-    intro i x hx; split_ifs <;> simp_all +decide [ne_of_gt, div_lt_iff₀, le_div_iff₀]
+    intro i x hx; split_ifs <;> simp_all +decide
     · cases ‹_› <;> nlinarith [show (i : ℝ) + 1 ≤ 2 * n by norm_cast; linarith [Fin.is_lt i], div_mul_cancel₀ (-n + (i : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), div_mul_cancel₀ (-n + (i + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0)]
     · rw [mul_div_cancel₀ _ (by positivity)]; congr; ring
       rw [div_le_iff₀ (by positivity), lt_div_iff₀ (by positivity)] at hx; norm_num [show ⌊(n : ℝ) + n * x * 4⌋ = i from Int.floor_eq_iff.mpr ⟨by norm_num; linarith, by norm_num; linarith⟩] at *
@@ -176,7 +176,7 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
       have hki_nat : (k - i.val : ℝ) = (↑(k - i.val) : ℝ) := by
         rw [Nat.cast_sub hle]
       apply h_const ⟨k - i.val, hlt⟩ (y - t)
-      simp only [Fin.val_mk]
+      simp only []
       constructor
       · rw [hki_nat] at hyt_lower; linarith
       · rw [hki_nat] at hyt_upper

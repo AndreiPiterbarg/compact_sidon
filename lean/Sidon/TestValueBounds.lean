@@ -37,7 +37,7 @@ noncomputable section
 /-- Sub-lemma: For any nonneg integrable function g on ℝ, the L∞ norm
     (essential supremum) is ≥ g(x) for any x where g is continuous. -/
 lemma eLpNorm_top_ge_of_continuous_at (g : ℝ → ℝ)
-    (hg_nn : ∀ x, 0 ≤ g x) (hg_int : MeasureTheory.Integrable g)
+    (hg_nn : ∀ x, 0 ≤ g x) (_hg_int : MeasureTheory.Integrable g)
     (x₀ : ℝ) (hg_cont : ContinuousAt g x₀)
     (h_fin : MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume ≠ ⊤) :
     (MeasureTheory.eLpNorm g ⊤ MeasureTheory.volume).toReal ≥ g x₀ := by
@@ -55,7 +55,7 @@ lemma eLpNorm_top_ge_of_continuous_at (g : ℝ → ℝ)
       h_ae_le.mono fun x hx h => not_le.mpr h hx
     rw [MeasureTheory.ae_iff] at h_ae_neg
     convert h_ae_neg using 2
-    ext x; simp [not_not]
+    ext x; simp
   obtain ⟨δ, hδ_pos, hball⟩ := Metric.continuousAt_iff.mp hg_cont (g x₀ - M) (by linarith)
   have h_sub : Metric.ball x₀ δ ⊆ {x | M < g x} := by
     intro x hx; simp only [Set.mem_setOf_eq]
@@ -85,7 +85,7 @@ lemma sum_bin_masses_eq_one (n : ℕ) (hn : n > 0) (f : ℝ → ℝ)
     rw [ MeasureTheory.integral_indicator ( measurableSet_Ico ) ];
   convert h_sum_eq_integral using 1;
   rw [ MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero ] ; ring_nf ; norm_num [ hn.ne' ];
-  exact fun x hx => Classical.not_not.1 fun hx' => by have := hf_supp hx'; exact this.2.not_le <| hx <| by linarith [ this.1 ] ;
+  exact fun x hx => Classical.not_not.1 fun hx' => by have := hf_supp hx'; exact this.2.not_ge <| hx <| by linarith [ this.1 ] ;
 
 /-- The max test value is attained at some window parameters. -/
 lemma max_test_value_le_max (n m : ℕ) (hn : n > 0) (c : Fin (2 * n) → ℕ) :
@@ -119,7 +119,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
           have h_bnd := hx ⟨2 * n, by omega⟩
           apply h_bnd
           rw [← h_eq]; push_cast
-          have : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (Nat.not_eq_zero_of_lt (Nat.zero_lt_of_lt hn))
+          have : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (Nat.ne_zero_of_lt (Nat.zero_lt_of_lt hn))
           field_simp; norm_num
         · exact h_gt
       exact Filter.eventually_of_mem (IsOpen.mem_nhds isOpen_Ioi hx_gt) fun y hy => by
@@ -422,7 +422,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
       show f_bin f n i t * f_bin f n j (z - t) = 0
       simp only [f_bin, Set.indicator_apply, bin_interval]
       split_ifs with h1 h2
-      · exfalso; apply hz; simp only [Z, hZ_def, Set.mem_Ico, δ]
+      · exfalso; apply hz; simp only [Z, Set.mem_Ico, δ]
         have h1l := (Set.mem_Ico.mp h1).1; have h1r := (Set.mem_Ico.mp h1).2
         have h2l := (Set.mem_Ico.mp h2).1; have h2r := (Set.mem_Ico.mp h2).2
         have hij1 := (Finset.mem_Icc.mp hij).1; have hij2 := (Finset.mem_Icc.mp hij).2
@@ -576,7 +576,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
         (by rwa [← MeasureTheory.eLpNorm_exponent_top])
         (le_trans (by rw [Real.enorm_eq_ofReal (hconv_nn z)]) hz)
     have h_meas_Z : MeasureTheory.volume Z ≠ ⊤ := by
-      simp only [Z, hZ_def]; rw [Real.volume_Ico]; exact ENNReal.ofReal_ne_top
+      simp only [Z]; rw [Real.volume_Ico]; exact ENNReal.ofReal_ne_top
     have h_intZ : ∫ z in Z, conv_ff z ≤ N * (↑ℓ * δ) := by
       calc ∫ z in Z, conv_ff z ≤ ∫ z in Z, N :=
             MeasureTheory.setIntegral_mono_ae hconv_int.integrableOn
@@ -618,7 +618,7 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
         · exact (h_conv_integrable i j).aestronglyMeasurable
         · exact MeasureTheory.aestronglyMeasurable_zero
       · filter_upwards [hg_le_ae] with z hz
-        simp only [Real.norm_eq_abs, abs_of_nonneg (hg_nn z), abs_of_nonneg (hconv_nn z)]
+        simp only [Real.norm_eq_abs, abs_of_nonneg (hg_nn z)]
         exact hz
     -- ═══════ Sorry 3: Integral of g equals ws ═══════
     have hg_integral : ∫ z, g z = ws := by

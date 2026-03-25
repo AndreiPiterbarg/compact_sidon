@@ -45,7 +45,7 @@ lemma discretization_error_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
     exact fun k hk => abs_sub_le_iff.mpr ⟨ by linarith [ Int.floor_le ( ( ( ∑ j ∈ Finset.univ.filter fun j : Fin ( 2 * n ) => ( j : ℕ ) < k, bin_masses f n j ) / ∑ j : Fin ( 2 * n ), bin_masses f n j ) * m ) ], by linarith [ Int.lt_floor_add_one ( ( ( ∑ j ∈ Finset.univ.filter fun j : Fin ( 2 * n ) => ( j : ℕ ) < k, bin_masses f n j ) / ∑ j : Fin ( 2 * n ), bin_masses f n j ) * m ) ] ⟩;
   have h_ci : (canonical_discretization f n m i : ℝ) = (⌊(∑ j ∈ Finset.univ.filter (fun j => j.val < i.val + 1), (bin_masses f n j)) / (∑ j ∈ Finset.univ, (bin_masses f n j)) * m⌋ : ℝ) - (⌊(∑ j ∈ Finset.univ.filter (fun j => j.val < i.val), (bin_masses f n j)) / (∑ j ∈ Finset.univ, (bin_masses f n j)) * m⌋ : ℝ) := by
     unfold canonical_discretization; norm_num [ Finset.sum_ite ] ;
-    split_ifs <;> simp_all +decide [ Finset.sum_ite, Nat.lt_succ_iff ];
+    split_ifs <;> simp_all +decide [ Nat.lt_succ_iff ];
     · rw [ Nat.cast_sub ] <;> norm_num [ abs_of_nonneg, Int.floor_nonneg ];
       · rw [ abs_of_nonneg, abs_of_nonneg ] <;> norm_cast;
         · refine' Int.floor_nonneg.mpr _;
@@ -86,7 +86,7 @@ lemma discretization_error_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
             exact MeasureTheory.integral_nonneg fun x => Set.indicator_nonneg ( fun _ _ => hf_nonneg x ) _;
           · convert sum_bin_masses_eq_one n hn f _ _ using 1 <;> aesop;
         · refine' Finset.sum_subset _ _ <;> simp +decide [ Finset.subset_iff ];
-          exact fun x hx => False.elim <| hx.not_le <| Nat.le_of_lt_succ <| by linarith [ Fin.is_lt i, Fin.is_lt x ] ;
+          exact fun x hx => False.elim <| hx.not_ge <| Nat.le_of_lt_succ <| by linarith [ Fin.is_lt i, Fin.is_lt x ] ;
       · rw [ ← Int.ofNat_le, Int.natAbs_of_nonneg ];
         · refine' Int.le_of_lt_add_one ( Int.floor_lt.mpr _ );
           refine' lt_of_le_of_lt ( mul_le_mul_of_nonneg_right ( div_le_one_of_le₀ _ _ ) ( Nat.cast_nonneg _ ) ) _ <;> norm_num;
@@ -102,19 +102,20 @@ lemma discretization_error_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
             rw [ Set.indicator_apply ] ; aesop;
   have h_sum_bin_masses : ∑ j ∈ Finset.univ, (bin_masses f n j) = 1 := by
     convert sum_bin_masses_eq_one n hn f hf_supp hf_int using 1;
-  simp_all +decide [ abs_le, div_le_iff₀, le_div_iff₀ ];
-  have := h_diff ( i + 1 ) ( by linarith [ Fin.is_lt i ] ) ; ( have := h_diff i ( by linarith [ Fin.is_lt i ] ) ; simp_all +decide [ Finset.sum_filter, Finset.sum_range, Nat.lt_succ_iff ] ; );
+  simp_all +decide [ abs_le, div_le_iff₀ ];
+  have := h_diff ( i + 1 ) ( by linarith [ Fin.is_lt i ] ) ; ( have := h_diff i ( by linarith [ Fin.is_lt i ] ) ; simp_all +decide [ Finset.sum_filter,
+      Nat.lt_succ_iff ] ; );
   rw [ show ( ∑ a : Fin ( 2 * n ), if a ≤ i then bin_masses f n a else 0 ) = ( ∑ a : Fin ( 2 * n ), if a < i then bin_masses f n a else 0 ) + bin_masses f n i from ?_ ] at *;
   · field_simp;
     constructor <;> linarith [ Int.floor_le ( ( ( ∑ a : Fin ( 2 * n ), if a < i then bin_masses f n a else 0 ) + bin_masses f n i ) * m ), Int.lt_floor_add_one ( ( ( ∑ a : Fin ( 2 * n ), if a < i then bin_masses f n a else 0 ) + bin_masses f n i ) * m ), Int.floor_le ( ( ∑ a : Fin ( 2 * n ), if a < i then bin_masses f n a else 0 ) * m ), Int.lt_floor_add_one ( ( ∑ a : Fin ( 2 * n ), if a < i then bin_masses f n a else 0 ) * m ) ];
   · rw [ Finset.sum_eq_sum_diff_singleton_add ( Finset.mem_univ i ) ];
-    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun h => lt_of_le_of_ne h ( by aesop ), fun h => le_of_lt h ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite, Finset.filter_lt_eq_Ioi ];
+    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun h => lt_of_le_of_ne h ( by aesop ), fun h => le_of_lt h ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite ];
     rw [ Finset.sdiff_singleton_eq_erase, Finset.filter_erase ] ; aesop;
   · rw [ Finset.sum_eq_sum_diff_singleton_add ( Finset.mem_univ i ) ];
-    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun hx' => lt_of_le_of_ne hx' ( by aesop ), fun hx' => le_of_lt hx' ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite, Finset.filter_lt_eq_Ioi ];
+    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun hx' => lt_of_le_of_ne hx' ( by aesop ), fun hx' => le_of_lt hx' ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite ];
     rw [ Finset.sdiff_singleton_eq_erase, Finset.filter_erase ] ; aesop;
   · rw [ Finset.sum_eq_sum_diff_singleton_add ( Finset.mem_univ i ) ];
-    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun hx' => lt_of_le_of_ne hx' ( by aesop ), fun hx' => le_of_lt hx' ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite, Finset.filter_lt_eq_Ioi ];
+    rw [ Finset.sum_congr rfl fun x hx => if_congr ( by exact ⟨ fun hx' => lt_of_le_of_ne hx' ( by aesop ), fun hx' => le_of_lt hx' ⟩ ) rfl rfl ] ; simp +decide [ Finset.sum_ite ];
     rw [ Finset.sdiff_singleton_eq_erase, Finset.filter_erase ] ; aesop
 
 /-- Claim 1.4: Contributing bins characterization. -/
@@ -423,7 +424,7 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         congr 1; ext i
         rw [← Finset.sum_sub_distrib, Finset.mul_sum]
         congr 1; ext j
-        rw [hw_def, hμ_def]; split_ifs <;> field_simp <;> ring
+        rw [hw_def, hμ_def]; split_ifs; field_simp; ring
       show test_value n m (canonical_discretization f n m) ℓ s_lo -
         test_value_continuous n f ℓ s_lo = ((4 : ℝ) * ↑n / ↑ℓ) * Q
       simp only [test_value, test_value_continuous, discrete_autoconvolution]
@@ -529,7 +530,7 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         _ = (1/↑m) * ∑ j ∈ contributing_bins n ℓ s_lo, w j := by
             rw [Finset.mul_sum]
             have hfilt : Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ =
-                contributing_bins n ℓ s_lo := by ext j; simp [Finset.mem_filter]
+                contributing_bins n ℓ s_lo := by ext j; simp
             rw [hfilt]; congr 1; ext j; ring
         _ = W / ↑m := by rw [hW, hw_def]; rw [Finset.sum_div]; field_simp
     -- Part B: exchange sums, bound range sums, use CB contiguity for mu bound
@@ -650,7 +651,7 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         _ = (1/↑m) * ∑ i ∈ contributing_bins n ℓ s_lo, μ i := by
             rw [Finset.mul_sum]
             have hfilt : Finset.filter (· ∈ contributing_bins n ℓ s_lo) Finset.univ =
-                contributing_bins n ℓ s_lo := by ext j; simp [Finset.mem_filter]
+                contributing_bins n ℓ s_lo := by ext j; simp
             rw [hfilt]; congr 1; ext i; ring
         _ ≤ (1/↑m) * (W + 1/↑m) := mul_le_mul_of_nonneg_left hCB_mu_le (by positivity)
         _ = W / ↑m + 1 / ↑m ^ 2 := by ring
@@ -736,7 +737,7 @@ theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
 
 /-- Claim 1.3: Dynamic threshold soundness. -/
 theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
-    (hn : n > 0) (hm : m > 0) (hct : 0 < c_target)
+    (hn : n > 0) (hm : m > 0) (_hct : 0 < c_target)
     (c : Fin (2 * n) → ℕ)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
     (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (c i : ℝ)) / m)

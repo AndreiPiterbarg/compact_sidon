@@ -25,7 +25,7 @@ noncomputable section
 
 /-- Claim 4.9: Gray code is a complete bijection over the Cartesian product. -/
 -- Source: output (15).lean (UUID: 7753e964) — PROVED
-theorem gray_code_bijection {k : ℕ} (r : Fin k → ℕ) (hr : ∀ i, 0 < r i) :
+theorem gray_code_bijection {k : ℕ} (r : Fin k → ℕ) (_hr : ∀ i, 0 < r i) :
     ∃ (f : Fin (∏ i, r i) → (∀ i : Fin k, Fin (r i))),
       Function.Bijective f := by
   have h_equiv : Nonempty (Fin (∏ i, r i) ≃ (∀ i, Fin (r i))) := by
@@ -63,7 +63,7 @@ theorem w_int_gray_update (lo_bin hi_bin : ℕ) (c c' : ℕ → ℤ)
            + (if (2*p+1) ∈ Finset.Icc lo_bin hi_bin then c' (2*p+1) - c (2*p+1) else 0) := by
   have h_split_sum : ∑ i ∈ Finset.Icc lo_bin hi_bin, c' i = ∑ i ∈ Finset.Icc lo_bin hi_bin, c i + ∑ i ∈ Finset.Icc lo_bin hi_bin, (if i = 2 * p then c' (2 * p) - c (2 * p) else 0) + ∑ i ∈ Finset.Icc lo_bin hi_bin, (if i = 2 * p + 1 then c' (2 * p + 1) - c (2 * p + 1) else 0) := by
     simpa only [ ← Finset.sum_add_distrib ] using Finset.sum_congr rfl fun i hi => by
-      by_cases hi1 : i = 2 * p <;> by_cases hi2 : i = 2 * p + 1 <;> simp_all <;> omega
+      by_cases hi1 : i = 2 * p <;> by_cases hi2 : i = 2 * p + 1 <;> simp_all
   simp_all
 
 end -- noncomputable section
