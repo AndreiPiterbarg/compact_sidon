@@ -295,6 +295,13 @@ private lemma range_sum_delta_le (n m : ℕ) (hn : n > 0) (hm : m > 0)
   rw [h_sum_eq]
   have h_upper := cumulative_delta_upper n m hn hm f hf_nonneg hf_supp hf_int b hb
   have h_lower := cumulative_delta_lower n m hn hm f hf_nonneg hf_supp hf_int a (le_trans hab hb)
+  set S_a := ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => i.val < a) Finset.univ,
+      ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i)
+  set S_b := ∑ i ∈ Finset.filter (fun i : Fin (2 * n) => i.val < b) Finset.univ,
+      ((canonical_discretization f n m i : ℝ) / ↑m - bin_masses f n i)
+  -- h_upper : S_b ≤ 0, h_lower : -1/m ≤ S_a, goal : S_b - S_a ≤ 1/m
+  have h1 : -1 / (↑m : ℝ) = -(1 / ↑m) := by ring
+  rw [h1] at h_lower
   linarith
 
 private lemma range_sum_delta_ge (n m : ℕ) (hn : n > 0) (hm : m > 0)
@@ -402,26 +409,30 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
       ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
         if i.1 + j.1 = k then w i * w j - μ i * μ j else 0 with hQ_def
     have h_diff_eq : test_value n m (canonical_discretization f n m) ℓ s_lo -
-        test_value_continuous n f ℓ s_lo = (4 * ↑n / ↑ℓ) * Q := by
+        test_value_continuous n f ℓ s_lo = ((4 : ℝ) * ↑n / ↑ℓ) * Q := by
       have h_inner : ∀ k, (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            if i.1 + j.1 = k then 4 * ↑n / ↑m * ↑(canonical_discretization f n m i) *
-              (4 * ↑n / ↑m * ↑(canonical_discretization f n m j)) else 0) -
+            if i.1 + j.1 = k then (4 : ℝ) * ↑n / ↑m * ↑(canonical_discretization f n m i) *
+              ((4 : ℝ) * ↑n / ↑m * ↑(canonical_discretization f n m j)) else 0) -
           (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            if i.1 + j.1 = k then 4 * ↑n * bin_masses f n i *
-              (4 * ↑n * bin_masses f n j) else 0) =
-          (4 * ↑n) ^ 2 * (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+            if i.1 + j.1 = k then (4 : ℝ) * ↑n * bin_masses f n i *
+              ((4 : ℝ) * ↑n * bin_masses f n j) else 0) =
+          ((4 : ℝ) * ↑n) ^ 2 * (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
             if i.1 + j.1 = k then w i * w j - μ i * μ j else 0) := by
         intro k
         rw [← Finset.sum_sub_distrib, Finset.mul_sum]
         congr 1; ext i
         rw [← Finset.sum_sub_distrib, Finset.mul_sum]
         congr 1; ext j
-        rw [hw_def, hμ_def]; split_ifs <;> ring
-      unfold test_value test_value_continuous discrete_autoconvolution
-      simp only []
+        rw [hw_def, hμ_def]; split_ifs <;> field_simp <;> ring
+      show test_value n m (canonical_discretization f n m) ℓ s_lo -
+        test_value_continuous n f ℓ s_lo = ((4 : ℝ) * ↑n / ↑ℓ) * Q
+      simp only [test_value, test_value_continuous, discrete_autoconvolution]
       rw [← mul_sub, ← Finset.sum_sub_distrib]
       simp_rw [h_inner, ← Finset.mul_sum]
-      rw [hQ_def]; ring
+      rw [hQ_def]
+      have hℓ_ne : (↑ℓ : ℝ) ≠ 0 := ne_of_gt hℓ_pos
+      have hn_ne : (↑n : ℝ) ≠ 0 := ne_of_gt hn_pos
+      field_simp
     suffices hQ_bound : Q ≤ 1 / ↑m ^ 2 + 2 * W / ↑m by
       rw [h_diff_eq]; exact mul_le_mul_of_nonneg_left hQ_bound (by positivity)
     set Part_A := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
@@ -431,10 +442,9 @@ theorem discretization_autoconv_error (n m : ℕ) (hn : n > 0) (hm : m > 0)
         ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
           if i.1 + j.1 = k then μ i * δ_i j else 0
     have hQ_eq : Q = Part_A + Part_B := by
+      show Q = Part_A + Part_B
       simp only [hQ_def, Part_A, Part_B, ← Finset.sum_add_distrib]
-      congr 1; ext k; rw [← Finset.sum_add_distrib]
-      congr 1; ext i; rw [← Finset.sum_add_distrib]
-      congr 1; ext j
+      congr 1; ext k; congr 1; ext i; congr 1; ext j
       split_ifs with h
       · exact h_two_term i j
       · simp
