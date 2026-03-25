@@ -1,0 +1,35 @@
+error: complete_proof.lean:1774:82: unsolved goals
+error: complete_proof.lean:1784:8: unsolved goals
+error: complete_proof.lean:1791:84: unsolved goals
+error: complete_proof.lean:1808:42: unsolved goals
+error: complete_proof.lean:1842:35: Application type mismatch: The argument
+error: complete_proof.lean:1877:75: Application type mismatch: The argument
+error: complete_proof.lean:1895:6: Type mismatch
+error: complete_proof.lean:1901:48: Application type mismatch: The argument
+error: complete_proof.lean:1901:73: Application type mismatch: The argument
+error: complete_proof.lean:2032:89: omega could not prove the goal:
+error: complete_proof.lean:2036:73: No applicable extensionality theorem found for type
+error: complete_proof.lean:2078:24: linarith failed to find a contradiction
+error: complete_proof.lean:2078:24: linarith failed to find a contradiction
+error: complete_proof.lean:2079:6: unsolved goals
+error: complete_proof.lean:2080:6: unsolved goals
+error: complete_proof.lean:2081:6: unsolved goals
+error: complete_proof.lean:2095:41: Type mismatch
+error: complete_proof.lean:2095:36: failed to synthesize
+error: complete_proof.lean:2094:31: failed to synthesize
+error: complete_proof.lean:2094:12: failed to synthesize
+error: complete_proof.lean:2093:11: failed to synthesize
+error: complete_proof.lean:2109:12: Type mismatch
+error: complete_proof.lean:2109:8: invalid 'calc' step, left-hand side is
+error: complete_proof.lean:2155:76: Application type mismatch: The argument
+error: complete_proof.lean:2157:49: Application type mismatch: The argument
+error: complete_proof.lean:2157:73: Application type mismatch: The argument
+error: complete_proof.lean:2589:2: linarith failed to find a contradiction
+error: complete_proof.lean:2747:34: failed to synthesize
+error: complete_proof.lean:2753:67: unsolved goals
+error: complete_proof.lean:2760:13: Tactic `unfold` failed to unfold `test_value` in
+error: complete_proof.lean:2777:26: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+error: Lean exited with code 1
+error: build failed
+---
+Total errors: 34
