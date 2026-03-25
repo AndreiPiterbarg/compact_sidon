@@ -36,9 +36,12 @@ noncomputable def autoconvolution_ratio (f : ℝ → ℝ) : ℝ :=
   let integral := MeasureTheory.integral MeasureTheory.volume f
   norm_inf / (integral ^ 2)
 
-/-- The autoconvolution constant c = inf R(f) over admissible f. -/
+/-- The autoconvolution constant c = inf R(f) over admissible f with positive integral.
+    The condition ∫f > 0 is necessary: without it, zero-integral functions would give
+    R(f) = 0/0 = 0, making the infimum trivially ≤ 0. -/
 noncomputable def autoconvolution_constant : ℝ :=
-  sInf {r : ℝ | ∃ (f : ℝ → ℝ), (∀ x, 0 ≤ f x) ∧ (Function.support f ⊆ Set.Ioo (-1/4) (1/4)) ∧ r = autoconvolution_ratio f}
+  sInf {r : ℝ | ∃ (f : ℝ → ℝ), (∀ x, 0 ≤ f x) ∧ (Function.support f ⊆ Set.Ioo (-1/4) (1/4))
+    ∧ MeasureTheory.integral MeasureTheory.volume f > 0 ∧ r = autoconvolution_ratio f}
 
 /-- Discrete autoconvolution: conv[k] = ∑_{i+j=k} a_i · a_j. -/
 def discrete_autoconvolution {d : ℕ} (a : Fin d → ℝ) (k : ℕ) : ℝ :=
