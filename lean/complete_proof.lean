@@ -1775,7 +1775,8 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       show step_function n m c y = step_function n m c x
       have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
       have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
-      simp only [step_function, h1, h2, ↓reduceIte]
+      simp only [step_function]
+      rw [if_pos h1, if_pos h2]
   · push_neg at hx_lt
     -- Case 2: x ≥ 1/4
     by_cases hx_ge : x ≥ (1/4 : ℝ)
@@ -1788,12 +1789,14 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
           push_cast
           have : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (by omega)
           field_simp
+          ring
         · exact h_gt
       exact Filter.eventually_of_mem (IsOpen.mem_nhds isOpen_Ioi hx_gt) fun y hy => by
         show step_function n m c y = step_function n m c x
         have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
         have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
-        simp only [step_function, h1, h2, ↓reduceIte]
+        simp only [step_function]
+        rw [if_pos h1, if_pos h2]
     · -- Case 3: -1/4 < x < 1/4, not a boundary
       push_neg at hx_ge
       have hx_lo : -(1/4 : ℝ) < x := by
@@ -1830,6 +1833,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
         have h := hx ⟨z.toNat, by omega⟩
         apply h
         rw [hx_eq]
+        congr 1
         push_cast [Int.toNat_of_nonneg hz_nn]
         ring
       -- Floor is locally constant at non-integer points
@@ -1844,8 +1848,9 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       ] with y hy_floor hy_range
       have h_floor_eq : ⌊(y + 1/4) / δ⌋ = z := by
         apply le_antisymm
-        · have := Int.floor_lt.mpr hy_floor.2
-          omega
+        · have hlt : ⌊(y + 1/4) / δ⌋ < z + 1 := by
+            simpa [Int.cast_add] using (Int.floor_lt.mpr hy_floor.2 : ⌊(y + 1/4) / δ⌋ < z + 1)
+          exact Int.lt_add_one_iff.mp hlt
         · exact Int.le_floor.mpr (le_of_lt hy_floor.1)
       have hy_cond : ¬(y < (-1:ℝ)/4 ∨ y ≥ 1/4) := by push_neg; constructor <;> linarith [hy_range.1, hy_range.2]
       have hx_cond : ¬(x < (-1:ℝ)/4 ∨ x ≥ 1/4) := by push_neg; constructor <;> linarith
