@@ -6,8 +6,14 @@ package sidon where
     ⟨`autoImplicit, false⟩
   ]
 
+-- Split proof modules (default build target)
 @[default_target]
 lean_lib Sidon where
+  srcDir := "."
+  roots := #[`Sidon]
+
+-- Legacy monolithic proof (kept for reference)
+lean_lib SidonMonolithic where
   srcDir := "."
   roots := #[`complete_proof]
 
