@@ -667,11 +667,13 @@ theorem correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
     (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / m) :
     autoconvolution_ratio f ≥ test_value n m (canonical_discretization f n m) ℓ s_lo - (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m) := by
   have h_cont : autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo :=
-    continuous_test_value_le_ratio n hn f hf_nonneg hf_supp hf_int ℓ s_lo hℓ
+    continuous_test_value_le_ratio n hn f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ
   have h_disc : test_value n m (canonical_discretization f n m) ℓ s_lo -
       test_value_continuous n f ℓ s_lo ≤
       (4 * ↑n / ↑ℓ) * (1 / ↑m ^ 2 + 2 * W / ↑m) :=
@@ -682,7 +684,9 @@ theorem correction_term_bound (n m : ℕ) (hn : n > 0) (hm : m > 0)
 theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
-    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1) :
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
     autoconvolution_ratio f ≥
       (max_test_value n m (canonical_discretization f n m) : ℝ) - 2 * n * (2 / m + 1 / m ^ 2) := by
   -- Step 1: The max test value is attained at some window (ℓ, s_lo) with ℓ ≥ 2
@@ -693,7 +697,7 @@ theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
   -- Step 2: Apply correction_term_bound at the maximizing window
   let W : ℝ :=
     (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / ↑m
-  have hbound := correction_term_bound n m hn hm f hf_nonneg hf_supp hf_int ℓ s_lo hℓ W rfl
+  have hbound := correction_term_bound n m hn hm f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ W rfl
   -- Step 3: Canonical discretization sums to m (needed for W ≤ 1)
   have h_mass_nz : ∑ j : Fin (2 * n), bin_masses f n j ≠ 0 := by
     rw [sum_bin_masses_eq_one n hn f hf_supp hf_int]; exact one_ne_zero
@@ -733,19 +737,21 @@ theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
 /-- Claim 1.3: Dynamic threshold soundness. -/
 theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
     (hn : n > 0) (hm : m > 0) (hct : 0 < c_target)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m)
+    (c : Fin (2 * n) → ℕ)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
     (W : ℝ) (hW : W = (∑ i ∈ contributing_bins n ℓ s_lo, (c i : ℝ)) / m)
     (h_exceeds : test_value n m c ℓ s_lo > c_target + (4 * n / ℓ) * (1 / m ^ 2 + 2 * W / m)) :
     ∀ f : ℝ → ℝ, (∀ x, 0 ≤ f x) →
       Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4) →
       MeasureTheory.integral MeasureTheory.volume f = 1 →
+      MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ →
       canonical_discretization f n m = c →
       autoconvolution_ratio f ≥ c_target := by
-  intro f hf_nonneg hf_supp hf_int hdisc
+  intro f hf_nonneg hf_supp hf_int h_conv_fin hdisc
   have hW' : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / ↑m := by
     rw [hW]; congr 1; congr 1; ext i; rw [hdisc]
-  have hbound := correction_term_bound n m hn hm f hf_nonneg hf_supp hf_int ℓ s_lo hℓ W hW'
+  have hbound := correction_term_bound n m hn hm f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ W hW'
   rw [hdisc] at hbound
   linarith
 

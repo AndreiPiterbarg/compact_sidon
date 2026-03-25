@@ -98,15 +98,37 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
   field_simp [ha_ne, ha2]
 
 /-- **Main theorem**: Every nonneg function f supported on (-1/4, 1/4) with positive
-    integral satisfies ‖f*f‖_∞ / (∫f)² ≥ 7/5 = 1.4.
+    integral and finite ‖f*f‖_∞ satisfies ‖f*f‖_∞ / (∫f)² ≥ 7/5 = 1.4.
+
+    The hypothesis h_conv_fin is necessary because autoconvolution_ratio uses
+    ENNReal.toReal, which maps ⊤ to 0. For f ∈ L¹ \ L² (e.g., f(x) ~ |x|^{-3/4}),
+    ‖f*f‖_∞ = ∞ and the mathematical ratio is ∞ ≥ 7/5, but the Lean-computed ratio
+    would be 0. This hypothesis holds for all bounded, L², or step functions.
 
     Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=64 with m=20,
     apply cascade_all_pruned to find a killing window (ℓ, s_lo) where TV exceeds the
     per-window threshold, then apply dynamic_threshold_sound to conclude R(g) ≥ 7/5. -/
+private lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
+    (h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
+    MeasureTheory.eLpNorm (MeasureTheory.convolution (fun x => a * f x) (fun x => a * f x)
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ := by
+  have h_eq : MeasureTheory.convolution (fun x => a * f x) (fun x => a * f x)
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume =
+      a ^ 2 • MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume := by
+    ext x; simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply',
+      Pi.smul_apply, smul_eq_mul]
+    simp only [mul_comm a (f _), ← mul_assoc]
+    rw [← MeasureTheory.integral_const_mul]; congr 1; ext t; ring
+  rw [h_eq, MeasureTheory.eLpNorm_const_smul]
+  exact ENNReal.mul_ne_top ENNReal.coe_ne_top h_fin
+
 theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
     (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
-    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0) :
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
     autoconvolution_ratio f ≥ 7/5 := by
   set I := MeasureTheory.integral MeasureTheory.volume f with hI_def
   set g := fun x => (1/I) * f x with hg_def
@@ -129,9 +151,12 @@ theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
   have hc_sum : ∑ i, c i = 20 :=
     canonical_discretization_sum_eq_m g 64 20 (by norm_num) (by norm_num) h_mass_nz hg_nonneg
   obtain ⟨ℓ, s_lo, hℓ, h_exceeds⟩ := cascade_all_pruned c hc_sum
+  have h_conv_fin_g : MeasureTheory.eLpNorm (MeasureTheory.convolution g g
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ :=
+    eLpNorm_convolution_scale_ne_top f (1/I) h_conv_fin
   set W := (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20
   have h_W_def : W = (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / (20 : ℝ) := rfl
   exact dynamic_threshold_sound 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
-    c hc_sum ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int rfl
+    c ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int h_conv_fin_g rfl
 
 end -- noncomputable section

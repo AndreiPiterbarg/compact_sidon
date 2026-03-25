@@ -337,11 +337,19 @@ private lemma sum_f_bin_le (n : ℕ) (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤
     simp only [this, Finset.sum_const_zero]; exact hf_nonneg t
 
 /-- **Theorem**: Continuous test value lower bound.
-    R(f) >= TV_continuous for admissible f, ell >= 2. -/
+    R(f) >= TV_continuous for admissible f with f*f ∈ L∞, ell >= 2.
+
+    The hypothesis h_conv_fin (finiteness of ‖f*f‖_∞) is necessary: for f ∈ L¹ \ L²
+    (e.g., f(x) = C|x|^{-3/4}·1_{(0,ε)}), the self-convolution f*f may be unbounded,
+    and autoconvolution_ratio returns 0 via ENNReal.toReal(⊤) = 0 rather than ∞.
+    This hypothesis is satisfied by all bounded functions, all L² functions,
+    and in particular all step functions used in the cascade computation. -/
 theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
     (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤)
     (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
     autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo := by
   set μ := bin_masses f n
@@ -559,23 +567,6 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
                 apply mul_le_mul (sum_f_bin_le n f hf_nonneg t) (sum_f_bin_le n f hf_nonneg (z - t))
                   (Finset.sum_nonneg fun j _ => f_bin_nonneg f hf_nonneg n j (z - t)) (hf_nonneg t)
       linarith [h_le_full, h_full_le]
-    -- ═══════ L∞ finiteness of conv_ff ═══════
-    -- We bound conv_ff(y) ≤ essSup(f) using Holder's inequality.
-    -- When f is essentially bounded (eLpNorm f ⊤ < ⊤), this gives a finite bound.
-    -- The case eLpNorm f ⊤ = ⊤ (f not essentially bounded) requires an additional
-    -- hypothesis (e.g. f ∈ L² or f ∈ L∞). For all functions in the application
-    -- (normalized nonneg functions), the finite case applies.
-    have hconv_fin : MeasureTheory.eLpNorm conv_ff ⊤ MeasureTheory.volume ≠ ⊤ := by
-      -- When essSup(f) < ⊤: conv_ff(z) ≤ essSup(f) * ∫f = essSup(f) ae, giving L∞.
-      -- This requires eLpNorm (f⋆f) ⊤ ≠ ⊤, i.e., f⋆f ∈ L∞.
-      -- For continuous f with compact support, this follows from
-      -- HasCompactSupport.continuous_convolution_right → Continuous (f⋆f) → bounded.
-      -- For general nonneg L¹ f (not necessarily continuous), f⋆f may fail to be in L∞
-      -- (e.g., f(x) = C·|x|^{-3/4}·1_{(0,ε)} gives (f⋆f)(0) = ∞).
-      -- The theorem statement implicitly requires f⋆f ∈ L∞. For the application
-      -- (step functions / bounded f), this holds. The original monolithic proof
-      -- had the same gap.
-      sorry
     have h_ae_N : ∀ᵐ z ∂MeasureTheory.volume, conv_ff z ≤ N := by
       filter_upwards [MeasureTheory.enorm_ae_le_eLpNormEssSup conv_ff MeasureTheory.volume] with z hz
       rw [← ENNReal.toReal_ofReal (hconv_nn z)]
