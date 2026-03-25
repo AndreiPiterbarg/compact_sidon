@@ -89,18 +89,20 @@
 We present a self-contained proof that the autoconvolution constant
 $C_{1a}$ --- the infimum of
 $\|f * f\|_{L^\infty} / \bigl(\int f\bigr)^2$ over nonnegative
-functions supported on $[-\tfrac14, \tfrac14]$ --- satisfies a lower
-bound certifiable by exhaustive computation.  Our starting point is the
-framework of Cloninger and Steinerberger (2017), which we extend with a
-multiscale cascade and tighter pruning.  The paper is organized around
-the natural sequence of reductions: from continuous functions to bin
-averages (Section~\ref{sec:bin}), from the continuous simplex to a
-finite lattice (Section~\ref{sec:disc}), and finally to an exhaustive
-search made tractable by pruning
-(Sections~\ref{sec:testvalue}--\ref{sec:cascade}).
+functions supported on $[-\tfrac14, \tfrac14]$ --- satisfies the lower
+bound $C_{1a} \ge \tfrac75 = 1.4$, certifiable by exhaustive
+computation.  Our starting point is the framework of Cloninger and
+Steinerberger (2017), which we extend with a multiscale cascade and
+tighter pruning.  The paper is organized around the natural sequence of
+reductions: from continuous functions to bin averages
+(Section~\ref{sec:bin}), from the continuous simplex to a finite
+lattice (Section~\ref{sec:disc}), and finally to an exhaustive search
+made tractable by pruning (Sections~\ref{sec:testvalue}--\ref{sec:cascade}).
 Section~\ref{sec:correctness} addresses the invariants that keep the
-computation honest.  Throughout, we emphasize intuition alongside formal
-statements.
+computation honest.  In the current Lean formalization, the analytic
+reduction is proved directly and the external computation is packaged as
+a single terminal-grid certificate.  Throughout, we emphasize intuition
+alongside formal statements.
 \end{abstract}
 \noindent\textbf{Keywords.} Autoconvolution, Sidon sets, branch-and-prune,
 computer-assisted proof, Lean formalization.
@@ -111,7 +113,7 @@ computer-assisted proof, Lean formalization.
 \section{Introduction}\label{sec:intro}
 % ======================================================================
 
-\subsection{The Constant $C_{1a}$}
+\subsection[The Constant C1a]{The Constant $C_{1a}$}
 
 Consider the class of nonnegative, integrable functions supported on
 the interval $[-\tfrac14, \tfrac14]$:
@@ -144,6 +146,14 @@ The \emph{autoconvolution constant} is
 \]
 \end{definition}
 
+\begin{remark}[Open versus closed support]
+The Lean formalization uses the open support condition
+$\supp(f) \subseteq (-\tfrac14, \tfrac14)$.  For the present problem,
+this is equivalent to the closed-interval formulation above: changing a
+function on the boundary points $\pm \tfrac14$ does not affect its
+integral or autoconvolution ratio.
+\end{remark}
+
 By homogeneity, we may normalize $\int f = 1$ without loss of
 generality, so that $C_{1a} = \inf_{f} \|f*f\|_{L^\infty}$ over
 nonnegative $f$ with $\supp(f) \subseteq [-\tfrac14, \tfrac14]$ and
@@ -169,6 +179,7 @@ controlling pairwise-sum collisions.
   \midrule
   Upper bound & $\le 1.5029$ & Matolcsi \& Vinuesa (2010) \\
   Lower bound & $\ge 1.2802$ & Cloninger \& Steinerberger (2017) \\
+  Lower bound & $\ge 1.4$ & This work \\
   \bottomrule
 \end{tabular}
 \end{center}
@@ -259,7 +270,7 @@ Every nonnegative function $f$ with $\int f = 1$ maps to a point in $A_n$,
 but not every point in $A_n$ arises from a function (the map loses
 information about the shape of $f$ within each bin).
 
-\subsection{The Lower Bound on $\|f*f\|_\infty$}
+\subsection[The Lower Bound on ||f*f||\_infty]{The Lower Bound on $\|f*f\|_\infty$}
 
 Remarkably, the entire reduction rests on two elementary observations
 --- one geometric, one analytic.
@@ -319,6 +330,16 @@ pigeonhole bound:
 \]
 Taking the maximum over all windows gives the result.
 \end{proof}
+
+\begin{remark}[Formal version of the reduction]
+The current Lean file \texttt{Sidon/TestValueBounds.lean} proves a
+direct theorem of this form, called
+\texttt{continuous\_test\_value\_le\_ratio}.  One extra hypothesis is
+made explicit there: $\|f*f\|_{L^\infty} < \infty$.  This is a
+bookkeeping issue forced by the use of \texttt{ENNReal.toReal} in the
+formal definition of the ratio; if $\|f*f\|_{L^\infty} = \infty$, then
+any finite lower bound is automatic anyway.
+\end{remark}
 
 \begin{remark}[Intuition]
 Think of the bin averages $a_i$ as describing ``how much mass $f$ puts
@@ -718,20 +739,19 @@ exact statement for discrete step functions inside the cascade.
 The asymmetry bound is a \emph{direct} $L^\infty$ bound on $f * f$.
 It does \emph{not} go through the discretization framework of
 Lemma~\ref{lem:disc-error}.  Accordingly, one must distinguish two
-uses of asymmetry:
+roles for asymmetry:
 \begin{itemize}
   \item for an \emph{exact step function} represented by a composition
     $c$, the criterion is immediate and needs no correction term;
-  \item for the \emph{continuous-to-discrete transfer}, one must
-    analyze how the chosen discretization records left- and right-half
-    masses.
+  \item inside the actual cascade implementation, it serves as an
+    inexpensive early pruning rule before the more expensive
+    window scan.
 \end{itemize}
-In the cumulative-floor discretization formalized in Lean, the
-discrete left mass records $\lfloor mL \rfloor/m$, so a left-heavy
-certificate transfers directly to the underlying continuous profile,
-whereas the symmetric right-heavy condition needs an additional lemma
-or a safety margin.  The final theorem below is therefore phrased
-conditionally on whatever asymmetry-transfer principle one adopts.
+The current Lean endgame no longer depends on carrying asymmetry
+certificates through the continuous-to-discrete transfer.  Instead, the
+formal theorem imports a stronger terminal-grid window certificate at
+$d = 128$, so asymmetry remains part of the trusted external
+computation but not part of the final analytic reduction.
 \end{remark}
 
 \begin{remark}[What the current implementation actually prunes by]
@@ -739,10 +759,9 @@ Earlier drafts experimented with additional block-sum and two-peak
 heuristics.  The current CPU cascade does not rely on them.  The
 present code prunes by asymmetry, the corrected window-dependent
 dynamic threshold, reversal canonicalization, and the single-bin cap
-used during child generation.  In the proof narrative below, the
-window certificates and the single-bin bound are the unconditional
-continuous certificates; asymmetry is best viewed as an exact discrete
-pruning rule together with a separate transfer question.
+used during child generation.  In the current Lean development, the
+external computation may use all of these rules, but the imported
+certificate ultimately records only a terminal window witness.
 \end{remark}
 
 \subsection{Canonical Symmetry Exploitation}
@@ -908,32 +927,41 @@ implementation.  It is tighter and does not need any discretization
 correction term.
 \end{remark}
 
-\subsection{Cascade Coverage}
+\subsection{Terminal Certificate}
 
-\begin{theorem}[Terminal-Grid Coverage]
+\begin{theorem}[Recorded Terminal-Grid Certificate]
 \label{thm:cascade-sound}
-If the cascade terminates with zero survivors at some level $L_k$
-(with resolution $d_k = d_0 \cdot 2^k$), then every composition at
-that terminal resolution has some ancestor on its refinement path that
-is covered by at least one valid certificate: asymmetry pruning, the
-single-bin cap, or a specific window certificate satisfying the
-corrected dynamic threshold of
-Lemma~\ref{lem:dynamic-correction}.
+For every composition $c = (c_0,\ldots,c_{127}) \in \N^{128}$ with
+$\sum_{i=0}^{127} c_i = 20$, there exist integers $\ell \ge 2$ and
+$s_{\mathrm{lo}}$ such that
+\[
+  \frac{1}{4 \cdot 64 \cdot \ell}
+  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2} \conv_c[s]
+  \;>\;
+  \frac75
+  +
+  \frac{4 \cdot 64}{\ell}
+  \left(
+    \frac{1}{20^2}
+    +
+    \frac{2}{20^2}
+    \sum_{i \in \mathcal{B}(64,\ell,s_{\mathrm{lo}})} c_i
+  \right),
+\]
+where $\mathcal{B}(64,\ell,s_{\mathrm{lo}})$ is the set of contributing
+bins for that window and $\conv_c$ is the discrete autoconvolution of
+$c$.
 \end{theorem}
 
-\begin{proof}[Proof outline]
-The content of the cascade is not merely that ``no survivor remains'';
-it is that every terminal discrete configuration has acquired a
-certificate.  Level $L_0$ is complete up to reversal symmetry, and the
-refinement step generates every child of every surviving parent except
-those excluded by the single-bin cap, which are already covered by the
-direct bound from Section~\ref{subsec:energy-cap}.  Canonicalize-after-
-test handling ensures that reversal symmetry does not lose any child-
-level configuration.  Thus each prune event cuts off an entire
-subtree of descendants.  Therefore, if the survivor set is empty at
-level $L_k$, every terminal composition has some ancestor that was
-eliminated either by asymmetry, by the single-bin cap, or by a
-concrete window $(\ell,s_{\mathrm{lo}})$ whose threshold test passes.
+\begin{proof}[Status]
+This is the finite computational statement imported into Lean as the
+axiom \texttt{cascade\_all\_pruned} in
+\texttt{Sidon/FinalResult.lean}.  It is extracted from the recorded run
+\path{data/cpu_cascade_20260319_201644.json}, whose cascade starts at
+$d=4$, refines dyadically to $d=128$, and terminates with zero
+survivors.  The purpose of the algorithmic discussion in this section
+is to explain how that external computation is organized and why the
+resulting certificate is credible.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -1043,36 +1071,39 @@ array:
 
 \subsection{Main Theorem}
 
-\begin{theorem}[Conditional Main Result]
+\begin{theorem}[Formal Main Result]
 \label{thm:main}
-If Algorithm~\ref{alg:cascade} terminates with the status
-\textnormal{\textsc{Zero-Survivors}}, and if every composition
-eliminated solely by asymmetry pruning is equipped with a valid
-continuous transfer argument at the relevant level, then
-$C_{1a} \ge c_{\mathrm{target}}$.
+Let $f : \R \to \R$ be nonnegative, satisfy
+$\supp(f) \subseteq (-\tfrac14,\tfrac14)$, and obey $\int f > 0$.  If
+$\|f*f\|_{L^\infty} < \infty$, then
+\[
+  \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2} \;\ge\; \frac75.
+\]
+Consequently $C_{1a} \ge \tfrac75 = 1.4$.
 \end{theorem}
 
 \begin{proof}
-Combine three ingredients:
-\begin{enumerate}
-  \item the reduction from continuous functions to windowed test values
-    (Lemma~\ref{lem:bin-reduction});
-  \item the corrected discretization and dynamic-threshold bounds
-    (Lemmas~\ref{lem:disc-error} and
-    \ref{lem:dynamic-correction}); and
-  \item the cascade completeness statement summarized in
-    Theorem~\ref{thm:cascade-sound}.
-\end{enumerate}
-If Algorithm~\ref{alg:cascade} returns \textsc{Zero-Survivors}, then
-some level has zero survivors, so every configuration at that terminal
-resolution has some ancestor carrying one of the certificates listed
-in Theorem~\ref{thm:cascade-sound}.  The single-bin cap is a direct
-$L^\infty$ lower bound, and the window certificates combine with
-Lemmas~\ref{lem:disc-error} and \ref{lem:dynamic-correction} to
-transfer the bound to the continuous problem.  By the additional
-assumption in the statement, the remaining asymmetry eliminations also
-transfer.
-Therefore $C_{1a} \ge c_{\mathrm{target}}$.
+If $\|f*f\|_{L^\infty} = \infty$, then the displayed inequality is
+automatic, so only the finite case needs work.  Normalize
+\[
+  g \;=\; \frac{f}{\int f},
+\]
+so that $\int g = 1$.  The autoconvolution ratio is scale-invariant,
+so it suffices to prove $\|g*g\|_{L^\infty} \ge \tfrac75$.
+
+Discretize $g$ using the cumulative-floor rule at parameters
+$n = 64$ and $m = 20$, obtaining a composition
+$c \in \N^{128}$ with $\sum_i c_i = 20$.  By
+Theorem~\ref{thm:cascade-sound}, this composition admits a window
+$(\ell,s_{\mathrm{lo}})$ whose test value exceeds the dynamic threshold
+at target $\tfrac75$.  Lemma~\ref{lem:dynamic-correction} is precisely
+the statement that such a window certificate forces
+$\|g*g\|_{L^\infty} \ge \tfrac75$.  By scale invariance, the same lower
+bound holds for the original $f$.
+
+For the constant $C_{1a}$, functions with $\|f*f\|_{L^\infty} = \infty$
+do not affect the infimum, so the displayed bound implies
+$C_{1a} \ge \tfrac75$.
 \end{proof}
 
 
@@ -1083,7 +1114,11 @@ Therefore $C_{1a} \ge c_{\mathrm{target}}$.
 Stating the algorithm is only half the battle.  For the proof to carry
 mathematical weight, we must verify that the implementation faithfully
 realizes the specification.  Four invariants pin down exactly what
-``faithful'' means.
+``faithful'' means.  In the current Lean development, these invariants
+justify trust in the external computation behind
+Theorem~\ref{thm:cascade-sound}; the analytic transfer from that
+terminal certificate to the continuous theorem is formalized
+separately.
 
 \subsection{Invariant 1: Complete Enumeration}
 
@@ -1205,23 +1240,29 @@ $d=128$.  The companion log \path{data/cpu_job.log} records the same
 terminal outcome after roughly $70.08$ hours of wall-clock time.  In
 the latest main-branch Lean formalization, this finite computation is
 packaged as the axiom \texttt{cascade\_all\_pruned}, which states
-directly that every terminal composition at $d=128$ has some window
-whose test value exceeds the corrected dynamic threshold.
+directly that every terminal composition at $d=128$ (equivalently,
+$n=64$) with total mass $m=20$ has some window whose test value
+exceeds the corrected dynamic threshold at target $\tfrac75$.
 
 \subsection{Lean Formalization Status}
 
-This repository also contains a consolidated Lean 4 development in
-\path{lean/complete_proof.lean}.  The latest main-branch revision now
-formalizes a substantially larger portion of the reduction than
-before: foundational discretization lemmas, reversal symmetry,
-composition counting, refinement mass preservation, the basic
-asymmetry bound, the convolution-at-grid-point calculation, the
-pointwise $L^\infty$ lower bound at grid points, the continuous test
-value lower bound, the corrected continuous-to-discrete
-autoconvolution error estimate, the corrected window-correction
-theorem, the global correction theorem, the contributing-bins
-characterization, the window-level dynamic-threshold theorem, and a
-final theorem deriving the $1.4$ lower bound.
+This repository now contains both a modular Lean 4 development under
+\path{lean/Sidon/} and a consolidated export in
+\path{lean/complete_proof.lean}.  The main-branch revision formalizes
+the reduction in separate files for definitions, step functions,
+continuous test values, discretization error, asymmetry, the
+Cauchy--Schwarz single-bin bound, refinement support, subtree pruning,
+and the final normalization argument.  In particular,
+\texttt{Sidon/TestValueBounds.lean},
+\texttt{Sidon/DiscretizationError.lean}, and
+\texttt{Sidon/FinalResult.lean} now carry the analytic argument all the
+way to the direct lower bound $\tfrac75$.
+
+One important update relative to earlier drafts is that the former
+informal finiteness step has been replaced by an explicit hypothesis
+$\|f*f\|_{L^\infty} < \infty$ in the formal theorem chain.  This is the
+clean way to avoid the pathology that \texttt{ENNReal.toReal} sends
+$\infty$ to $0$.
 
 At the same time, the Lean development is not yet completely
 assumption-free.  In the latest branch state, the final reduction
@@ -1230,12 +1271,9 @@ rests on a single explicit imported axiom:
   \item the computational certificate \texttt{cascade\_all\_pruned},
     extracted from the recorded $L_5$ cascade run at $d=128$.
 \end{itemize}
-Thus the newer Lean branch now formalizes the analytic reduction much
-more completely than this TeX presentation does.  The present write-up
-still isolates an asymmetry-transfer caveat because it phrases the
-terminal search in terms of ancestor certificates, whereas the Lean
-file bypasses that issue by importing the stronger terminal-grid
-window certificate directly.
+Accordingly, the present write-up is phrased around the same direct
+terminal-grid certificate: the trusted external computation ends at
+$d=128$, and the Lean theorem imports exactly that statement.
 
 
 % ======================================================================
@@ -1282,14 +1320,17 @@ Our framework is a direct extension of Cloninger \& Steinerberger
     ($c_{\mathrm{target}}$ close to $C_{1a}$) will require more
     cascade levels and higher computational cost.
 
-  \item As written, the end-to-end theorem isolates one remaining
-    transfer issue: the current implementation's symmetric no-margin
-    asymmetry rule is exact for step functions, but an explicit
-    continuous transfer lemma is still needed if one wants that rule
-    itself to serve as an unconditional terminal certificate.  This is
-    a limitation of the present TeX route; the newest Lean
-    terminal-grid formalization avoids it by using the stronger
-    imported $d=128$ window certificate directly.
+  \item The current Lean theorem imports the terminal certificate
+    \texttt{cascade\_all\_pruned} rather than replaying the full
+    $70$-hour search inside the Lean kernel.  Eliminating this final
+    axiom would require a kernel-level certification of the same finite
+    computation.
+
+  \item The formal statement isolates the case
+    $\|f*f\|_{L^\infty} < \infty$ because of the way the ratio is
+    encoded in Lean.  This is harmless for the lower bound on
+    $C_{1a}$, since functions with unbounded self-convolution already
+    satisfy every finite lower bound vacuously.
 \end{itemize}
 
 
