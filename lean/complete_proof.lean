@@ -2032,17 +2032,58 @@ theorem continuous_test_value_le_ratio (n : ℕ) (hn : n > 0)
   rw [h_simp]
   -- ws <= 1 (window partial sum <= total autoconvolution)
   have h_ws_le : ws ≤ 1 := by
-    calc ws ≤ ∑ k ∈ Finset.range (2 * (2 * n)),
-          ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
-            (if i.1 + j.1 = k then μ i * μ j else 0) :=
-          Finset.sum_le_sum_of_subset_of_nonneg (fun k hk => by simp [Finset.mem_range]; omega)
-            (fun k _ _ => Finset.sum_nonneg fun i _ => Finset.sum_nonneg fun j _ => by
-              split_ifs <;> [exact mul_nonneg (hμ_nn i) (hμ_nn j); exact le_refl 0])
-      _ = (∑ i : Fin (2 * n), μ i) ^ 2 := by
-          rw [sq, ← Finset.sum_product']; rw [Finset.sum_comm]; congr 1; ext ⟨i, j⟩
-          simp only [Finset.sum_ite_eq', Finset.mem_range]
-          split_ifs with h; · rfl; · push_neg at h; omega
-      _ = 1 := by rw [hμ_sum]; ring
+    have h_inner_zero : ∀ k, k ∉ Finset.range (2 * (2 * n)) →
+        (∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+          (if i.1 + j.1 = k then μ i * μ j else 0)) = 0 := by
+      intro k hk
+      simp only [Finset.mem_range, not_lt] at hk
+      apply Finset.sum_eq_zero
+      intro i _
+      apply Finset.sum_eq_zero
+      intro j _
+      rw [if_neg]
+      intro heq
+      omega
+    have h_eq : ws =
+      ∑ k ∈ (Finset.Icc s_lo (s_lo + ℓ - 2)).filter (· < 2 * (2 * n)),
+        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+          (if i.1 + j.1 = k then μ i * μ j else 0) := by
+      symm
+      apply Finset.sum_filter_of_ne
+      intro k hk hne
+      by_contra h
+      push_neg at h
+      exact hne (h_inner_zero k (by simp only [Finset.mem_range, not_lt]; omega))
+    have h_range_eq : ∑ k ∈ Finset.range (2 * (2 * n)),
+        ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+          (if i.1 + j.1 = k then μ i * μ j else 0) =
+        (∑ i : Fin (2 * n), μ i) ^ 2 := by
+      conv_lhs =>
+        rw [Finset.sum_comm]
+        arg 2
+        ext i
+        rw [Finset.sum_comm]
+      simp_rw [Finset.sum_ite_eq]
+      simp only [Finset.mem_range]
+      have : ∀ (i j : Fin (2 * n)), i.1 + j.1 < 2 * (2 * n) := by
+        intro i j
+        omega
+      simp only [this, ↓reduceIte]
+      rw [sq, Finset.sum_mul_sum]
+    rw [h_eq]
+    calc _ ≤ ∑ k ∈ Finset.range (2 * (2 * n)),
+            ∑ i : Fin (2 * n), ∑ j : Fin (2 * n),
+              (if i.1 + j.1 = k then μ i * μ j else 0) := by
+          apply Finset.sum_le_sum_of_subset_of_nonneg
+          · intro k hk
+            simp only [Finset.mem_filter, Finset.mem_range] at hk ⊢
+            exact hk.2
+          · intro k _ _
+            exact Finset.sum_nonneg fun i _ => Finset.sum_nonneg fun j _ => by
+              split_ifs <;> [exact mul_nonneg (hμ_nn i) (hμ_nn j); exact le_refl 0]
+      _ = 1 := by
+          rw [h_range_eq, hμ_sum]
+          ring
   have hws_nn : 0 ≤ ws := Finset.sum_nonneg fun k _ => Finset.sum_nonneg fun i _ =>
     Finset.sum_nonneg fun j _ => by
       split_ifs <;> [exact mul_nonneg (hμ_nn i) (hμ_nn j); exact le_refl 0]
