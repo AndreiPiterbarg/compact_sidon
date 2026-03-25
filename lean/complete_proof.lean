@@ -1775,48 +1775,25 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       show step_function n m c y = step_function n m c x
       have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inl hy
       have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inl hx_lt
-      have h1' : y < -1 / 4 ∨ 4⁻¹ ≤ y := by
-        rcases h1 with h1 | h1
-        · left
-          linarith
-        · right
-          simpa using h1
-      have h2' : x < -1 / 4 ∨ 4⁻¹ ≤ x := by
-        rcases h2 with h2 | h2
-        · left
-          linarith
-        · right
-          simpa using h2
-      simp [step_function, h1', h2']
+      simp [step_function, h1, h2]
   · push_neg at hx_lt
     -- Case 2: x ≥ 1/4
     by_cases hx_ge : x ≥ (1/4 : ℝ)
     · have hx_gt : x > 1/4 := by
-        refine lt_of_le_of_ne hx_ge ?_
-        intro h_eq
-        have h_bnd := hx ⟨2 * n, by omega⟩
-        apply h_bnd
-        rw [← h_eq]
-        push_cast
-        field_simp
-        ring
+        rcases eq_or_lt_of_le hx_ge with h_eq | h_gt
+        · exfalso
+          have h_bnd := hx ⟨2 * n, by omega⟩
+          apply h_bnd
+          rw [← h_eq]
+          push_cast
+          have : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (by omega)
+          field_simp
+        · exact h_gt
       exact Filter.eventually_of_mem (IsOpen.mem_nhds isOpen_Ioi hx_gt) fun y hy => by
         show step_function n m c y = step_function n m c x
         have h1 : y < -(1/4 : ℝ) ∨ y ≥ 1/4 := Or.inr (le_of_lt hy)
         have h2 : x < -(1/4 : ℝ) ∨ x ≥ 1/4 := Or.inr hx_ge
-        have h1' : y < -1 / 4 ∨ 4⁻¹ ≤ y := by
-          rcases h1 with h1 | h1
-          · left
-            linarith
-          · right
-            simpa using h1
-        have h2' : x < -1 / 4 ∨ 4⁻¹ ≤ x := by
-          rcases h2 with h2 | h2
-          · left
-            linarith
-          · right
-            simpa using h2
-        simp [step_function, h1', h2']
+        simp [step_function, h1, h2]
     · -- Case 3: -1/4 < x < 1/4, not a boundary
       push_neg at hx_ge
       have hx_lo : -(1/4 : ℝ) < x := by
