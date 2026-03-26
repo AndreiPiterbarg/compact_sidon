@@ -101,7 +101,7 @@ reductions: from continuous functions to bin averages
 lattice (Section~\ref{sec:disc}), and finally to an exhaustive search
 made tractable by pruning (Sections~\ref{sec:testvalue}--\ref{sec:cascade}).
 Section~\ref{sec:correctness} addresses the invariants that keep the
-computation honest.  In the current Lean formalization, the analytic
+computation honest.  In the accompanying Lean formalization, the analytic
 reduction is proved directly and the external computation is packaged as
 a single terminal-grid certificate.  Throughout, we emphasize intuition
 alongside formal statements.
@@ -255,6 +255,14 @@ Each bin has width $\tfrac{1}{4n}$.
 We use $d = 2n$ bins total, indexed from $-n$ to $n-1$.  In the
 implementation, we re-index these as $0, 1, \ldots, d-1$ (i.e.,
 $j \mapsto j + n$).  The mathematics is the same either way.
+
+In the Lean development, the bins are taken to be half-open intervals
+\[
+  \left[-\tfrac14 + \frac{i}{4n},\; -\tfrac14 + \frac{i+1}{4n}\right),
+\]
+so that they form a genuine partition.  This change affects neither
+the bin integrals nor the convolution bounds, since the endpoints form
+a null set.
 \end{remark}
 
 Figure~\ref{fig:partition-bins} illustrates the support partition and
@@ -366,7 +374,7 @@ Taking the maximum over all windows gives the result.
 \end{proof}
 
 \begin{remark}[Formal version of the reduction]
-The current Lean file \texttt{Sidon/TestValueBounds.lean} proves a
+The Lean file \texttt{Sidon/TestValueBounds.lean} proves a
 direct theorem of this form, called
 \texttt{continuous\_test\_value\_le\_ratio}.  One extra hypothesis is
 made explicit there: $\|f*f\|_{L^\infty} < \infty$.  This is a
@@ -539,7 +547,8 @@ stated global bound for $\tv$.
 The raw CS17 correction is $\tfrac{2}{m} + \tfrac{1}{m^2}$, but the
 global level-$n$ correction is
 $2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.  At the starting level
-$n=2$ and $m=20$, this is $0.41$.  In the current codebase, this
+$n=2$ and $m=20$, this is $0.41$.  In the implementation accompanying
+this paper, this
 global quantity is used only for coarse caps and reporting; the actual
 pruning kernel uses the sharper window-dependent threshold described
 next.
@@ -817,23 +826,23 @@ roles for asymmetry:
 \begin{itemize}
   \item for an \emph{exact step function} represented by a composition
     $c$, the criterion is immediate and needs no correction term;
-  \item inside the actual cascade implementation, it serves as an
+  \item inside the certificate computation, it serves as an
     inexpensive early pruning rule before the more expensive
     window scan.
 \end{itemize}
-The current Lean endgame no longer depends on carrying asymmetry
+The final Lean theorem no longer depends on carrying asymmetry
 certificates through the continuous-to-discrete transfer.  Instead, the
 formal theorem imports a stronger terminal-grid window certificate at
 $d = 128$, so asymmetry remains part of the trusted external
 computation but not part of the final analytic reduction.
 \end{remark}
 
-\begin{remark}[What the current implementation actually prunes by]
+\begin{remark}[What the certificate computation prunes by]
 Earlier drafts experimented with additional block-sum and two-peak
-heuristics.  The current CPU cascade does not rely on them.  The
-present code prunes by asymmetry, the corrected window-dependent
+heuristics.  The recorded cascade does not rely on them.  The
+certificate computation prunes by asymmetry, the corrected window-dependent
 dynamic threshold, reversal canonicalization, and the single-bin cap
-used during child generation.  In the current Lean development, the
+used during child generation.  In the Lean development, the
 external computation may use all of these rules, but the imported
 certificate ultimately records only a terminal window witness.
 \end{remark}
@@ -895,8 +904,8 @@ the inner pairs when outer pairs tie.
 % ======================================================================
 
 Brute-force enumeration at fine resolution is hopelessly infeasible ---
-even modest parameters yield billions of lattice points.  The key idea,
-borrowed from multigrid methods in numerical analysis, is to start
+even modest parameters yield billions of lattice points.  The key idea
+is to start
 coarse: most configurations can be ruled out cheaply at low resolution,
 and only the stubborn survivors need to be examined more closely.
 
@@ -921,7 +930,7 @@ and only the stubborn survivors need to be examined more closely.
     computational budget is reached.
 \end{enumerate}
 
-Figure~\ref{fig:cascade-flow} summarizes the recorded run
+Figure~\ref{fig:cascade-flow} summarizes the recorded certificate run
 \path{data/cpu_cascade_20260319_201644.json}, including the exact
 survivor counts at each dyadic level.
 
@@ -929,7 +938,7 @@ survivor counts at each dyadic level.
 \centering
 \includegraphics[width=\linewidth]{04_cascade_flow.pdf}
 \caption{Stylized overview of the multiscale cascade.  The annotations
-record the exact survivor counts from the terminal proof run: $345$ at
+record the exact survivor counts from the terminal certificate run: $345$ at
 $d=4$, then $48{,}443$, $7{,}499{,}382$, $147{,}279{,}894$, $76{,}829$,
 and finally $0$ at $d=128$.}
 \label{fig:cascade-flow}
@@ -1010,7 +1019,7 @@ claim.
 \begin{remark}[Tighter Cauchy--Schwarz cap]
 The looser cap $x_{\text{cap}}^{\mathrm{TV}}$ mirrors the older global
 correction narrative, while the direct cap
-$x_{\text{cap}}^{\mathrm{CS}}$ is the effective one in the current
+$x_{\text{cap}}^{\mathrm{CS}}$ is the effective one in the
 implementation.  It is tighter and does not need any discretization
 correction term.
 \end{remark}
@@ -1020,11 +1029,17 @@ correction term.
 \begin{theorem}[Recorded Terminal-Grid Certificate]
 \label{thm:cascade-sound}
 For every composition $c = (c_0,\ldots,c_{127}) \in \N^{128}$ with
-$\sum_{i=0}^{127} c_i = 20$, there exist integers $\ell \ge 2$ and
+$\sum_{i=0}^{127} c_i = 20$, let
+\[
+  a_i \;=\; \frac{4 \cdot 64}{20}\, c_i,
+  \qquad i = 0,\ldots,127,
+\]
+and let $\conv_a$ be the discrete autoconvolution of $a$.  Then there
+exist integers $\ell \ge 2$ and
 $s_{\mathrm{lo}}$ such that
 \[
   \frac{1}{4 \cdot 64 \cdot \ell}
-  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2} \conv_c[s]
+  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2} \conv_a[s]
   \;>\;
   \frac75
   +
@@ -1037,14 +1052,14 @@ $s_{\mathrm{lo}}$ such that
   \right),
 \]
 where $\mathcal{B}(64,\ell,s_{\mathrm{lo}})$ is the set of contributing
-bins for that window and $\conv_c$ is the discrete autoconvolution of
-$c$.
+bins for that window.
 \end{theorem}
 
 \begin{proof}[Status]
 This is the finite computational statement imported into Lean as the
 axiom \texttt{cascade\_all\_pruned} in
-\texttt{Sidon/FinalResult.lean}.  It is extracted from the recorded run
+\texttt{Sidon/FinalResult.lean}.  It is extracted from the recorded
+certificate run
 \path{data/cpu_cascade_20260319_201644.json}, whose cascade starts at
 $d=4$, refines dyadically to $d=128$, and terminates with zero
 survivors.  The purpose of the algorithmic discussion in this section
@@ -1202,7 +1217,7 @@ $C_{1a} \ge \tfrac75$.
 Stating the algorithm is only half the battle.  For the proof to carry
 mathematical weight, we must verify that the implementation faithfully
 realizes the specification.  Four invariants pin down exactly what
-``faithful'' means.  In the current Lean development, these invariants
+``faithful'' means.  In the accompanying Lean development, these invariants
 justify trust in the external computation behind
 Theorem~\ref{thm:cascade-sound}; the analytic transfer from that
 terminal certificate to the continuous theorem is formalized
@@ -1326,7 +1341,7 @@ The recorded CPU cascade in
 level $L_5$, corresponding to dyadic refinement from $d=4$ through
 $d=128$.  The companion log \path{data/cpu_job.log} records the same
 terminal outcome after roughly $70.08$ hours of wall-clock time.  In
-the latest main-branch Lean formalization, this finite computation is
+the accompanying Lean formalization, this finite computation is
 packaged as the axiom \texttt{cascade\_all\_pruned}, which states
 directly that every terminal composition at $d=128$ (equivalently,
 $n=64$) with total mass $m=20$ has some window whose test value
@@ -1334,11 +1349,10 @@ exceeds the corrected dynamic threshold at target $\tfrac75$.
 
 \subsection{Lean Formalization Status}
 
-This repository now contains both a modular Lean 4 development under
-\path{lean/Sidon/} and a consolidated export in
-\path{lean/complete_proof.lean}.  The formalization is carried out in
-Lean~4~\cite{Lean4}, on top of the mathlib library~\cite{Mathlib}.  The
-main-branch revision formalizes
+The accompanying formalization consists of a modular Lean 4 development
+under \path{lean/Sidon/} and a consolidated export in
+\path{lean/complete_proof.lean}.  It is carried out in Lean~4~\cite{Lean4},
+on top of the mathlib library~\cite{Mathlib}.  The development formalizes
 the reduction in separate files for definitions, step functions,
 continuous test values, discretization error, asymmetry, the
 Cauchy--Schwarz single-bin bound, refinement support, subtree pruning,
@@ -1355,7 +1369,7 @@ clean way to avoid the pathology that \texttt{ENNReal.toReal} sends
 $\infty$ to $0$.
 
 At the same time, the Lean development is not yet completely
-assumption-free.  In the latest branch state, the final reduction
+assumption-free.  The final reduction
 rests on a single explicit imported axiom:
 \begin{itemize}
   \item the computational certificate \texttt{cascade\_all\_pruned},
@@ -1410,7 +1424,7 @@ Cloninger--Steinerberger~\cite{CS17}.  The key differences:
     ($c_{\mathrm{target}}$ close to $C_{1a}$) will require more
     cascade levels and higher computational cost.
 
-  \item The current Lean theorem imports the terminal certificate
+  \item The Lean theorem imports the terminal certificate
     \texttt{cascade\_all\_pruned} rather than replaying the full
     $70$-hour search inside the Lean kernel.  Eliminating this final
     axiom would require a kernel-level certification of the same finite
@@ -1437,7 +1451,7 @@ Tao~et~al.'s optimization constants repository~\cite{Tao}.
 % References
 % ======================================================================
 
-\bibliographystyle{alphaurl}
+\bibliographystyle{amsalpha}
 \bibliography{lower_bound_refs}
 
 \end{document}
