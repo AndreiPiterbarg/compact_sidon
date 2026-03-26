@@ -44,6 +44,9 @@ import Sidon.SlidingWindow
 -- Gray code subtree pruning (Claims 4.14–4.25)
 import Sidon.GrayCodeSubtreePruning
 
+-- Univariate sweep skip (Claims 4.36–4.46)
+import Sidon.UnivariateSweepSkip
+
 -- Asymmetry bound (Claim 2.1)
 import Sidon.AsymmetryBound
 
