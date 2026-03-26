@@ -7,6 +7,7 @@
 \usepackage{microtype}
 \usepackage{newtxtext,newtxmath}
 \usepackage{geometry}
+\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{enumitem}
 \usepackage{booktabs}
@@ -19,6 +20,7 @@
 \usepackage{titlesec}
 
 \geometry{margin=1.05in}
+\graphicspath{{figures/}}
 \hypersetup{
   colorlinks=true,
   linkcolor=MidnightBlue,
@@ -92,7 +94,7 @@ $\|f * f\|_{L^\infty} / \bigl(\int f\bigr)^2$ over nonnegative
 functions supported on $[-\tfrac14, \tfrac14]$ --- satisfies the lower
 bound $C_{1a} \ge \tfrac75 = 1.4$, certifiable by exhaustive
 computation.  Our starting point is the framework of Cloninger and
-Steinerberger (2017), which we extend with a multiscale cascade and
+Steinerberger~\cite{CS17}, which we extend with a multiscale cascade and
 tighter pruning.  The paper is organized around the natural sequence of
 reductions: from continuous functions to bin averages
 (Section~\ref{sec:bin}), from the continuous simplex to a finite
@@ -162,7 +164,8 @@ $\int f = 1$.
 \medskip
 
 \noindent\textbf{Why this constant matters.}  $C_{1a}$ is connected to
-the asymptotic size of Sidon sets in additive combinatorics.  A
+the asymptotic theory of Sidon and generalized Sidon sets in additive
+combinatorics~\cite{ET41,MO2006,CRV10,MO2009,CS17}.  A
 \emph{Sidon set} is a set of integers where all pairwise sums are
 distinct; equivalently, the ``representation function'' of the sumset
 has values at most~2 everywhere except at doubled elements.  The
@@ -172,17 +175,20 @@ controlling pairwise-sum collisions.
 
 \subsection{Known Bounds}
 
-\begin{center}
+\begin{table}[t]
+\centering
 \begin{tabular}{lcl}
   \toprule
   \textbf{Bound} & \textbf{Value} & \textbf{Reference} \\
   \midrule
-  Upper bound & $\le 1.5029$ & Matolcsi \& Vinuesa (2010) \\
-  Lower bound & $\ge 1.2802$ & Cloninger \& Steinerberger (2017) \\
+  Published upper bound & $\le 1.50992$ & Matolcsi \& Vinuesa~\cite{MV10} \\
+  Published lower bound & $\ge 1.28$ & Cloninger \& Steinerberger~\cite{CS17} \\
   Lower bound & $\ge 1.4$ & This work \\
   \bottomrule
 \end{tabular}
-\end{center}
+\caption{Published bounds on $C_{1a}$ in the normalization used here.}
+\label{tab:published-bounds}
+\end{table}
 
 The \emph{upper bound} comes from exhibiting explicit functions whose
 autoconvolution peak is small.  This is a constructive task: find a
@@ -192,6 +198,18 @@ The \emph{lower bound} is fundamentally harder: one must show that
 \emph{no} function can achieve a peak below the threshold.  This
 requires exhaustive elimination of all possibilities, which is the
 subject of this document.
+
+For the longer historical chain of published improvements, together
+with announcement-level updates beyond the journal literature, see the
+optimization-constants repository maintained by Tao~\cite{Tao}.  The
+published lower bounds of Martin--O'Bryant~\cite{MO2004,MO2009},
+Matolcsi--Vinuesa~\cite{MV10}, and
+Cloninger--Steinerberger~\cite{CS17} give the progression
+\[
+  1 \;<\; 1.182778 \;<\; 1.262 \;<\; 1.2748 \;<\; 1.28
+\]
+in the present normalization, while the older upper bound $\pi/2$
+comes from Schinzel--Schmidt~\cite{SS2002}.
 
 \subsection{Proof Strategy at a High Level}
 
@@ -239,6 +257,9 @@ implementation, we re-index these as $0, 1, \ldots, d-1$ (i.e.,
 $j \mapsto j + n$).  The mathematics is the same either way.
 \end{remark}
 
+Figure~\ref{fig:partition-bins} illustrates the support partition and
+the induced vector of bin averages.
+
 \subsection{Bin Averages}
 
 For any nonnegative $f$ with $\supp(f) \subseteq (-\tfrac14,
@@ -270,12 +291,25 @@ Every nonnegative function $f$ with $\int f = 1$ maps to a point in $A_n$,
 but not every point in $A_n$ arises from a function (the map loses
 information about the shape of $f$ within each bin).
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{01_partition_bins.pdf}
+\caption{A stylized nonnegative profile supported on $[-\tfrac14,\tfrac14]$,
+together with the equal-bin partition and the resulting vector of bin
+averages.  The lower panel emphasizes the simplex constraint
+$\sum_j a_j = 4n$ after normalizing $\int f = 1$.}
+\label{fig:partition-bins}
+\end{figure}
+
 \subsection[The Lower Bound on ||f*f||\_infty]{The Lower Bound on $\|f*f\|_\infty$}
 
 Remarkably, the entire reduction rests on two elementary observations
 --- one geometric, one analytic.
 
-\begin{lemma}[Reduction to Bin Averages --- Lemma~1 of CS17]
+The next lemma is the basic analytic reduction of
+Cloninger and Steinerberger~\cite[Lemma~1]{CS17}.
+
+\begin{lemma}[Reduction to Bin Averages]
 \label{lem:bin-reduction}
 For any $f \in \mathcal{F}$ with $\int f = 1$ and corresponding bin
 averages $a = (a_0, \ldots, a_{d-1})$:
@@ -370,7 +404,10 @@ coordinates
   \qquad
   \sum_{j=0}^{d-1} \mu_j = 1,
 \]
-and approximate this normalized simplex by a finite lattice.
+and approximate this normalized simplex by a finite lattice.  Regular
+simplex grids are a standard device in finite-dimensional global
+optimization~\cite{Bomze2014}; here the same geometry is adapted to the
+composition coordinates used by the branch-and-prune computation.
 
 \subsection{The Lattice}
 
@@ -405,11 +442,27 @@ normalized mass coordinates $b_j = c_j/m$, while the test-value
 formulas remain most natural in the bin-average coordinates $a_j$.
 \end{remark}
 
+Figure~\ref{fig:simplex-lattice} shows this discretization on a
+two-dimensional toy simplex, where a continuous point is rounded to a
+nearby lattice point.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.76\linewidth]{02_simplex_lattice.pdf}
+\caption{A three-coordinate slice of the normalized simplex.  A point
+$\mu$ is rounded to a nearby lattice point $b \in B_{n,m}$, illustrating
+the $\ell_\infty$-net statement used in the discretization step.}
+\label{fig:simplex-lattice}
+\end{figure}
+
 The lattice is useful only if every continuous point has a nearby
 lattice point --- otherwise gaps in the lattice could hide the
 minimizer.
 
-\begin{lemma}[Lattice as an Approximation --- Lemma~2 of CS17]
+The relevant approximation statement is
+Cloninger--Steinerberger~\cite[Lemma~2]{CS17}.
+
+\begin{lemma}[Lattice as an Approximation]
 \label{lem:lattice-approx}
 $B_{n,m}$ is a $\tfrac{1}{m}$-net of the normalized mass simplex.
 That is, for every $\mu \in \R_{\ge 0}^d$ with $\sum \mu_j = 1$, there
@@ -433,7 +486,10 @@ Since we approximate the normalized mass vector $\mu$ by $b$ with
 per-coordinate error at most
 $\tfrac{1}{m}$, the windowed test value changes by a bounded amount.
 
-\begin{lemma}[Discretization Error --- corrected Lemma~3 of CS17]
+The next inequality is the corrected discretization estimate replacing
+the original Lemma~3 in~\cite{CS17}.
+
+\begin{lemma}[Discretization Error]
 \label{lem:disc-error}
 Let $a \in A_n$, write $\mu_i = a_i/(4n)$, and let
 $b \in B_{n,m}$ satisfy $\|\mu-b\|_\infty \le \tfrac{1}{m}$.
@@ -497,7 +553,11 @@ actual contributing mass by its trivial upper bound.  A tighter,
 position-dependent bound exploits the fact that narrow or
 edge-positioned windows involve fewer bins.
 
-\begin{lemma}[Dynamic Correction --- Equation~(1) of CS17]
+The window-specific threshold below is the one exploited by
+Cloninger and Steinerberger~\cite[Eq.~(1)]{CS17} and by the present
+cascade implementation.
+
+\begin{lemma}[Dynamic Correction]
 \label{lem:dynamic-correction}
 For a specific window at position $k$ with length $\ell$, let
 $W_{\text{int}} = \sum_{i \in \mathcal{B}(k,\ell)} c_i$ be the total
@@ -666,6 +726,20 @@ with $c \le \rev(c)$ lexicographically.  The associated bin-average
 vectors have the same test value, so this halves the search space (up
 to palindromes).
 \end{corollary}
+
+Figure~\ref{fig:reversal-canonical} depicts the reversal orbit of a
+composition and the lexicographic canonicalization used to choose one
+representative from each non-palindromic pair.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{03_reversal_canonical.pdf}
+\caption{Reversal symmetry of the test value and the canonicalization
+rule $c \mapsto \min(c,\rev(c))$.  Palindromic compositions are fixed by
+the involution, while non-palindromic pairs contribute only one
+canonical representative to the search.}
+\label{fig:reversal-canonical}
+\end{figure}
 
 Even after exploiting reversal symmetry, the number of implementation
 states to check --- roughly $\binom{m+d-1}{d-1}/2$ --- grows rapidly
@@ -846,6 +920,20 @@ and only the stubborn survivors need to be examined more closely.
     until either all are eliminated (proof complete) or a
     computational budget is reached.
 \end{enumerate}
+
+Figure~\ref{fig:cascade-flow} summarizes the recorded run
+\path{data/cpu_cascade_20260319_201644.json}, including the exact
+survivor counts at each dyadic level.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{04_cascade_flow.pdf}
+\caption{Stylized overview of the multiscale cascade.  The annotations
+record the exact survivor counts from the terminal proof run: $345$ at
+$d=4$, then $48{,}443$, $7{,}499{,}382$, $147{,}279{,}894$, $76{,}829$,
+and finally $0$ at $d=128$.}
+\label{fig:cascade-flow}
+\end{figure}
 
 \subsection{Dyadic Splitting (Refinement)}
 
@@ -1248,7 +1336,9 @@ exceeds the corrected dynamic threshold at target $\tfrac75$.
 
 This repository now contains both a modular Lean 4 development under
 \path{lean/Sidon/} and a consolidated export in
-\path{lean/complete_proof.lean}.  The main-branch revision formalizes
+\path{lean/complete_proof.lean}.  The formalization is carried out in
+Lean~4~\cite{Lean4}, on top of the mathlib library~\cite{Mathlib}.  The
+main-branch revision formalizes
 the reduction in separate files for definitions, step functions,
 continuous test values, discretization error, asymmetry, the
 Cauchy--Schwarz single-bin bound, refinement support, subtree pruning,
@@ -1282,8 +1372,8 @@ $d=128$, and the Lean theorem imports exactly that statement.
 
 \subsection{Relationship to the Original CS17 Proof}
 
-Our framework is a direct extension of Cloninger \& Steinerberger
-(2017).  The key differences:
+Our framework is a direct extension of
+Cloninger--Steinerberger~\cite{CS17}.  The key differences:
 
 \begin{enumerate}
   \item \textbf{Dynamic correction}: We use a sharper per-window
@@ -1347,34 +1437,7 @@ Tao~et~al.'s optimization constants repository~\cite{Tao}.
 % References
 % ======================================================================
 
-\begin{thebibliography}{9}
-
-\bibitem{CS17}
-A.~Cloninger and S.~Steinerberger,
-\emph{On Suprema of Autoconvolutions with an Application to Sidon Sets},
-Proc.\ AMS \textbf{145}(8), 3191--3200, 2017.
-\href{https://arxiv.org/abs/1403.7988}{arXiv:1403.7988}.
-
-\bibitem{MV10}
-M.~Matolcsi and C.~Vinuesa,
-\emph{Improved bounds on the supremum of autoconvolutions},
-J.\ Math.\ Anal.\ Appl.\ \textbf{372}(2), 439--447, 2010.
-\href{https://arxiv.org/abs/0907.1379}{arXiv:0907.1379}.
-
-\bibitem{White22}
-E.~White,
-\emph{New upper bounds on the supremum of autoconvolutions},
-\href{https://arxiv.org/abs/2210.16437}{arXiv:2210.16437}, 2022.
-
-\bibitem{BL25}
-E.~Boyer and Z.~Li,
-\emph{Improved lower bounds on autoconvolution suprema}, 2025.
-\href{https://arxiv.org/abs/2506.16750}{arXiv:2506.16750}.
-
-\bibitem{Tao}
-T.~Tao et al.,
-\href{https://teorth.github.io/optimizationproblems/constants/1a.html}{Optimization Problems Repository, constant C1a page}.
-
-\end{thebibliography}
+\bibliographystyle{alphaurl}
+\bibliography{lower_bound_refs}
 
 \end{document}
