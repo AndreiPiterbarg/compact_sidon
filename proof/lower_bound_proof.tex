@@ -76,35 +76,36 @@
 \newcommand{\conv}{\operatorname{conv}}
 
 % ══════════════════════════════════════════════════════════════════════
-\title{%
-  \bfseries A Rigorous Proof Framework for Lower Bounds on the\\
-  \bfseries Autoconvolution Constant $C_{1a}$\\[5pt]
-  \large Via the Cloninger--Steinerberger Branch-and-Prune Algorithm
-}
+\title{\texorpdfstring{%
+  \bfseries A Computer-Assisted Proof That the\\
+  \bfseries Autoconvolution Constant $C_{1a}$ Satisfies $C_{1a}\ge \tfrac75$
+}{A Computer-Assisted Proof That the Autoconvolution Constant C1a Satisfies C1a >= 7/5}}
 \author{Jai Bajaj}
-\date{March 2026}
+\date{}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We present a self-contained proof that the autoconvolution constant
-$C_{1a}$ --- the infimum of
-$\|f * f\|_{L^\infty} / \bigl(\int f\bigr)^2$ over nonnegative
-functions supported on $[-\tfrac14, \tfrac14]$ --- satisfies the lower
-bound $C_{1a} \ge \tfrac75 = 1.4$, certifiable by exhaustive
-computation.  Our starting point is the framework of Cloninger and
-Steinerberger~\cite{CS17}, which we extend with a multiscale cascade and
-tighter pruning.  The paper is organized around the natural sequence of
-reductions: from continuous functions to bin averages
-(Section~\ref{sec:bin}), from the continuous simplex to a finite
-lattice (Section~\ref{sec:disc}), and finally to an exhaustive search
-made tractable by pruning (Sections~\ref{sec:testvalue}--\ref{sec:cascade}).
-Section~\ref{sec:correctness} addresses the invariants that keep the
-computation honest.  In the accompanying Lean formalization, the analytic
-reduction is proved directly and the external computation is packaged as
-a single terminal-grid certificate.  Throughout, we emphasize intuition
-alongside formal statements.
+We prove that the autoconvolution constant
+\[
+  C_{1a}
+  \;=\;
+  \inf_f \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2},
+\]
+taken over nonnegative functions supported on
+$(-\tfrac14,\tfrac14)$, satisfies $C_{1a}\ge \tfrac75$.  The argument
+starts from the Cloninger--Steinerberger reduction~\cite{CS17} from
+continuous functions to windowed sums of bin masses, but is organized
+around the exact objects used in the accompanying Lean development: a
+half-open bin partition, a cumulative-floor canonical discretization,
+and a window-dependent correction term.  The finite verification is a
+dyadic branch-and-prune cascade with terminal parameters
+$n=64$, $m=20$, and $d=128$, ending with zero survivors.  All analytic
+steps from the continuous problem to the terminal-grid statement are
+formalized in Lean; the only imported assumption is the finite terminal
+certificate asserting that every composition in $\mathbb{N}^{128}$ of
+total mass $20$ is eliminated by some admissible window.
 \end{abstract}
 \noindent\textbf{Keywords.} Autoconvolution, Sidon sets, branch-and-prune,
 computer-assisted proof, Lean formalization.
@@ -117,49 +118,45 @@ computer-assisted proof, Lean formalization.
 
 \subsection[The Constant C1a]{The Constant $C_{1a}$}
 
-Consider the class of nonnegative, integrable functions supported on
-the interval $[-\tfrac14, \tfrac14]$:
+Let
 \[
-  \mathcal{F} \;=\; \Bigl\{
-    f : \R \to \R_{\ge 0}
-    \;\Big|\;
-    \supp(f) \subseteq \bigl[-\tfrac14, \tfrac14\bigr],\;
-    \int f > 0
-  \Bigr\}.
+  \mathcal{F}
+  \;=\;
+  \left\{
+    f \in L^1(\R) :
+    f \ge 0,\ 
+    \supp(f) \subseteq \left(-\tfrac14,\tfrac14\right),\
+    \int_{\R} f > 0
+  \right\}.
 \]
 
 The \emph{autoconvolution} of $f$ is
 \[
   (f * f)(t) \;=\; \int_{-\infty}^{\infty} f(x)\, f(t - x)\, dx.
 \]
-Since $\supp(f) \subseteq [-\tfrac14, \tfrac14]$, the
-autoconvolution is supported on $[-\tfrac12, \tfrac12]$ and is itself
-nonnegative.
-
-A natural question is: how small can the peak of $f * f$ be, relative
-to the total mass of $f$?  This is precisely what $C_{1a}$ measures.
+Since $f \in L^1(\R)$ has compact support, $f*f$ is continuous,
+nonnegative, and supported on $[-\tfrac12,\tfrac12]$.
 
 \begin{definition}
-The \emph{autoconvolution constant} is
+The \emph{autoconvolution ratio} is
 \[
-  C_{1a} \;=\; \inf_{f \in \mathcal{F}} \;
-  \frac{\displaystyle\max_{|t| \le 1/2}\, (f*f)(t)}%
-       {\displaystyle\left(\int f\right)^{\!2}}.
+  R(f)
+  \;=\;
+  \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2},
+\]
+and the \emph{autoconvolution constant} is
+\[
+  C_{1a} \;=\; \inf_{f \in \mathcal{F}} R(f).
 \]
 \end{definition}
 
-\begin{remark}[Open versus closed support]
-The Lean formalization uses the open support condition
-$\supp(f) \subseteq (-\tfrac14, \tfrac14)$.  For the present problem,
-this is equivalent to the closed-interval formulation above: changing a
-function on the boundary points $\pm \tfrac14$ does not affect its
-integral or autoconvolution ratio.
+\begin{remark}[Normalization and the formal ratio]
+By homogeneity, $R(\lambda f)=R(f)$ for every $\lambda>0$, so one may
+normalize $\int f=1$.  The Lean definition
+\path{autoconvolution_ratio} uses the essential supremum
+\path{eLpNorm} of $f*f$; for $f\in\mathcal{F}$ this agrees with the
+maximum of $f*f$ on $[-\tfrac12,\tfrac12]$ because $f*f$ is continuous.
 \end{remark}
-
-By homogeneity, we may normalize $\int f = 1$ without loss of
-generality, so that $C_{1a} = \inf_{f} \|f*f\|_{L^\infty}$ over
-nonnegative $f$ with $\supp(f) \subseteq [-\tfrac14, \tfrac14]$ and
-$\int f = 1$.
 
 \medskip
 
@@ -199,10 +196,7 @@ The \emph{lower bound} is fundamentally harder: one must show that
 requires exhaustive elimination of all possibilities, which is the
 subject of this document.
 
-For the longer historical chain of published improvements, together
-with announcement-level updates beyond the journal literature, see the
-optimization-constants repository maintained by Tao~\cite{Tao}.  The
-published lower bounds of Martin--O'Bryant~\cite{MO2004,MO2009},
+The published lower bounds of Martin--O'Bryant~\cite{MO2004,MO2009},
 Matolcsi--Vinuesa~\cite{MV10}, and
 Cloninger--Steinerberger~\cite{CS17} give the progression
 \[
@@ -213,24 +207,34 @@ comes from Schinzel--Schmidt~\cite{SS2002}.
 
 \subsection{Proof Strategy at a High Level}
 
-The proof proceeds in three conceptual steps:
+The proof has two components: a continuous reduction and a finite
+certificate.  The continuous reduction is formalized in Lean; the
+finite certificate is produced by an exhaustive branch-and-prune
+computation.
+
+At a high level, the reduction proceeds in three steps:
 
 \begin{enumerate}[label=(\roman*)]
   \item \textbf{Reduce} the infinite-dimensional optimization
-    (over all nonnegative functions) to a finite-dimensional one
-    (over vectors of bin averages), with a quantified approximation
-    error.
+    over functions to a family of windowed quadratic expressions in bin
+    masses.
 
-  \item \textbf{Discretize} the finite-dimensional simplex to a
-    lattice, with a quantified rounding error.
+  \item \textbf{Discretize} the normalized bin masses by a specific
+    cumulative-floor map, producing a composition
+    $c \in \mathbb{N}^{2n}$ of total mass $m$ together with a
+    quantified per-window error term.
 
-  \item \textbf{Enumerate} every lattice point and verify that each
-    one has autoconvolution peak exceeding the target threshold.
-    If all are eliminated, the bound is proven.
+  \item \textbf{Certify} that every terminal composition at
+    $(n,m)=(64,20)$ is eliminated by some window whose test value
+    exceeds the corrected threshold.
 \end{enumerate}
 
-Step~(iii) is made tractable by pruning strategies (asymmetry,
-windowed bounds) and a multiscale cascade (coarse-to-fine refinement).
+The terminal statement is verified by a dyadic cascade from $d=4$ to
+$d=128$, using reversal symmetry, asymmetry pruning, and the
+window-dependent correction term.  The Lean theorem
+\path{autoconvolution_ratio_ge_7_5} combines the analytic
+reduction with the imported terminal certificate
+\path{cascade_all_pruned}.
 
 
 % ======================================================================
@@ -243,159 +247,150 @@ finite-dimensional and computable.
 
 \subsection{The Partition}
 
-Fix a positive integer $n$ (the ``half-bin count'').  Partition
-$(-\tfrac14, \tfrac14)$ into $d = 2n$ equal bins:
+Fix a positive integer $n$ and write $d=2n$.  The formalization uses
+the half-open partition
 \[
-  I_j \;=\; \left(\frac{j}{4n},\; \frac{j+1}{4n}\right),
-  \qquad j = -n, -n+1, \ldots, n-1.
+  I_i
+  \;=\;
+  \left[-\tfrac14 + \frac{i}{4n},\,
+        -\tfrac14 + \frac{i+1}{4n}\right),
+  \qquad i=0,\dots,d-1.
 \]
-Each bin has width $\tfrac{1}{4n}$.
-
-\begin{remark}
-We use $d = 2n$ bins total, indexed from $-n$ to $n-1$.  In the
-implementation, we re-index these as $0, 1, \ldots, d-1$ (i.e.,
-$j \mapsto j + n$).  The mathematics is the same either way.
-
-In the Lean development, the bins are taken to be half-open intervals
-\[
-  \left[-\tfrac14 + \frac{i}{4n},\; -\tfrac14 + \frac{i+1}{4n}\right),
-\]
-so that they form a genuine partition.  This change affects neither
-the bin integrals nor the convolution bounds, since the endpoints form
-a null set.
-\end{remark}
+Each bin has width $\tfrac{1}{4n}$, and the family $\{I_i\}_{i=0}^{d-1}$
+partitions $[-\tfrac14,\tfrac14)$.
 
 Figure~\ref{fig:partition-bins} illustrates the support partition and
-the induced vector of bin averages.
+the induced vectors of bin masses and bin averages.
 
-\subsection{Bin Averages}
+\subsection{Bin Masses and Bin Averages}
 
-For any nonnegative $f$ with $\supp(f) \subseteq (-\tfrac14,
-\tfrac14)$ and $\int f = 1$, define the \emph{bin averages}:
+Assume now that $f\in\mathcal{F}$ and $\int f = 1$.  Define the
+\emph{bin masses}
 \[
-  a_j \;=\; 4n \int_{I_j} f(x)\, dx \;\ge\; 0,
-  \qquad j = 0, \ldots, d-1.
+  \mu_i \;=\; \int_{I_i} f(x)\,dx \;\ge\; 0,
+  \qquad i=0,\dots,d-1,
 \]
-
-The factor $4n$ normalizes so that each $a_j$ equals the average value
-of $f$ on the bin $I_j$ (since $|I_j| = \tfrac{1}{4n}$).  The
-constraint $\int f = 1$ becomes
+and the associated \emph{bin averages}
 \[
-  \sum_{j=0}^{d-1} a_j \;=\; 4n.
+  a_i \;=\; 4n\,\mu_i.
 \]
+Since $|I_i|=\tfrac{1}{4n}$, the quantity $a_i$ is the average value
+of $f$ on $I_i$ whenever $f$ is constant on that bin.
+
+\begin{lemma}[Partition of mass]
+\label{lem:sum-bin-masses}
+For the normalized function $f$, the bin masses satisfy
+\[
+  \sum_{i=0}^{d-1} \mu_i \;=\; 1,
+  \qquad
+  \sum_{i=0}^{d-1} a_i \;=\; 4n.
+\]
+\end{lemma}
+
+\begin{proof}
+The half-open bins partition $[-\tfrac14,\tfrac14)$, while
+$\supp(f)\subseteq (-\tfrac14,\tfrac14)$ excludes the endpoints.  Thus
+the sum of the bin integrals is $\int f=1$, and the second identity is
+obtained by multiplying by $4n$.
+\end{proof}
+
+\begin{remark}[Formal counterpart]
+The Lean lemma \path{sum_bin_masses_eq_one} is exactly the first
+identity above.  It is used repeatedly to normalize the cumulative
+discretization map introduced in Section~\ref{sec:disc}.
+\end{remark}
 
 \begin{definition}
-The \emph{continuous simplex} is
+The \emph{normalized mass simplex} and the \emph{bin-average simplex}
+are
 \[
-  A_n \;=\; \Bigl\{
-    a \in \R_{\ge 0}^d
-    \;\Big|\;
-    \sum_{j=0}^{d-1} a_j = 4n
-  \Bigr\}.
+  \Delta_n
+  \;=\;
+  \left\{
+    \mu \in \R_{\ge 0}^d : \sum_{i=0}^{d-1}\mu_i = 1
+  \right\},
+\]
+\[
+  A_n
+  \;=\;
+  \left\{
+    a \in \R_{\ge 0}^d : \sum_{i=0}^{d-1}a_i = 4n
+  \right\}
+  \;=\;
+  4n\,\Delta_n.
 \]
 \end{definition}
 
-Every nonnegative function $f$ with $\int f = 1$ maps to a point in $A_n$,
-but not every point in $A_n$ arises from a function (the map loses
-information about the shape of $f$ within each bin).
+The vector $\mu=(\mu_0,\dots,\mu_{d-1})$ is the object discretized in
+Lean, whereas the windowed quadratic forms are most naturally written
+in the rescaled coordinates $a=4n\,\mu$.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{01_partition_bins.pdf}
-\caption{A stylized nonnegative profile supported on $[-\tfrac14,\tfrac14]$,
-together with the equal-bin partition and the resulting vector of bin
-averages.  The lower panel emphasizes the simplex constraint
-$\sum_j a_j = 4n$ after normalizing $\int f = 1$.}
+\caption{A nonnegative profile supported on $[-\tfrac14,\tfrac14]$,
+together with the half-open partition into equal bins.  The upper panel
+shows the support decomposition, while the lower panel records the
+induced averages $a_i=4n\,\mu_i$ and the simplex identity
+$\sum_i a_i=4n$ after normalizing $\int f=1$.}
 \label{fig:partition-bins}
 \end{figure}
 
-\subsection[The Lower Bound on ||f*f||\_infty]{The Lower Bound on $\|f*f\|_\infty$}
+\subsection[Window Lower Bound for the Ratio]{Window Lower Bound for the Ratio}
 
-Remarkably, the entire reduction rests on two elementary observations
---- one geometric, one analytic.
+The next lemma is the analytic bridge from the continuous problem to
+the discrete windowed expressions of Cloninger and
+Steinerberger~\cite[Lemma~1]{CS17}.
 
-The next lemma is the basic analytic reduction of
-Cloninger and Steinerberger~\cite[Lemma~1]{CS17}.
-
-\begin{lemma}[Reduction to Bin Averages]
+\begin{lemma}[Per-window test-value bound]
 \label{lem:bin-reduction}
-For any $f \in \mathcal{F}$ with $\int f = 1$ and corresponding bin
-averages $a = (a_0, \ldots, a_{d-1})$:
+Let $f\in\mathcal{F}$ satisfy $\int f=1$, and let
+$a_i=4n\int_{I_i}f$.  Then for every pair of integers
+$\ell\ge 2$ and $s_{\mathrm{lo}}\ge 0$,
 \[
-  \|f * f\|_{L^\infty}
+  \|f*f\|_{L^\infty}
   \;\ge\;
-  \max_{\substack{2 \le \ell \le 2d \\[2pt] k}}
   \frac{1}{4n\ell}
-  \sum_{\substack{0 \le i, j \le d-1 \\[1pt] k \le i+j \le k+\ell-2}}
-  a_i\, a_j.
+  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2}
+  \ \sum_{\substack{0\le i,j\le d-1\\ i+j=s}}
+  a_i a_j.
 \]
 \end{lemma}
 
 \begin{proof}[Proof sketch]
-\noindent\textbf{Ingredient 1: Support of cross-convolutions.}
-Let $f_i = f \cdot \mathbf{1}_{I_i}$ be the restriction of $f$ to bin
-$I_i$.  Then $f = \sum_i f_i$ and
+Write $f_i=f\,\mathbf{1}_{I_i}$.  Then
+$f=\sum_i f_i$ and $(f*f)(t)=\sum_{i,j}(f_i*f_j)(t)$.  The support of
+$f_i*f_j$ is contained in $I_i+I_j$, an interval of length
+$\tfrac{1}{2n}$ whose location depends only on $i+j$.  If one fixes
+the sum-index window
+$s_{\mathrm{lo}}\le i+j\le s_{\mathrm{lo}}+\ell-2$, the corresponding
+Minkowski sums form an interval of total length $\tfrac{\ell}{4n}$.
+The total $L^1$ mass contributed by these terms is
 \[
-  (f * f)(t) \;=\; \sum_{i,j} (f_i * f_j)(t).
+  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2}
+  \ \sum_{i+j=s}
+  \frac{a_i}{4n}\frac{a_j}{4n}.
 \]
-The convolution $f_i * f_j$ is supported on the Minkowski sum
-$I_i + I_j$, which is an interval of width $\tfrac{1}{2n}$.
-The key point: \emph{the index $i + j$ determines which part of the
-convolution domain receives the contribution from $f_i * f_j$}.
-
-\medskip
-\noindent\textbf{Ingredient 2: Pigeonhole.}
-For any nonnegative function $h$ and interval $J$:
-$\|h\|_{L^\infty} \ge \tfrac{1}{|J|} \int_J h$.
-
-\medskip
-\noindent\textbf{Combining.}  Consider a ``window'' covering
-sum-indices $s \in \{k, k+1, \ldots, k + \ell - 2\}$.  The Minkowski
-sums for consecutive sum-indices overlap (their centers are spaced
-$\tfrac{1}{4n}$ apart, each of width $\tfrac{1}{2n}$), so their
-union forms an interval of length exactly $\tfrac{\ell}{4n}$ in the
-convolution domain.  All cross-terms $f_i * f_j$ with
-$k \le i + j \le k + \ell - 2$ have support within this interval,
-contributing total $L^1$ mass
-$\sum \tfrac{a_i}{4n} \cdot \tfrac{a_j}{4n}$.  Applying the
-pigeonhole bound:
-\[
-  \|f * f\|_{L^\infty}
-  \;\ge\;
-  \frac{1}{\ell / (4n)}
-  \sum_{\substack{k \le i+j \le k+\ell-2}}
-  \frac{a_i\, a_j}{(4n)^2}
-  \;=\;
-  \frac{1}{4n\ell}
-  \sum_{\substack{k \le i+j \le k+\ell-2}}
-  a_i\, a_j.
-\]
-Taking the maximum over all windows gives the result.
+Applying the averaging inequality
+$\|h\|_{L^\infty}\ge |J|^{-1}\int_J h$ to this interval gives the
+claimed lower bound.
 \end{proof}
 
-\begin{remark}[Formal version of the reduction]
-The Lean file \texttt{Sidon/TestValueBounds.lean} proves a
-direct theorem of this form, called
-\texttt{continuous\_test\_value\_le\_ratio}.  One extra hypothesis is
-made explicit there: $\|f*f\|_{L^\infty} < \infty$.  This is a
-bookkeeping issue forced by the use of \texttt{ENNReal.toReal} in the
-formal definition of the ratio; if $\|f*f\|_{L^\infty} = \infty$, then
-any finite lower bound is automatic anyway.
+\begin{remark}[Formal counterpart]
+The Lean theorem \path{continuous_test_value_le_ratio} is the
+formal version of Lemma~\ref{lem:bin-reduction}.  Its statement is
+\emph{per window}: for each admissible $(\ell,s_{\mathrm{lo}})$ with
+$\ell\ge 2$, the continuous windowed test value is bounded above by the
+autoconvolution ratio.  The maximized reduction used in the paper is
+obtained only after taking the maximum over all windows.
 \end{remark}
 
 \begin{remark}[Intuition]
-Think of the bin averages $a_i$ as describing ``how much mass $f$ puts
-in each bin.''  The products $a_i a_j$ measure how much the mass in
-bins $i$ and $j$ contribute to the autoconvolution.  The window
-argument says: if too much product-mass falls in any fixed interval of
-the convolution domain, then $f * f$ must be large somewhere in that
-interval.
-
-The reader may wonder: why not just take the narrowest possible window
-($\ell = 2$) everywhere?  Because narrow windows see fewer
-cross-terms, so their sums can be small even when mass is spread
-across many bins.  The interplay between window width and the number of
-contributing pairs is what makes the optimization nontrivial.
+The products $a_i a_j$ quantify how much mass from bins $i$ and $j$
+can contribute to the autoconvolution.  Narrow windows carry the
+favorable prefactor $\tfrac{1}{4n\ell}$ but capture fewer pairs; wider
+windows capture more pairs but average over a longer interval.  The
+branch-and-prune computation exploits this competition.
 \end{remark}
 
 
@@ -405,21 +400,16 @@ contributing pairs is what makes the optimization nontrivial.
 
 Having reduced the problem to minimizing over the continuous simplex
 $A_n$, we face a new obstacle: $A_n$ is uncountable.  To bring the
-problem within reach of a computer, we renormalize to the bin-mass
-coordinates
-\[
-  \mu_j \;=\; \frac{a_j}{4n},
-  \qquad
-  \sum_{j=0}^{d-1} \mu_j = 1,
-\]
-and approximate this normalized simplex by a finite lattice.  Regular
-simplex grids are a standard device in finite-dimensional global
-optimization~\cite{Bomze2014}; here the same geometry is adapted to the
-composition coordinates used by the branch-and-prune computation.
+problem within reach of a computer, we discretize the normalized mass
+simplex $\Delta_n$.  Regular simplex grids are standard in
+finite-dimensional optimization~\cite{Bomze2014}; here the key point is
+that the formal proof uses a particular lattice point selected by a
+cumulative-floor rule.
 
 \subsection{The Lattice}
 
-In these normalized coordinates, the natural grid has spacing $1/m$.
+Fix a positive integer $m$.  In normalized mass coordinates, the
+natural grid has spacing $1/m$.
 
 \begin{definition}
 Fix a positive integer $m$ (the ``grid resolution'').  The
@@ -434,21 +424,10 @@ Fix a positive integer $m$ (the ``grid resolution'').  The
 where each $b_j$ is a nonnegative multiple of $\tfrac{1}{m}$.
 \end{definition}
 
-Equivalently, writing $c_j = m \cdot b_j$, the lattice consists of
+Equivalently, writing $c_i = m b_i$, the lattice consists of
 nonnegative integer vectors $c = (c_0, \ldots, c_{d-1})$ with
 $\sum c_j = m$.  These are the \emph{compositions} of the integer $m$
 into $d$ nonnegative parts.
-
-\begin{remark}[Implementation convention]
-The implementation stores the integer composition $c$ itself.  The
-corresponding bin-average vector is
-\[
-  a_j \;=\; \frac{4n}{m}\,c_j.
-\]
-Thus the discretization lemmas are most naturally phrased in the
-normalized mass coordinates $b_j = c_j/m$, while the test-value
-formulas remain most natural in the bin-average coordinates $a_j$.
-\end{remark}
 
 Figure~\ref{fig:simplex-lattice} shows this discretization on a
 two-dimensional toy simplex, where a continuous point is rounded to a
@@ -457,162 +436,234 @@ nearby lattice point.
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.76\linewidth]{02_simplex_lattice.pdf}
-\caption{A three-coordinate slice of the normalized simplex.  A point
-$\mu$ is rounded to a nearby lattice point $b \in B_{n,m}$, illustrating
-the $\ell_\infty$-net statement used in the discretization step.}
+\caption{A three-coordinate slice of the normalized simplex.  The point
+$\mu$ is replaced by a nearby lattice point $b \in B_{n,m}$; in the
+formal proof this representative is chosen by the cumulative-floor map
+described below.}
 \label{fig:simplex-lattice}
 \end{figure}
 
-The lattice is useful only if every continuous point has a nearby
-lattice point --- otherwise gaps in the lattice could hide the
-minimizer.
+For the formal argument, however, one needs a specific lattice point,
+not merely an existence statement.
 
-The relevant approximation statement is
-Cloninger--Steinerberger~\cite[Lemma~2]{CS17}.
+\begin{definition}[Canonical discretization]
+\label{def:canonical-disc}
+Let $\mu\in\Delta_n$ and define the cumulative masses
+\[
+  M(k) \;=\; \sum_{i<k}\mu_i,
+  \qquad 0\le k\le d.
+\]
+Set
+\[
+  D(k) \;=\; \lfloor m\,M(k)\rfloor,
+  \qquad 0\le k\le d,
+\]
+and define the integer composition
+$c=(c_0,\dots,c_{d-1})$ by
+\[
+  c_i = D(i+1)-D(i)\quad (0\le i\le d-2),
+  \qquad
+  c_{d-1}=m-D(d-1).
+\]
+The associated normalized lattice point is $w_i=c_i/m$.
+\end{definition}
 
-\begin{lemma}[Lattice as an Approximation]
-\label{lem:lattice-approx}
-$B_{n,m}$ is a $\tfrac{1}{m}$-net of the normalized mass simplex.
-That is, for every $\mu \in \R_{\ge 0}^d$ with $\sum \mu_j = 1$, there
-exists $b \in B_{n,m}$ with $\|\mu - b\|_\infty \le \tfrac{1}{m}$.
-\end{lemma}
+\begin{remark}[Exact formal definition]
+The Lean definition \path{canonical_discretization} is applied
+directly to the function $f$.  It forms the same cumulative-floor
+expression, but writes
+\[
+  D_f(k)
+  \;=\;
+  \left\lfloor
+    m\,
+    \frac{\sum_{i<k}\mu_i}{\sum_j \mu_j}
+  \right\rfloor
+\]
+in terms of the bin masses $\mu_i=\int_{I_i}f$.  By
+Lemma~\ref{lem:sum-bin-masses}, the denominator is $1$ once
+$\int f=1$.
+\end{remark}
+
+\begin{proposition}[Basic properties of the canonical discretization]
+\label{prop:canonical-disc-basic}
+The composition $c$ from Definition~\ref{def:canonical-disc} satisfies
+\[
+  \sum_{i=0}^{d-1} c_i = m,
+  \qquad
+  \left| \frac{c_i}{m} - \mu_i \right| \le \frac{1}{m}
+  \quad\text{for each } i.
+\]
+\end{proposition}
 
 \begin{proof}[Proof sketch]
-Given $\mu$ with $\sum \mu_j = 1$, round each coordinate to the
-nearest multiple of
-$\tfrac{1}{m}$, adjusting to maintain the sum constraint.
-Specifically, use a greedy rounding: process coordinates left to
-right, maintaining a running deficit $t_i = \sum_{j<i}(b_j - \mu_j)$.
-Round down first, then alternate to keep $-\tfrac{1}{m} < t_{i+1} \le
-0$.  The last coordinate is set to enforce the exact sum.  Each
-coordinate satisfies $|\mu_j - b_j| \le \tfrac{1}{m}$.
+The sum identity is telescoping:
+\[
+  \sum_{i=0}^{d-2} (D(i+1)-D(i)) + m-D(d-1) = m.
+\]
+For the coordinate error, write
+\[
+  \frac{c_i}{m}-\mu_i
+  =
+  \left(\frac{D(i+1)}{m}-M(i+1)\right)
+  -
+  \left(\frac{D(i)}{m}-M(i)\right),
+\]
+and use the elementary floor bounds
+$-1<\lfloor x\rfloor-x\le 0$.  In Lean these statements are formalized
+by \path{canonical_discretization_sum_eq_m} together with the
+coordinatewise estimate proved in
+\path{Sidon/DiscretizationError.lean}.
 \end{proof}
 
 \subsection{The Discretization Error Bound}
 
-Since we approximate the normalized mass vector $\mu$ by $b$ with
-per-coordinate error at most
-$\tfrac{1}{m}$, the windowed test value changes by a bounded amount.
-
-The next inequality is the corrected discretization estimate replacing
-the original Lemma~3 in~\cite{CS17}.
-
-\begin{lemma}[Discretization Error]
-\label{lem:disc-error}
-Let $a \in A_n$, write $\mu_i = a_i/(4n)$, and let
-$b \in B_{n,m}$ satisfy $\|\mu-b\|_\infty \le \tfrac{1}{m}$.
-Then, for any admissible window $(\ell,k)$,
+Define the set of \emph{contributing bins} for a window
+$(\ell,s_{\mathrm{lo}})$ by
 \[
-  W_{\ell,k}(\mu)
-  \;\ge\;
-  W_{\ell,k}(b)
-  \;-\;
-  \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right),
+  \mathcal{B}_{n,\ell,s_{\mathrm{lo}}}
+  \;=\;
+  \left\{
+    i\in\{0,\dots,d-1\} :
+    \exists\, j\in\{0,\dots,d-1\},\
+    s_{\mathrm{lo}}\le i+j\le s_{\mathrm{lo}}+\ell-2
+  \right\}.
+\]
+Equivalently,
+\[
+  \mathcal{B}_{n,\ell,s_{\mathrm{lo}}}
+  =
+  \left\{
+    i :
+    \max\!\bigl(0,s_{\mathrm{lo}}-(d-1)\bigr)
+    \le i \le
+    \min\!\bigl(d-1,s_{\mathrm{lo}}+\ell-2\bigr)
+  \right\},
+\]
+which is the content of the Lean theorem
+\path{contributing_bins_iff}.
+
+The next estimate is the exact per-window bound used later in the main
+theorem.
+
+\begin{lemma}[Per-window discretization error]
+\label{lem:disc-error}
+Let $f\in\mathcal{F}$ satisfy $\int f=1$, let
+$c$ be the canonical discretization from
+Definition~\ref{def:canonical-disc}, and set
+$w_i=c_i/m$.  For a fixed window $(\ell,s_{\mathrm{lo}})$, write
+\[
+  W \;=\; \sum_{i\in \mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} w_i.
+\]
+Then
+\[
+  \operatorname{TV}_{n,m}(c;\ell,s_{\mathrm{lo}})
+  -
+  \operatorname{TV}^{\mathrm{cont}}_n(f;\ell,s_{\mathrm{lo}})
+  \;\le\;
+  \frac{4n}{\ell}
+  \left(
+    \frac{1}{m^2} + \frac{2W}{m}
+  \right),
 \]
 where
 \[
-  W_{\ell,k}(x)
+  \operatorname{TV}_{n,m}(c;\ell,s_{\mathrm{lo}})
   \;=\;
-  \frac{4n}{\ell}
-  \sum_{\substack{0 \le i,j \le d-1 \\ k \le i+j \le k+\ell-2}}
-  x_i x_j.
+  \frac{1}{4n\ell}
+  \sum_{s=s_{\mathrm{lo}}}^{s_{\mathrm{lo}}+\ell-2}
+  \sum_{i+j=s}
+  \left(\frac{4n}{m}c_i\right)\left(\frac{4n}{m}c_j\right),
 \]
-Consequently, if $\tilde b_i = 4n\,b_i$ is the associated bin-average
-vector, then
-\[
-  \tv(a)
-  \;\ge\;
-  \tv(\tilde b)
-  \;-\;
-  2n\left(\frac{2}{m} + \frac{1}{m^2}\right).
-\]
+and $\operatorname{TV}^{\mathrm{cont}}_n(f;\ell,s_{\mathrm{lo}})$ is
+the corresponding continuous expression from
+Lemma~\ref{lem:bin-reduction}.
 \end{lemma}
 
 \begin{proof}[Proof sketch]
-This is the corrected CS17 discretization bound.  For a fixed window,
-write $\mu=b+\varepsilon$.  The perturbation contributes two error
-terms: a cross term of size
-$\tfrac{4n}{\ell}\cdot \tfrac{2}{m}\,W$, where $W \le 1$ is the total
-contributing mass in that window, and a quadratic term of size
-$\tfrac{4n}{\ell}\cdot \tfrac{1}{m^2}$.  Summing them yields the
-per-window correction
-\[
-  \frac{4n}{\ell}\left(\frac{2}{m} + \frac{1}{m^2}\right).
-\]
-Since $\ell \ge 2$, we have $\tfrac{4n}{\ell} \le 2n$, which gives the
-stated global bound for $\tv$.
+Write $w_i=\mu_i+\delta_i$.  Expanding the quadratic expression gives
+linear and quadratic error terms.  The quadratic part is bounded by
+$\tfrac{4n}{\ell}\cdot\tfrac{1}{m^2}$ because
+$|\delta_i|\le \tfrac{1}{m}$, while the linear part is bounded by
+$\tfrac{4n}{\ell}\cdot \tfrac{2W}{m}$ because only the contributing
+bins matter in the chosen window.  This is precisely the estimate
+proved in Lean before the theorem
+\path{dynamic_threshold_sound}.
 \end{proof}
 
-\begin{remark}[The correction term in practice]
-The raw CS17 correction is $\tfrac{2}{m} + \tfrac{1}{m^2}$, but the
-global level-$n$ correction is
-$2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.  At the starting level
-$n=2$ and $m=20$, this is $0.41$.  In the implementation accompanying
-this paper, this
-global quantity is used only for coarse caps and reporting; the actual
-pruning kernel uses the sharper window-dependent threshold described
-next.
-\end{remark}
+\begin{corollary}[Global correction bound]
+For every admissible window one has
+\[
+  \operatorname{TV}_{n,m}(c;\ell,s_{\mathrm{lo}})
+  -
+  \operatorname{TV}^{\mathrm{cont}}_n(f;\ell,s_{\mathrm{lo}})
+  \;\le\;
+  2n\left(\frac{2}{m}+\frac{1}{m^2}\right),
+\]
+because $W\le 1$ and $\ell\ge 2$.
+\end{corollary}
 
 \subsection{The Refined (Dynamic) Correction}
 
-The global correction bound from Lemma~\ref{lem:disc-error} is
-pessimistic: it assumes the worst-case window length and replaces the
-actual contributing mass by its trivial upper bound.  A tighter,
-position-dependent bound exploits the fact that narrow or
-edge-positioned windows involve fewer bins.
+The global correction bound is convenient for estimates, but the formal
+proof and the certificate computation use the sharper per-window
+threshold.
 
-The window-specific threshold below is the one exploited by
-Cloninger and Steinerberger~\cite[Eq.~(1)]{CS17} and by the present
-cascade implementation.
-
-\begin{lemma}[Dynamic Correction]
+\begin{theorem}[Dynamic threshold soundness]
 \label{lem:dynamic-correction}
-For a specific window at position $k$ with length $\ell$, let
-$W_{\text{int}} = \sum_{i \in \mathcal{B}(k,\ell)} c_i$ be the total
-integer mass in contributing bins, where $\mathcal{B}(k,\ell) = \{i :
-\exists\, j \text{ with } k \le i+j \le k+\ell-2\}$.  Then the
-\emph{window-specific effective threshold} is:
+Let $c$ be the canonical discretization of a normalized function
+$f\in\mathcal{F}$ at parameters $(n,m)$, and let
 \[
-  T_{\ell,k} \;=\; c_{\mathrm{target}}
-    + \frac{4n}{\ell}\cdot \frac{1 + 2\, W_{\mathrm{int}}}{m^2}
+  W
+  \;=\;
+  \frac{1}{m}
+  \sum_{i\in \mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} c_i.
 \]
-rather than the coarse global threshold
-$c_{\mathrm{target}} + 2n\left(\tfrac{2}{m} + \tfrac{1}{m^2}\right)$.
-\end{lemma}
+If, for some window $(\ell,s_{\mathrm{lo}})$ with $\ell\ge 2$,
+\[
+  \operatorname{TV}_{n,m}(c;\ell,s_{\mathrm{lo}})
+  \;>\;
+  c_{\mathrm{target}}
+  +
+  \frac{4n}{\ell}
+  \left(
+    \frac{1}{m^2} + \frac{2W}{m}
+  \right),
+\]
+then $R(f)\ge c_{\mathrm{target}}$.
+\end{theorem}
 
 \begin{proof}
-Let $\mathrm{ws}$ be the integer window sum of the autoconvolution of a
-composition $c$ with $\sum_i c_i = m$.  Since the implementation uses
-the rescaling $a_i = \tfrac{4n}{m}c_i$, the corresponding test value is
-\[
-  W_{\ell,k}(a) \;=\; \frac{4n}{m^2\ell}\,\mathrm{ws}.
-\]
-Therefore the corrected dynamic pruning condition is equivalent to
-\[
-  \text{int\_thresh}
-  \;=\;
-  \bigl\lfloor
-    \Bigl(
-      c_{\mathrm{target}} \cdot m^2 \cdot \frac{\ell}{4n}
-      + 1 + 2\,W_{\text{int}} + 10^{-9}m^2
-    \Bigr)
-    (1 - 4\epsilon_{\mathrm{mach}})
-  \bigr\rfloor,
-\]
-which is the corrected form now used in
-\texttt{run\_cascade.py}.  The
-additive $10^{-9}m^2$ term raises the threshold, while the factor
-$(1 - 4\epsilon_{\mathrm{mach}})$ lowers it slightly before flooring;
-the additive margin dominates, so the net effect is conservative.
+Combine Lemma~\ref{lem:bin-reduction} with
+Lemma~\ref{lem:disc-error}.  The first gives
+$R(f)\ge \operatorname{TV}^{\mathrm{cont}}_n(f;\ell,s_{\mathrm{lo}})$,
+and the second shows that the discrete test value exceeds the
+continuous one by at most the correction term displayed above.
 \end{proof}
 
-\begin{remark}[Why dynamic is better]
-The dynamic correction keeps track of the actual contributing mass
-$W_{\text{int}}$ and retains the favorable factor $\tfrac{4n}{\ell}$.
-Long windows and edge windows therefore carry smaller corrections than
-the worst-case global bound, which is why the cascade can prune far
-more aggressively than a uniform-threshold search.
+\begin{remark}[Formal counterpart]
+The Lean theorem \path{dynamic_threshold_sound} is the formal
+statement of Theorem~\ref{lem:dynamic-correction}.  Its hypotheses are
+organized in terms of the explicit composition
+$c$, written in Lean as \path{canonical_discretization f n m}, the normalized
+contributing-bin mass
+$W = m^{-1}\sum_{i\in\mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} c_i$, and a
+single window whose discrete test value exceeds the threshold.
+\end{remark}
+
+\begin{remark}[Integer-coordinate form]
+If
+$W_{\mathrm{int}}=\sum_{i\in\mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} c_i$,
+then the threshold from
+Theorem~\ref{lem:dynamic-correction} can be written equivalently as
+\[
+  c_{\mathrm{target}}
+  +
+  \frac{4n}{\ell}\,
+  \frac{1+2W_{\mathrm{int}}}{m^2}.
+\]
+This is the exact test-value threshold that reappears in the terminal
+certificate at $(n,m)=(64,20)$.
 \end{remark}
 
 % ======================================================================
@@ -646,14 +697,21 @@ In words: compute the autoconvolution, slide a window of each possible
 width $\ell$ across it, sum the $\ell - 1$ consecutive entries in each
 window position, normalize by $4n\ell$, and take the maximum.
 
-\begin{remark}[Integer implementation coordinates]
+\begin{remark}[Lean indexing convention]
+The Lean definition \path{max_test_value} lets the starting index
+$s_{\mathrm{lo}}$ range over all values $0,\dots,2d-1$, even when the
+window extends past the support of $\conv$.  The extra positions only
+append zero entries, so this convention does not change the maximum.
+\end{remark}
+
+\begin{remark}[Integer composition coordinates]
 The code stores compositions
 $c=(c_0,\ldots,c_{d-1}) \in \N^d$ with $\sum_i c_i = m$ and recovers
 the bin-average vector by
 \[
   a_i \;=\; \frac{4n}{m}\,c_i.
 \]
-All pruning formulas below are stated in these implementation
+All pruning formulas below are stated in these integer
 coordinates.
 \end{remark}
 
@@ -750,7 +808,7 @@ canonical representative to the search.}
 \label{fig:reversal-canonical}
 \end{figure}
 
-Even after exploiting reversal symmetry, the number of implementation
+Even after exploiting reversal symmetry, the number of integer
 states to check --- roughly $\binom{m+d-1}{d-1}/2$ --- grows rapidly
 with $d$ and $m$.  To keep the computation tractable, we need ways to
 rule out large swathes of the simplex without computing the full test
@@ -838,18 +896,16 @@ computation but not part of the final analytic reduction.
 \end{remark}
 
 \begin{remark}[What the certificate computation prunes by]
-Earlier drafts experimented with additional block-sum and two-peak
-heuristics.  The recorded cascade does not rely on them.  The
-certificate computation prunes by asymmetry, the corrected window-dependent
-dynamic threshold, reversal canonicalization, and the single-bin cap
-used during child generation.  In the Lean development, the
-external computation may use all of these rules, but the imported
-certificate ultimately records only a terminal window witness.
+The recorded cascade uses asymmetry pruning, the corrected
+window-dependent threshold, reversal canonicalization, and the
+single-bin cap from Section~\ref{subsec:energy-cap}.  The imported Lean
+axiom does not encode these intermediate pruning mechanisms; it records
+only the resulting terminal window witnesses.
 \end{remark}
 
 \subsection{Canonical Symmetry Exploitation}
 
-If $c$ is an implementation-space composition and
+If $c$ is an integer composition and
 $\tilde c_i = \tfrac{4n}{m}c_i$ is its associated bin-average vector,
 then Theorem~\ref{thm:reversal} gives
 $\tv(\tilde c) = \tv(\widetilde{\rev(c)})$.  This motivates the
@@ -1048,23 +1104,25 @@ $s_{\mathrm{lo}}$ such that
     \frac{1}{20^2}
     +
     \frac{2}{20^2}
-    \sum_{i \in \mathcal{B}(64,\ell,s_{\mathrm{lo}})} c_i
+    \sum_{i \in \mathcal{B}_{64,\ell,s_{\mathrm{lo}}}} c_i
   \right),
 \]
-where $\mathcal{B}(64,\ell,s_{\mathrm{lo}})$ is the set of contributing
+where $\mathcal{B}_{64,\ell,s_{\mathrm{lo}}}$ is the set of contributing
 bins for that window.
 \end{theorem}
 
 \begin{proof}[Status]
 This is the finite computational statement imported into Lean as the
-axiom \texttt{cascade\_all\_pruned} in
-\texttt{Sidon/FinalResult.lean}.  It is extracted from the recorded
-certificate run
-\path{data/cpu_cascade_20260319_201644.json}, whose cascade starts at
-$d=4$, refines dyadically to $d=128$, and terminates with zero
-survivors.  The purpose of the algorithmic discussion in this section
-is to explain how that external computation is organized and why the
-resulting certificate is credible.
+axiom \path{cascade_all_pruned} in
+\path{Sidon/FinalResult.lean}.  The archived cascade run
+\path{data/cpu_cascade_20260319_201644.json} records that the dyadic
+search from $d=4$ to $d=128$ terminates with zero survivors at level
+$L_5$.  The completeness properties discussed in
+Section~\ref{sec:correctness} explain why that terminal outcome implies
+the universal quantification appearing above.  The intermediate cascade
+levels matter only as an efficient route to this terminal statement;
+the final Lean theorem depends only on the quantification over all
+compositions in $\N^{128}$.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -1135,12 +1193,12 @@ array:
   $n_0$, max levels $L_{\max}$
 \State $d_0 \gets 2 n_0$
 \State Generate all canonical compositions of $m$ into $d_0$ parts
-  \Comment{implementation coordinates}
+  \Comment{integer composition coordinates}
 \State Apply asymmetry pruning (threshold
   $\sqrt{c_{\text{target}}/2}$)
 \State For every remaining composition, scan all windows and prune if
   some window exceeds the dynamic threshold from
-  Lemma~\ref{lem:dynamic-correction}
+  Theorem~\ref{lem:dynamic-correction}
 \State $\text{survivors}_0 \gets$ unpruned compositions
 \For{$k = 1, 2, \ldots, L_{\max}$}
   \State $d_k \gets 2 d_{k-1}$; \quad
@@ -1174,7 +1232,7 @@ array:
 
 \subsection{Main Theorem}
 
-\begin{theorem}[Formal Main Result]
+\begin{theorem}[Main theorem]
 \label{thm:main}
 Let $f : \R \to \R$ be nonnegative, satisfy
 $\supp(f) \subseteq (-\tfrac14,\tfrac14)$, and obey $\int f > 0$.  If
@@ -1185,28 +1243,53 @@ $\|f*f\|_{L^\infty} < \infty$, then
 Consequently $C_{1a} \ge \tfrac75 = 1.4$.
 \end{theorem}
 
+\begin{remark}[Exact Lean statement]
+The Lean theorem \path{autoconvolution_ratio_ge_7_5} is phrased
+for the function \path{autoconvolution_ratio} and carries an
+explicit finiteness hypothesis
+\path{h_conv_fin} asserting that the essential supremum of $f*f$ is
+not $\top$.  This is the formal counterpart of the hypothesis
+$\|f*f\|_{L^\infty}<\infty$ in Theorem~\ref{thm:main}.
+\end{remark}
+
 \begin{proof}
-If $\|f*f\|_{L^\infty} = \infty$, then the displayed inequality is
-automatic, so only the finite case needs work.  Normalize
+Normalize
 \[
   g \;=\; \frac{f}{\int f},
 \]
 so that $\int g = 1$.  The autoconvolution ratio is scale-invariant,
-so it suffices to prove $\|g*g\|_{L^\infty} \ge \tfrac75$.
+so it suffices to prove $R(g)\ge \tfrac75$.
 
-Discretize $g$ using the cumulative-floor rule at parameters
-$n = 64$ and $m = 20$, obtaining a composition
-$c \in \N^{128}$ with $\sum_i c_i = 20$.  By
-Theorem~\ref{thm:cascade-sound}, this composition admits a window
-$(\ell,s_{\mathrm{lo}})$ whose test value exceeds the dynamic threshold
-at target $\tfrac75$.  Lemma~\ref{lem:dynamic-correction} is precisely
-the statement that such a window certificate forces
-$\|g*g\|_{L^\infty} \ge \tfrac75$.  By scale invariance, the same lower
-bound holds for the original $f$.
+At parameters $(n,m)=(64,20)$, the identity
+\path{sum_bin_masses_eq_one} gives total bin mass $1$, so the
+cumulative-floor construction
+\path{canonical_discretization} produces a composition
+$c\in\N^{128}$ with $\sum_i c_i=20$.  By the terminal certificate
+Theorem~\ref{thm:cascade-sound}, there exist
+$(\ell,s_{\mathrm{lo}})$ such that
+\[
+  \operatorname{TV}_{64,20}(c;\ell,s_{\mathrm{lo}})
+  \;>\;
+  \frac75
+  +
+  \frac{4\cdot 64}{\ell}
+  \left(
+    \frac{1}{20^2}
+    +
+    \frac{2}{20^2}
+    \sum_{i\in\mathcal{B}_{64,\ell,s_{\mathrm{lo}}}} c_i
+  \right).
+\]
+This is exactly the hypothesis needed for
+Theorem~\ref{lem:dynamic-correction}, which in Lean is the theorem
+\path{dynamic_threshold_sound}.  Its proof combines the
+continuous lower bound \path{continuous_test_value_le_ratio} with
+the per-window discretization estimate from
+Lemma~\ref{lem:disc-error}.  Therefore $R(g)\ge \tfrac75$, and scale
+invariance gives $R(f)\ge \tfrac75$.
 
-For the constant $C_{1a}$, functions with $\|f*f\|_{L^\infty} = \infty$
-do not affect the infimum, so the displayed bound implies
-$C_{1a} \ge \tfrac75$.
+Taking the infimum over $f\in\mathcal{F}$ yields
+$C_{1a}\ge \tfrac75$.
 \end{proof}
 
 
@@ -1214,29 +1297,24 @@ $C_{1a} \ge \tfrac75$.
 \section{Correctness Invariants}\label{sec:correctness}
 % ======================================================================
 
-Stating the algorithm is only half the battle.  For the proof to carry
-mathematical weight, we must verify that the implementation faithfully
-realizes the specification.  Four invariants pin down exactly what
-``faithful'' means.  In the accompanying Lean development, these invariants
-justify trust in the external computation behind
-Theorem~\ref{thm:cascade-sound}; the analytic transfer from that
-terminal certificate to the continuous theorem is formalized
-separately.
+The external computation matters only through the finite statement of
+Theorem~\ref{thm:cascade-sound}.  To justify importing that statement,
+one must know that the search implementation really tested every
+relevant terminal composition against the correct threshold.  The
+following invariants isolate the required claims.
 
 \subsection{Invariant 1: Complete Enumeration}
 
-Every implementation-space composition
+Every integer composition
 $c \in \N^d$ with $\sum_i c_i = m$ must be either directly checked or
 shown to be covered by a checked ancestor and all its refinements.
 
 \begin{itemize}
   \item At $L_0$: all $\binom{m + d_0 - 1}{d_0 - 1}$ compositions
-    are enumerated (in canonical form, with reversal symmetry).
-    Verified by comparing the generator output count against the
-    stars-and-bars formula, and by checking completeness, uniqueness,
-    non-negativity, and sum constraints.
+    are generated, up to the reversal symmetry from
+    Section~\ref{subsec:reversal}.
   \item At $L_k$ ($k \ge 1$): all children of all surviving parents
-    are generated (no sampling or probabilistic skipping).
+    are generated, with no sampling or probabilistic filtering.
 \end{itemize}
 
 \subsection{Invariant 2: All Windows Checked}
@@ -1244,20 +1322,17 @@ shown to be covered by a checked ancestor and all its refinements.
 For each composition that is not eliminated by asymmetry, every valid
 window $(\ell, k)$ with $2 \le \ell \le 2d$ and all valid starting
 positions $k$ must be tested before the composition is declared a
-survivor.  Early exit occurs only \emph{after} a pruning window is
-found --- never for survivors.
+survivor.  Early exit is permitted only after a pruning window has been
+found.
 
 \subsection{Invariant 3: Conservative Arithmetic}
 
-Floating-point arithmetic is the Achilles' heel of computer-assisted
-proofs: a single rounding error in the wrong direction could cause a
-valid configuration to be falsely pruned, invalidating the entire
-argument.  We guard against this as follows:
+Unsound threshold arithmetic would invalidate the proof.  The
+computation avoids this as follows:
 
 \begin{itemize}
   \item Integer coordinates: the autoconvolution is computed in
-    integer arithmetic ($c_i c_j$ are exact integers), avoiding
-    round-off entirely.
+    exact integer arithmetic.
   \item Conservative threshold: the code evaluates the corrected
     integer threshold
     \[
@@ -1283,56 +1358,51 @@ energy cap are provably pruned.
 \section{Computational Verification}\label{sec:verification}
 % ======================================================================
 
-The correctness of the implementation has been verified through
-multiple independent checks.
+The implementation was audited at three levels: enumeration,
+test-value evaluation, and terminal certification.
 
 \subsection{Composition Generators}
 
 \begin{itemize}
-  \item \textbf{Completeness}: For 7 parameter combinations $(d, S)$,
-    the generator output count matches $\binom{S+d-1}{d-1}$ exactly.
-    All outputs sum to $S$, are non-negative, and are unique.
-  \item \textbf{Specialized $\equiv$ generic}: The $d=4$ and $d=6$
-    specialized generators produce identical sets to the generic
-    stack-based generator.
-  \item \textbf{Canonical correctness}: For 8 parameter combinations,
-    canonical generators produce exactly $\tfrac{N+P}{2}$ outputs, all
-    satisfying $b \le \rev(b)$, with every non-canonical $b$ having
-    $\rev(b)$ in the output.
-  \item \textbf{Batch boundaries}: Across 9 configurations and 8
-    batch sizes, output is identical regardless of where batch
-    boundaries fall (160 checks, all pass).
+  \item Generator output counts were checked against the
+    stars-and-bars formula $\binom{m+d-1}{d-1}$ for representative
+    parameter choices, confirming completeness, uniqueness, and the sum
+    constraint.
+  \item Specialized low-dimensional generators were checked against a
+    generic reference generator.
+  \item Canonical enumeration was checked against the exact count
+    $\tfrac{N+P}{2}$ from Proposition~\ref{prop:canon-count}.
 \end{itemize}
 
 \subsection{Test Value Computation}
 
 \begin{itemize}
-  \item Reversal symmetry ($\tv(b) = \tv(\rev(b))$) verified
-    exhaustively for $d=4, S=8$ (165 compositions) and $d=6, S=6$
-    (462 compositions), plus 1,500 random tests.  Zero mismatches.
-  \item Pure-Python reference implementation agrees with Numba JIT
-    kernel on all 891 canonical compositions at $d=4, m=20$.
+  \item Reversal symmetry was verified on exhaustive small instances
+    and additional random tests.
+  \item An independent reference implementation agrees with the
+    optimized kernel on all canonical compositions at the coarse test
+    level $d=4$, $m=20$.
 \end{itemize}
 
 \subsection{Pruning Correctness}
 
 \begin{itemize}
-  \item Window pruning: zero compositions are pruned whose true test
-    value is below the dynamic threshold.
-  \item Window pruning: zero compositions fail to be pruned when their
-    true test value exceeds the dynamic threshold.
-  \item Asymmetry filter: exhaustive step-function checks at coarse
-    levels confirm the expected lower bound on the exact discretized
-    profiles, and the filter is exactly symmetric under reversal.
+  \item Exhaustive coarse-level checks confirm that the window test
+    never prunes a composition whose exact test value lies below the
+    dynamic threshold.
+  \item The same checks confirm that every composition whose exact test
+    value exceeds the threshold is indeed eliminated.
+  \item The asymmetry filter was checked directly on exact step
+    functions and is symmetric under reversal.
 \end{itemize}
 
-\subsection{MATLAB Baseline Comparison}
+\subsection{Formula Cross-Check}
 
-The cascade prover's dynamic threshold formula has been verified
-algebraically equivalent to the original MATLAB code of
-Cloninger--Steinerberger, with the Python implementation being
-strictly more conservative (harder to prune) due to the explicit
-$10^{-9}m^2$ safety margin.
+The integer threshold used in the search is algebraically equivalent to
+the test-value threshold in
+Theorem~\ref{lem:dynamic-correction}.  Relative to the exact
+mathematical threshold, the implementation adds a small positive safety
+margin before flooring, so the pruning rule is conservative.
 
 \subsection{Final Cascade Run}
 
@@ -1342,7 +1412,7 @@ level $L_5$, corresponding to dyadic refinement from $d=4$ through
 $d=128$.  The companion log \path{data/cpu_job.log} records the same
 terminal outcome after roughly $70.08$ hours of wall-clock time.  In
 the accompanying Lean formalization, this finite computation is
-packaged as the axiom \texttt{cascade\_all\_pruned}, which states
+packaged as the axiom \path{cascade_all_pruned}, which states
 directly that every terminal composition at $d=128$ (equivalently,
 $n=64$) with total mass $m=20$ has some window whose test value
 exceeds the corrected dynamic threshold at target $\tfrac75$.
@@ -1354,30 +1424,23 @@ under \path{lean/Sidon/} and a consolidated export in
 \path{lean/complete_proof.lean}.  It is carried out in Lean~4~\cite{Lean4},
 on top of the mathlib library~\cite{Mathlib}.  The development formalizes
 the reduction in separate files for definitions, step functions,
-continuous test values, discretization error, asymmetry, the
-Cauchy--Schwarz single-bin bound, refinement support, subtree pruning,
-and the final normalization argument.  In particular,
-\texttt{Sidon/TestValueBounds.lean},
-\texttt{Sidon/DiscretizationError.lean}, and
-\texttt{Sidon/FinalResult.lean} now carry the analytic argument all the
-way to the direct lower bound $\tfrac75$.
+continuous test values, discretization error, pruning lemmas, and the
+final normalization argument.  The key analytic files for the present
+paper are \path{Sidon/TestValueBounds.lean},
+\path{Sidon/DiscretizationError.lean}, and
+\path{Sidon/FinalResult.lean}.
 
-One important update relative to earlier drafts is that the former
-informal finiteness step has been replaced by an explicit hypothesis
-$\|f*f\|_{L^\infty} < \infty$ in the formal theorem chain.  This is the
-clean way to avoid the pathology that \texttt{ENNReal.toReal} sends
-$\infty$ to $0$.
+Because \path{autoconvolution_ratio} is encoded using
+\path{ENNReal.toReal}, the formal theorem carries an explicit
+finiteness hypothesis on the essential supremum of $f*f$.
 
-At the same time, the Lean development is not yet completely
-assumption-free.  The final reduction
-rests on a single explicit imported axiom:
+The development is not completely axiom-free.  The final reduction
+rests on one imported statement:
 \begin{itemize}
-  \item the computational certificate \texttt{cascade\_all\_pruned},
-    extracted from the recorded $L_5$ cascade run at $d=128$.
+  \item the computational certificate \path{cascade_all_pruned},
+    expressing the terminal-grid statement at $d=128$.
 \end{itemize}
-Accordingly, the present write-up is phrased around the same direct
-terminal-grid certificate: the trusted external computation ends at
-$d=128$, and the Lean theorem imports exactly that statement.
+Everything else in the analytic reduction is proved in Lean.
 
 
 % ======================================================================
@@ -1396,13 +1459,12 @@ Cloninger--Steinerberger~\cite{CS17}.  The key differences:
 
   \item \textbf{Multiscale cascade}: CS17 used $m = 50$ and refined
     from $n = 3$ through $n = 24$.  We use $m = 20$ with dyadic
-    refinement from $d = 4$ through $d = 128$, exploiting the fused
-    kernel's efficiency.
+    refinement from $d = 4$ through $d = 128$.
 
   \item \textbf{Fused generation}: Instead of materializing all
-    children and then testing, we generate and test each child inline,
-    reducing memory from $O(N_{\text{children}} \cdot d)$ to $O(d)$
-    per parent.
+    children and then testing them, we generate and test each child
+    inline, reducing memory from $O(N_{\text{children}} \cdot d)$ to
+    $O(d)$ per parent.
 
   \item \textbf{Integer arithmetic}: Autoconvolution and threshold
     comparisons use exact integer operations, with floating-point
@@ -1425,7 +1487,7 @@ Cloninger--Steinerberger~\cite{CS17}.  The key differences:
     cascade levels and higher computational cost.
 
   \item The Lean theorem imports the terminal certificate
-    \texttt{cascade\_all\_pruned} rather than replaying the full
+    \path{cascade_all_pruned} rather than replaying the full
     $70$-hour search inside the Lean kernel.  Eliminating this final
     axiom would require a kernel-level certification of the same finite
     computation.
@@ -1443,8 +1505,7 @@ Cloninger--Steinerberger~\cite{CS17}.  The key differences:
 % ======================================================================
 
 This work builds on the foundational algorithm of Cloninger and
-Steinerberger~\cite{CS17}.  The constant $C_{1a}$ is tracked in
-Tao~et~al.'s optimization constants repository~\cite{Tao}.
+Steinerberger~\cite{CS17}.
 
 
 % ======================================================================
