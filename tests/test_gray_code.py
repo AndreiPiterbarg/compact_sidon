@@ -103,6 +103,19 @@ def test_d2_survivors_match(parent):
     assert match, f"Mismatch: orig={n_orig}, gray={n_gray}"
 
 
+# --- d_parent=16 tests (exercises sparse cross-term path, d_child=32) ---
+
+@pytest.mark.parametrize("parent", [
+    np.array([2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3], dtype=np.int32),
+    np.array([2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2], dtype=np.int32),
+    np.array([0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0], dtype=np.int32),
+])
+def test_d16_survivors_match(parent):
+    """d_child=32 exercises sparse cross-term path."""
+    n_orig, n_gray, match = _run_both(parent)
+    assert match, f"Mismatch: orig={n_orig}, gray={n_gray}"
+
+
 # --- Enumeration completeness: c_target=999 disables all pruning ---
 
 def test_enumeration_completeness_d4():
