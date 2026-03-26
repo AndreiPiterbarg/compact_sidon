@@ -1471,7 +1471,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     Replaces the lexicographic odometer with a mixed-radix Gray code
     (Knuth TAOCP 7.2.1.1).  Every step changes exactly one cursor position
     by ±1, so the incremental autoconvolution update is always O(d_child).
-    No deep carries, no subtree pruning needed.
+    Includes subtree pruning at J_MIN level for inner-sweep skip.
 
     Same signature and return type as _fused_generate_and_prune.
     """
@@ -1500,6 +1500,17 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     n_surv = 0
     conv_len = 2 * d_child - 1
 
+    # --- Subtree pruning constants ---
+    J_MIN = 7
+    n_subtree_pruned = 0
+    partial_conv = np.empty(conv_len, dtype=np.int32)
+
+    # Prefix sum of parent bins (for W_int_unfixed in subtree pruning)
+    parent_prefix = np.empty(d_parent + 1, dtype=np.int64)
+    parent_prefix[0] = 0
+    for i in range(d_parent):
+        parent_prefix[i + 1] = parent_prefix[i] + np.int64(parent_int[i])
+
     # --- Allocate arrays ---
     cursor = np.empty(d_parent, dtype=np.int32)
     for i in range(d_parent):
@@ -1509,6 +1520,12 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     raw_conv = np.empty(conv_len, dtype=np.int32)
     prefix_c = np.empty(d_child + 1, dtype=np.int64)
 
+    # --- Sparse cross-term optimization (d_child >= 32) ---
+    use_sparse = d_child >= 32
+    nz_list = np.empty(d_child, dtype=np.int32)
+    nz_pos = np.full(d_child, -1, dtype=np.int32)
+    nz_count = 0
+
     qc_ell = np.int32(0)
     qc_s = np.int32(0)
     qc_W_int = np.int64(0)
@@ -1517,6 +1534,13 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     for i in range(d_parent):
         child[2 * i] = cursor[i]
         child[2 * i + 1] = parent_int[i] - cursor[i]
+
+    if use_sparse:
+        for i in range(d_child):
+            if child[i] != 0:
+                nz_list[nz_count] = i
+                nz_pos[i] = nz_count
+                nz_count += 1
 
     # --- Precompute per-ell constants (identical to original) ---
     ell_count = 2 * d_child - 1
@@ -1560,10 +1584,12 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                     raw_conv[i + j] += np.int32(2) * ci * cj
 
     # --- Gray code setup: active positions (range > 1) ---
+    # Build right-to-left so inner (fast) digits are rightmost parent bins.
+    # This makes the fixed region for subtree pruning a left prefix.
     n_active = 0
     active_pos = np.empty(d_parent, dtype=np.int32)
     radix = np.empty(d_parent, dtype=np.int32)
-    for i in range(d_parent):
+    for i in range(d_parent - 1, -1, -1):
         r = hi_arr[i] - lo_arr[i] + 1
         if r > 1:
             active_pos[n_active] = i
@@ -1682,18 +1708,39 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
         raw_conv[2 * k2] += new2 * new2 - old2 * old2
         # Mutual term (k2 = k1 + 1, always adjacent)
         raw_conv[k1 + k2] += np.int32(2) * (new1 * new2 - old1 * old2)
-        # Cross-terms: bins BEFORE changed pair
-        for jj in range(k1):
-            cj = np.int32(child[jj])
-            if cj != 0:
-                raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
-                raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
-        # Cross-terms: bins AFTER changed pair
-        for jj in range(k2 + 1, d_child):
-            cj = np.int32(child[jj])
-            if cj != 0:
-                raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
-                raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+        # Cross-terms with unchanged bins
+        if use_sparse:
+            # Update nz_list for changed bins k1, k2
+            if old1 != 0 and new1 == 0:
+                p = nz_pos[k1]; nz_count -= 1
+                last = nz_list[nz_count]; nz_list[p] = last
+                nz_pos[last] = p; nz_pos[k1] = -1
+            elif old1 == 0 and new1 != 0:
+                nz_list[nz_count] = k1; nz_pos[k1] = nz_count; nz_count += 1
+            if old2 != 0 and new2 == 0:
+                p = nz_pos[k2]; nz_count -= 1
+                last = nz_list[nz_count]; nz_list[p] = last
+                nz_pos[last] = p; nz_pos[k2] = -1
+            elif old2 == 0 and new2 != 0:
+                nz_list[nz_count] = k2; nz_pos[k2] = nz_count; nz_count += 1
+            # Iterate only nonzero bins, skip k1 and k2
+            for idx in range(nz_count):
+                jj = nz_list[idx]
+                if jj != k1 and jj != k2:
+                    cj = np.int32(child[jj])
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+        else:
+            for jj in range(k1):
+                cj = np.int32(child[jj])
+                if cj != 0:
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+            for jj in range(k2 + 1, d_child):
+                cj = np.int32(child[jj])
+                if cj != 0:
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
 
         # Quick-check W_int update (O(1))
         if qc_ell > 0:
@@ -1708,7 +1755,164 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
             if qc_lo <= k2 and k2 <= qc_hi:
                 qc_W_int += np.int64(delta2)
 
-    return n_surv, 0
+        # === SUBTREE PRUNING CHECK ===
+        # When digit J_MIN just advanced, inner digits 0..J_MIN-1 are about
+        # to sweep.  Check if the partial autoconvolution of the fixed left
+        # prefix already exceeds the threshold for all possible inner values.
+        if j == J_MIN and n_active > J_MIN:
+            fixed_parent_boundary = active_pos[J_MIN - 1]
+            fixed_len = 2 * fixed_parent_boundary
+
+            if fixed_len >= 4:
+                # Compute partial autoconvolution of fixed prefix
+                partial_conv_len = 2 * fixed_len - 1
+                for kk in range(partial_conv_len):
+                    partial_conv[kk] = np.int32(0)
+                for ii in range(fixed_len):
+                    ci = np.int32(child[ii])
+                    if ci != 0:
+                        partial_conv[2 * ii] += ci * ci
+                        for jj2 in range(ii + 1, fixed_len):
+                            cj2 = np.int32(child[jj2])
+                            if cj2 != 0:
+                                partial_conv[ii + jj2] += np.int32(2) * ci * cj2
+                # Prefix sum for sliding window
+                for kk in range(1, partial_conv_len):
+                    partial_conv[kk] += partial_conv[kk - 1]
+
+                # Fixed-region child prefix for W_int_fixed
+                prefix_c[0] = 0
+                for ii in range(fixed_len):
+                    prefix_c[ii + 1] = prefix_c[ii] + np.int64(child[ii])
+
+                first_unfixed_parent = fixed_parent_boundary
+                subtree_pruned = False
+
+                for ell_oi in range(ell_count):
+                    if subtree_pruned:
+                        break
+                    ell = ell_order[ell_oi]
+                    n_cv = ell - 1
+                    ell_idx = ell - 2
+                    dyn_base_ell = dyn_base_ell_arr[ell_idx]
+                    two_ell_inv_4n = two_ell_arr[ell_idx]
+
+                    n_windows_partial = partial_conv_len - n_cv + 1
+                    if n_windows_partial <= 0:
+                        continue
+
+                    for s_lo in range(n_windows_partial):
+                        s_hi = s_lo + n_cv - 1
+                        ws = np.int64(partial_conv[s_hi])
+                        if s_lo > 0:
+                            ws -= np.int64(partial_conv[s_lo - 1])
+
+                        lo_bin = s_lo - (d_child - 1)
+                        if lo_bin < 0:
+                            lo_bin = 0
+                        hi_bin = s_lo + ell - 2
+                        if hi_bin > d_child - 1:
+                            hi_bin = d_child - 1
+
+                        # W_int_fixed: actual child masses in fixed prefix
+                        fixed_hi = hi_bin
+                        if fixed_hi > fixed_len - 1:
+                            fixed_hi = fixed_len - 1
+                        if fixed_hi >= lo_bin:
+                            lo_clamp = lo_bin
+                            if lo_clamp < 0:
+                                lo_clamp = 0
+                            W_int_fixed = prefix_c[fixed_hi + 1] - prefix_c[lo_clamp]
+                        else:
+                            W_int_fixed = np.int64(0)
+
+                        # W_int_unfixed: parent upper bound for bins
+                        # right of fixed prefix
+                        unfixed_lo_bin = lo_bin
+                        if unfixed_lo_bin < fixed_len:
+                            unfixed_lo_bin = fixed_len
+                        if unfixed_lo_bin <= hi_bin:
+                            p_lo = unfixed_lo_bin // 2
+                            p_hi = hi_bin // 2
+                            if p_lo < first_unfixed_parent:
+                                p_lo = first_unfixed_parent
+                            if p_hi >= d_parent:
+                                p_hi = d_parent - 1
+                            if p_lo <= p_hi:
+                                W_int_unfixed = parent_prefix[p_hi + 1] - parent_prefix[p_lo]
+                            else:
+                                W_int_unfixed = np.int64(0)
+                        else:
+                            W_int_unfixed = np.int64(0)
+
+                        W_int_max = W_int_fixed + W_int_unfixed
+                        dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int_max)
+                        dyn_it = np.int64(dyn_x * one_minus_4eps)
+                        if ws > dyn_it:
+                            subtree_pruned = True
+                            break
+
+                if subtree_pruned:
+                    n_subtree_pruned += 1
+
+                    # Save where focus should go after skip
+                    next_focus = gc_focus[J_MIN]
+
+                    # Reset inner Gray code digits to fresh state
+                    for kk in range(J_MIN):
+                        gc_a[kk] = 0
+                        gc_dir[kk] = 1
+                        gc_focus[kk] = kk
+
+                    # Wire focus to skip inner sweep
+                    gc_focus[0] = next_focus
+                    gc_focus[J_MIN] = J_MIN
+
+                    # Reset cursor and child for inner positions
+                    for kk in range(J_MIN):
+                        p = active_pos[kk]
+                        cursor[p] = lo_arr[p]
+                        child[2 * p] = lo_arr[p]
+                        child[2 * p + 1] = parent_int[p] - lo_arr[p]
+
+                    # Full recompute raw_conv (O(d²))
+                    for kk in range(conv_len):
+                        raw_conv[kk] = np.int32(0)
+                    for ii in range(d_child):
+                        ci = np.int32(child[ii])
+                        if ci != 0:
+                            raw_conv[2 * ii] += ci * ci
+                            for jj2 in range(ii + 1, d_child):
+                                cj2 = np.int32(child[jj2])
+                                if cj2 != 0:
+                                    raw_conv[ii + jj2] += np.int32(2) * ci * cj2
+
+                    # Rebuild nz_list after subtree prune reset
+                    if use_sparse:
+                        nz_count = 0
+                        for ii in range(d_child):
+                            if child[ii] != 0:
+                                nz_list[nz_count] = ii
+                                nz_pos[ii] = nz_count
+                                nz_count += 1
+                            else:
+                                nz_pos[ii] = -1
+
+                    # Recompute qc_W_int
+                    if qc_ell > 0:
+                        qc_lo2 = qc_s - (d_child - 1)
+                        if qc_lo2 < 0:
+                            qc_lo2 = 0
+                        qc_hi2 = qc_s + qc_ell - 2
+                        if qc_hi2 > d_child - 1:
+                            qc_hi2 = d_child - 1
+                        qc_W_int = np.int64(0)
+                        for ii in range(qc_lo2, qc_hi2 + 1):
+                            qc_W_int += np.int64(child[ii])
+
+                    continue  # skip to TEST at top of loop
+
+    return n_surv, n_subtree_pruned
 
 
 def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
