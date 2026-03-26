@@ -41,6 +41,9 @@ import Sidon.GrayCode
 -- Sliding window and zero-bin skip (Claims 4.12, 4.13)
 import Sidon.SlidingWindow
 
+-- Gray code subtree pruning (Claims 4.14–4.25)
+import Sidon.GrayCodeSubtreePruning
+
 -- Asymmetry bound (Claim 2.1)
 import Sidon.AsymmetryBound
 
