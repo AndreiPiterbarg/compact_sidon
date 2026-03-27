@@ -25,7 +25,10 @@
   colorlinks=true,
   linkcolor=MidnightBlue,
   citecolor=MidnightBlue,
-  urlcolor=MidnightBlue
+  urlcolor=MidnightBlue,
+  pdftitle={A Computer-Assisted Proof That the Autoconvolution Constant C1a Satisfies C1a >= 7/5},
+  pdfauthor={Jai Bajaj},
+  pdfsubject={A computer-assisted lower bound for the autoconvolution constant}
 }
 \captionsetup{font=small, labelfont=bf}
 \setlist{topsep=4pt, itemsep=2pt, parsep=0pt}
@@ -116,7 +119,7 @@ computer-assisted proof, Lean formalization.
 \section{Introduction}\label{sec:intro}
 % ======================================================================
 
-\subsection[The Constant C1a]{The Constant $C_{1a}$}
+\subsection{The Constant \texorpdfstring{$C_{1a}$}{C1a}}
 
 Let
 \[
@@ -183,7 +186,7 @@ controlling pairwise-sum collisions.
   Lower bound & $\ge 1.4$ & This work \\
   \bottomrule
 \end{tabular}
-\caption{Published bounds on $C_{1a}$ in the normalization used here.}
+\caption[Published bounds on C1a in the normalization used here.]{Published bounds on $C_{1a}$ in the normalization used here.}
 \label{tab:published-bounds}
 \end{table}
 
@@ -328,7 +331,7 @@ in the rescaled coordinates $a=4n\,\mu$.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{01_partition_bins.pdf}
-\caption{A nonnegative profile supported on $[-\tfrac14,\tfrac14]$,
+\caption[A nonnegative profile on the support interval and its induced bin averages.]{A nonnegative profile supported on $[-\tfrac14,\tfrac14]$,
 together with the half-open partition into equal bins.  The upper panel
 shows the support decomposition, while the lower panel records the
 induced averages $a_i=4n\,\mu_i$ and the simplex identity
@@ -436,7 +439,7 @@ nearby lattice point.
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.76\linewidth]{02_simplex_lattice.pdf}
-\caption{A three-coordinate slice of the normalized simplex.  The point
+\caption[A three-coordinate slice of the normalized simplex and its lattice approximation.]{A three-coordinate slice of the normalized simplex.  The point
 $\mu$ is replaced by a nearby lattice point $b \in B_{n,m}$; in the
 formal proof this representative is chosen by the cumulative-floor map
 described below.}
@@ -801,7 +804,7 @@ representative from each non-palindromic pair.
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.92\linewidth]{03_reversal_canonical.pdf}
-\caption{Reversal symmetry of the test value and the canonicalization
+\caption[Reversal symmetry and canonicalization of compositions.]{Reversal symmetry of the test value and the canonicalization
 rule $c \mapsto \min(c,\rev(c))$.  Palindromic compositions are fixed by
 the involution, while non-palindromic pairs contribute only one
 canonical representative to the search.}
@@ -993,7 +996,7 @@ survivor counts at each dyadic level.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{04_cascade_flow.pdf}
-\caption{Stylized overview of the multiscale cascade.  The annotations
+\caption[Stylized overview of the multiscale cascade with terminal-run survivor counts.]{Stylized overview of the multiscale cascade.  The annotations
 record the exact survivor counts from the terminal certificate run: $345$ at
 $d=4$, then $48{,}443$, $7{,}499{,}382$, $147{,}279{,}894$, $76{,}829$,
 and finally $0$ at $d=128$.}
