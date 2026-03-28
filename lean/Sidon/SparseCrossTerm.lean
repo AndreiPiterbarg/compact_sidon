@@ -19,6 +19,23 @@ a full raw_conv recompute), nz_list is rebuilt from scratch.
 STATUS: PROOF OBLIGATIONS ONLY — no proofs are attempted here.
 Each `sorry` marks an open obligation. Dependencies on existing modules
 (Defs, IncrementalAutoconv, GrayCode) are noted.
+
+AUDIT FIXES (2026-03-28):
+- Claim 4.26: Changed conclusion from Finset equality to biconditional form
+  (matching downstream consumers in Claims 4.30, 4.31).
+- Claim 4.27: Removed (redundant — conclusion restated hypothesis h_forward).
+- Claims 4.28–4.29: Changed conclusion from `True` to substantive
+  set-membership biconditionals about the updated nz_list.
+- Claim 4.30: Added constraining hypotheses (h_k1, h_k2, h_rest) connecting
+  nz_list' to the four-case update result.
+- Claim 4.31: (a) Removed `child j ≠ 0` from dense-side filter (dense code
+  iterates all j ≠ k1,k2; zero terms contribute 0 via 2·δ·0 = 0).
+  (b) Added k2 contribution (delta2 · child[j] at k2+j), previously missing.
+- Claim 4.32: Added connecting hypotheses (h_dense, h_sparse) defining both
+  raw_conv arrays as raw_conv_after_self plus respective cross-term deltas.
+- Claim 4.33: Changed conclusion from Finset equality to biconditional form.
+- Claim 4.35: Added hypotheses (h_same, h_S_dense, h_S_sparse) defining
+  survivor sets via a common enumeration and pruning test.
 -/
 
 import Mathlib
@@ -43,61 +60,42 @@ set_option autoImplicit false
 noncomputable section
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- PART A: Nonzero List Invariant (Claims 4.26–4.27)
+-- PART A: Nonzero List Invariant (Claim 4.26)
 --
 -- The nz_list is a faithful representation of the set of nonzero child bins.
 -- This invariant must hold at every point where the cross-term loop executes.
+--
+-- Claim 4.27 (nz_pos consistency) has been removed: its conclusion
+-- `nz_list[nz_pos[i]] = i` was the third conjunct of hypothesis h_forward,
+-- making the theorem a trivial extraction with no added content.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-/-- Claim 4.26: nz_list invariant — the set of indices stored in
-    nz_list[0..nz_count-1] is exactly the set of indices i where
-    child[i] ≠ 0.
+/-- Claim 4.26: nz_list invariant — child[i] ≠ 0 iff i appears in
+    nz_list[0..nz_count-1].
 
-    Formally: nz_list is a permutation of {i : Fin d | child i ≠ 0}.
-    This is the core invariant that the sparse cross-term loop relies on.
+    This is the core invariant for the sparse cross-term loop.
     It must hold:
       (a) after initialization from the first child,
       (b) after each incremental nz_list update following a Gray code step,
-      (c) after nz_list rebuild following a subtree prune. -/
+      (c) after nz_list rebuild following a subtree prune.
+
+    The biconditional form is consumed by Claims 4.30, 4.31, 4.32. -/
 theorem nz_list_invariant
     {d : ℕ} (child : Fin d → ℤ)
-    (nz_list : Fin d → ℕ)  -- indices of nonzero bins
+    (nz_list : Fin d → ℕ)
     (nz_count : ℕ) (hnz_count : nz_count ≤ d)
-    -- nz_list[0..nz_count-1] are all valid indices
     (h_valid : ∀ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ < d)
-    -- nz_list[0..nz_count-1] are all distinct
     (h_distinct : ∀ k₁ k₂ : Fin nz_count,
       nz_list ⟨k₁.1, by omega⟩ = nz_list ⟨k₂.1, by omega⟩ → k₁ = k₂)
-    -- nz_list[0..nz_count-1] are exactly the nonzero indices
     (h_nonzero : ∀ k : Fin nz_count,
-      child ⟨nz_list ⟨k.1, by omega⟩, by omega⟩ ≠ 0)
+      child ⟨nz_list ⟨k.1, by omega⟩, h_valid k⟩ ≠ 0)
     (h_complete : ∀ i : Fin d, child i ≠ 0 →
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1) :
-    -- The set represented by nz_list equals {i | child i ≠ 0}
-    (Finset.image (fun k : Fin nz_count => (⟨nz_list ⟨k.1, by omega⟩, by omega⟩ : Fin d))
-      Finset.univ) =
-    Finset.filter (fun i => child i ≠ 0) Finset.univ := by
+    ∀ i : Fin d, child i ≠ 0 ↔
+      ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1 := by
   sorry
-
-/-- Claim 4.27: The reverse-index nz_pos is consistent with nz_list.
-    For every nonzero bin i, nz_pos[i] gives the position of i in nz_list.
-    For every zero bin i, nz_pos[i] = -1 (sentinel).
-
-    This enables O(1) removal from nz_list via swap-with-last. -/
-theorem nz_pos_consistent
-    {d : ℕ} (child : Fin d → ℤ)
-    (nz_list : Fin d → ℕ) (nz_pos : Fin d → ℤ)
-    (nz_count : ℕ) (hnz_count : nz_count ≤ d)
-    -- Forward: nz_pos maps nonzero bins to their position in nz_list
-    (h_forward : ∀ i : Fin d, child i ≠ 0 →
-      0 ≤ nz_pos i ∧ nz_pos i < nz_count ∧
-      nz_list ⟨(nz_pos i).toNat, by omega⟩ = i.1)
-    -- Backward: zero bins map to -1
-    (h_zero : ∀ i : Fin d, child i = 0 → nz_pos i = -1) :
-    -- Consistency: nz_list[nz_pos[i]] = i for all nonzero i
-    ∀ i : Fin d, child i ≠ 0 →
-      nz_list ⟨(nz_pos i).toNat, by omega⟩ = i.1 := by
-  sorry
+  -- (→) from h_complete
+  -- (←) given ⟨k, hk⟩, substitute hk into h_nonzero k
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART B: Incremental Update Correctness (Claims 4.28–4.30)
@@ -105,151 +103,253 @@ theorem nz_pos_consistent
 -- When the Gray code advances and exactly one cursor position changes,
 -- bins k1 = 2*pos and k2 = 2*pos+1 get new values. The nz_list must be
 -- updated to reflect these changes. There are four cases per bin:
---   nonzero → zero:   remove from list
---   zero → nonzero:   add to list
---   nonzero → nonzero: no change
---   zero → zero:       no change
+--   nonzero → zero:   swap-remove from list
+--   zero → nonzero:   append to list
+--   nonzero → nonzero: no change needed
+--   zero → zero:       no change needed
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-/-- Claim 4.28: Swap-remove preserves the nz_list invariant.
+/-- Claim 4.28: Swap-remove preserves the nz_list invariant (minus one element).
 
     When removing index i from nz_list, we swap it with the last element
-    and decrement nz_count. This preserves the set of stored indices
-    (minus the removed one) and the distinctness property. -/
-theorem swap_remove_preserves_invariant
-    {d : ℕ} (nz_list : Fin d → ℕ) (nz_pos : Fin d → ℤ)
-    (nz_count : ℕ) (hnz : 0 < nz_count) (hnz_d : nz_count ≤ d)
-    (i : Fin d)  -- the index being removed
-    (h_in_list : 0 ≤ nz_pos i ∧ (nz_pos i).toNat < nz_count)
-    -- Define the updated list after swap-remove
-    (nz_list' : Fin d → ℕ) (nz_pos' : Fin d → ℤ) (nz_count' : ℕ)
-    (h_count' : nz_count' = nz_count - 1)
-    -- The swap: nz_list'[pos_of_i] = nz_list[nz_count-1]
-    (h_swap : nz_list' ⟨(nz_pos i).toNat, by omega⟩ =
-              nz_list ⟨nz_count - 1, by omega⟩)
-    -- Everything else unchanged
-    (h_rest : ∀ k : ℕ, k < nz_count' → k ≠ (nz_pos i).toNat →
-      nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩)
-    -- Reverse index updated
-    (h_pos_last : nz_pos' ⟨nz_list ⟨nz_count - 1, by omega⟩, by omega⟩ = nz_pos i)
-    (h_pos_removed : nz_pos' i = -1) :
-    -- The set of indices in nz_list'[0..nz_count'-1] equals
-    -- the set in nz_list[0..nz_count-1] minus {i}
-    True := by
-  sorry
+    and decrement nz_count. The resulting nz_list represents exactly the
+    original set minus {i}.
 
-/-- Claim 4.29: Append preserves the nz_list invariant.
+    Code reference: run_cascade.py:1304-1309
+      p = nz_pos[k]; nz_count -= 1
+      last = nz_list[nz_count]; nz_list[p] = last
+      nz_pos[last] = p; nz_pos[k] = -1 -/
+theorem swap_remove_preserves_invariant
+    {d : ℕ} (nz_list nz_list' : Fin d → ℕ)
+    (nz_count : ℕ) (hnz : 0 < nz_count) (hnz_d : nz_count ≤ d)
+    -- No duplicates in original list
+    (h_distinct : ∀ k₁ k₂ : Fin nz_count,
+      nz_list ⟨k₁.1, by omega⟩ = nz_list ⟨k₂.1, by omega⟩ → k₁ = k₂)
+    -- The index being removed
+    (i : Fin d) (p : ℕ) (hp : p < nz_count)
+    (h_at_p : nz_list ⟨p, by omega⟩ = i.1)
+    -- Result of swap-remove
+    (nz_count' : ℕ) (h_count' : nz_count' = nz_count - 1)
+    (h_swap : nz_list' ⟨p, by omega⟩ = nz_list ⟨nz_count - 1, by omega⟩)
+    (h_rest : ∀ k : ℕ, k < nz_count' → k ≠ p →
+      nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩) :
+    -- The set in nz_list' = the set in nz_list minus {i}
+    ∀ j : Fin d,
+      (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = j.1) ↔
+      ((∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = j.1) ∧ j ≠ i) := by
+  sorry
+  -- (→) If nz_list'[k'] = j, trace k' through swap/rest to find j in nz_list.
+  --     j ≠ i by h_distinct: if j = i then nz_list[k''] = nz_list[p],
+  --     forcing k'' = p, but position p now holds nz_list[nz_count-1].
+  -- (←) If nz_list[k0] = j and j ≠ i:
+  --     case k0 < nz_count': if k0 ≠ p then nz_list'[k0] = nz_list[k0] = j;
+  --       if k0 = p then nz_list[p] = j = i, contradiction.
+  --     case k0 = nz_count-1: nz_list'[p] = nz_list[nz_count-1] = j,
+  --       and p < nz_count' (since p = nz_count-1 would give j = i).
+
+/-- Claim 4.29: Append preserves the nz_list invariant (plus one element).
 
     When adding index i to nz_list, we place it at position nz_count
-    and increment nz_count. -/
+    and increment nz_count.
+
+    Code reference: run_cascade.py:1308-1309
+      nz_list[nz_count] = k; nz_pos[k] = nz_count; nz_count += 1 -/
 theorem append_preserves_invariant
-    {d : ℕ} (nz_list : Fin d → ℕ) (nz_pos : Fin d → ℤ)
+    {d : ℕ} (nz_list nz_list' : Fin d → ℕ)
     (nz_count : ℕ) (hnz_d : nz_count < d)
-    (i : Fin d)  -- the index being added
-    (h_not_in : nz_pos i = -1)
-    -- Define the updated list after append
-    (nz_list' : Fin d → ℕ) (nz_pos' : Fin d → ℤ) (nz_count' : ℕ)
-    (h_count' : nz_count' = nz_count + 1)
+    -- The index being added
+    (i : Fin d)
+    -- i is not already in nz_list
+    (h_not_in : ∀ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ ≠ i.1)
+    -- Result of append
+    (nz_count' : ℕ) (h_count' : nz_count' = nz_count + 1)
     (h_append : nz_list' ⟨nz_count, by omega⟩ = i.1)
     (h_rest : ∀ k : ℕ, k < nz_count →
-      nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩)
-    (h_pos_new : nz_pos' i = nz_count) :
-    -- The set of indices in nz_list'[0..nz_count'-1] equals
-    -- the set in nz_list[0..nz_count-1] ∪ {i}
-    True := by
+      nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩) :
+    -- The set in nz_list' = the set in nz_list plus {i}
+    ∀ j : Fin d,
+      (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = j.1) ↔
+      ((∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = j.1) ∨ j = i) := by
   sorry
+  -- (→) If k' < nz_count: nz_list'[k'] = nz_list[k'], giving left disjunct.
+  --     If k' = nz_count: nz_list'[nz_count] = i, giving right disjunct.
+  -- (←) Left: nz_list[k0] = j, so nz_list'[k0] = nz_list[k0] = j with k0 < nz_count'.
+  --     Right: j = i, use h_append with k' = nz_count < nz_count'.
 
 /-- Claim 4.30: After the four-case update (old→new for bins k1, k2),
     the nz_list invariant is restored for the updated child array.
 
-    This combines Claims 4.28–4.29 for the two bins that change in
+    This composes Claims 4.28–4.29 for the two bins that change in
     each Gray code step. The key insight is that bins k1 and k2 are
     the ONLY bins that change, so the invariant for all other bins
-    is trivially preserved. -/
+    is trivially preserved.
+
+    The hypotheses h_k1, h_k2, h_rest specify the postcondition of the
+    four-case update procedure (established by composing Claims 4.28–4.29
+    for each of k1 and k2 as needed).
+
+    Code reference: run_cascade.py:1303-1315 (the four-case block) -/
 theorem incremental_nz_update_correct
     {d : ℕ} (child child' : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k1 ≠ k2)
     -- Only k1, k2 changed
     (h_unchanged : ∀ i : Fin d, i ≠ k1 → i ≠ k2 → child' i = child i)
     -- nz_list was correct before
-    (nz_list nz_pos : Fin d → _) (nz_count : ℕ)
+    (nz_list : Fin d → ℕ) (nz_count : ℕ) (hnz : nz_count ≤ d)
     (h_inv_before : ∀ i : Fin d, child i ≠ 0 ↔
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1)
-    -- nz_list', nz_pos', nz_count' are the result of the four-case update
-    (nz_list' nz_pos' : Fin d → _) (nz_count' : ℕ) :
+    -- nz_list' is the result of the four-case update
+    (nz_list' : Fin d → ℕ) (nz_count' : ℕ) (hnz' : nz_count' ≤ d)
+    -- The update correctly tracks k1
+    (h_k1 : (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = k1.1) ↔ child' k1 ≠ 0)
+    -- The update correctly tracks k2
+    (h_k2 : (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = k2.1) ↔ child' k2 ≠ 0)
+    -- All other indices unchanged in nz_list
+    (h_rest : ∀ j : Fin d, j ≠ k1 → j ≠ k2 →
+      ((∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = j.1) ↔
+       (∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = j.1))) :
     -- nz_list' is correct for child'
-    (∀ i : Fin d, child' i ≠ 0 ↔
-      ∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = i.1) := by
+    ∀ i : Fin d, child' i ≠ 0 ↔
+      ∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = i.1 := by
   sorry
+  -- Case i = k1: exact h_k1.symm
+  -- Case i = k2: exact h_k2.symm
+  -- Case i ≠ k1, k2: chain h_unchanged + h_inv_before + h_rest
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART C: Cross-Term Equivalence (Claims 4.31–4.32)
 --
 -- The sparse cross-term loop computes the same raw_conv updates as the
--- original two-loop version. This is the central correctness theorem.
+-- original dense loop. This is the central correctness theorem.
+--
+-- Key insight: The dense loop iterates all j ≠ k1, k2 (via range boundaries).
+-- When child[j] = 0, the contribution is 2·δ·0 = 0, so zero bins are
+-- harmless. The sparse loop iterates only nz_list entries ≠ k1, k2, which
+-- by the invariant (Claim 4.26) are exactly the nonzero bins. Since zero
+-- bins contribute 0, both loops produce the same sum.
+--
+-- The self-terms (at indices 2·k1, 2·k2) and mutual term (at index k1+k2)
+-- are computed identically by both paths (run_cascade.py:1296-1300, before
+-- the if/else branch), so they cancel. Only the cross-terms differ.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-/-- Claim 4.31: The sparse cross-term sum equals the dense cross-term sum.
+/-- Claim 4.31: The sparse cross-term sum equals the dense cross-term sum,
+    for BOTH the delta1 (at k1+j) and delta2 (at k2+j) contributions.
 
-    The original code computes:
-      Σ_{j ∈ [0,k1)} if child[j]≠0: 2·δ₁·child[j] at raw_conv[k1+j]
-                                       2·δ₂·child[j] at raw_conv[k2+j]
-      + Σ_{j ∈ (k2,d)} same
+    Dense path (run_cascade.py:1323-1333):
+      for jj in range(k1):          # all j < k1
+          raw_conv[k1+jj] += 2·δ₁·child[jj]
+          raw_conv[k2+jj] += 2·δ₂·child[jj]
+      for jj in range(k2+1, d):     # all j > k2
+          raw_conv[k1+jj] += 2·δ₁·child[jj]
+          raw_conv[k2+jj] += 2·δ₂·child[jj]
 
-    The sparse code computes:
-      Σ_{j ∈ nz_list, j≠k1, j≠k2}: 2·δ₁·child[j] at raw_conv[k1+j]
-                                       2·δ₂·child[j] at raw_conv[k2+j]
+    Sparse path (run_cascade.py:1317-1322):
+      for idx in range(nz_count):
+          jj = nz_list[idx]
+          if jj != k1 and jj != k2:
+              raw_conv[k1+jj] += 2·δ₁·child[jj]
+              raw_conv[k2+jj] += 2·δ₂·child[jj]
 
     These are equal because:
-      (a) nz_list contains exactly the indices where child[j] ≠ 0
-      (b) The original code skips j where child[j] = 0
-      (c) The original code skips j = k1, k2 via range boundaries
-      (d) The sparse code skips j = k1, k2 via explicit check -/
+      (a) nz_list = {j | child[j] ≠ 0} (Claim 4.26 invariant)
+      (b) For j with child[j] = 0: 2·δ·0 = 0 (zero terms contribute nothing)
+      (c) Dense skips j ∈ {k1,k2} via range boundaries
+      (d) Sparse skips j ∈ {k1,k2} via explicit check
+
+    Note: the dense-side formalization does NOT filter on child j ≠ 0
+    (matching the actual code which iterates all j in range). The equality
+    holds because zero-valued terms contribute 0 to the sum.
+
+    Depends on: Claim 4.26 (nz_list invariant). -/
 theorem sparse_cross_term_eq_dense
     {d : ℕ} (child : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k2.1 = k1.1 + 1)
     (delta1 delta2 : ℤ)
     (nz_list : Fin d → ℕ) (nz_count : ℕ)
-    -- nz_list invariant holds
+    (hnz_count : nz_count ≤ d)
+    (h_valid : ∀ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ < d)
+    (h_distinct : ∀ k₁ k₂ : Fin nz_count,
+      nz_list ⟨k₁.1, by omega⟩ = nz_list ⟨k₂.1, by omega⟩ → k₁ = k₂)
     (h_inv : ∀ i : Fin d, child i ≠ 0 ↔
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1) :
-    -- For every convolution index t, the sparse update equals the dense update
     ∀ t : ℕ,
-    -- Dense: sum over j < k1 and j > k2 where child[j] ≠ 0
+    -- k1 cross-term contribution: dense = sparse
     (∑ j : Fin d,
-      if (j.1 < k1.1 ∨ j.1 > k2.1) ∧ child j ≠ 0 ∧ k1.1 + j.1 = t
-      then 2 * delta1 * child j else 0) =
-    -- Sparse: sum over nz_list entries ≠ k1, k2
-    (∑ idx : Fin nz_count,
-      let j := (⟨nz_list ⟨idx.1, by omega⟩, by omega⟩ : Fin d)
       if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t
-      then 2 * delta1 * child j else 0) := by
-  sorry  -- Follows from h_inv bijectivity + child j = 0 filtering
+      then 2 * delta1 * child j else 0) =
+    (∑ idx : Fin nz_count,
+      let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩
+      if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t
+      then 2 * delta1 * child j else 0)
+    ∧
+    -- k2 cross-term contribution: dense = sparse
+    (∑ j : Fin d,
+      if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t
+      then 2 * delta2 * child j else 0) =
+    (∑ idx : Fin nz_count,
+      let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩
+      if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t
+      then 2 * delta2 * child j else 0) := by
+  sorry
+  -- For each component, the proof has two steps:
+  -- Step 1 (zero-filtering): ∑_{j : Fin d} f(j) = ∑_{j : Fin d, child j ≠ 0} f(j)
+  --   because child j = 0 ⟹ f(j) = 2·δ·child j = 2·δ·0 = 0.
+  -- Step 2 (bijection): ∑_{j ∈ nonzero set} f(j) = ∑_{idx : Fin nz_count} f(nz_list[idx])
+  --   because h_inv + h_distinct + h_valid give a bijection between
+  --   Fin nz_count and {j : Fin d | child j ≠ 0}.
 
 /-- Claim 4.32: The raw_conv array after the sparse cross-term update
     is identical to the raw_conv array after the dense cross-term update.
 
-    This lifts Claim 4.31 from individual convolution indices to the
-    full raw_conv array. Since both updates touch the same set of
-    raw_conv entries with the same deltas, the resulting arrays are equal.
+    Both paths start from the same intermediate state raw_conv_after_self
+    (after applying self-terms and mutual term, which are identical —
+    run_cascade.py:1296-1300). The only difference is the cross-term
+    computation. By Claim 4.31, the cross-term deltas are equal, so the
+    final raw_conv arrays are equal.
 
     This is the master equivalence theorem: it guarantees that the
     pruning test (which reads raw_conv) sees identical values regardless
-    of whether sparse or dense cross-terms were used. -/
+    of whether sparse or dense cross-terms were used.
+
+    Depends on: Claim 4.31 (sparse_cross_term_eq_dense),
+                IncrementalAutoconv.delta_three_way_split (S = {k1,k2}). -/
 theorem raw_conv_sparse_eq_dense
     {d : ℕ} (child : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k2.1 = k1.1 + 1)
     (delta1 delta2 : ℤ)
-    (raw_conv_before : Fin (2 * d - 1) → ℤ)
     (nz_list : Fin d → ℕ) (nz_count : ℕ)
+    (hnz_count : nz_count ≤ d)
+    (h_valid : ∀ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ < d)
+    (h_distinct : ∀ k₁ k₂ : Fin nz_count,
+      nz_list ⟨k₁.1, by omega⟩ = nz_list ⟨k₂.1, by omega⟩ → k₁ = k₂)
     (h_inv : ∀ i : Fin d, child i ≠ 0 ↔
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1)
-    -- Self-terms and mutual term are identical (not affected by sparse)
-    -- raw_conv_after_dense: result of applying dense cross-term loop
-    -- raw_conv_after_sparse: result of applying sparse cross-term loop
-    (raw_conv_dense raw_conv_sparse : Fin (2 * d - 1) → ℤ) :
+    -- Shared intermediate state (after self-terms + mutual term)
+    (raw_conv_after_self : Fin (2 * d - 1) → ℤ)
+    -- Dense cross-term update: iterate all j ≠ k1, k2
+    (raw_conv_dense : Fin (2 * d - 1) → ℤ)
+    (h_dense : ∀ t : Fin (2 * d - 1), raw_conv_dense t = raw_conv_after_self t
+      + (∑ j : Fin d, if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t.1
+          then 2 * delta1 * child j else 0)
+      + (∑ j : Fin d, if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t.1
+          then 2 * delta2 * child j else 0))
+    -- Sparse cross-term update: iterate nz_list entries ≠ k1, k2
+    (raw_conv_sparse : Fin (2 * d - 1) → ℤ)
+    (h_sparse : ∀ t : Fin (2 * d - 1), raw_conv_sparse t = raw_conv_after_self t
+      + (∑ idx : Fin nz_count,
+          let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩
+          if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t.1
+          then 2 * delta1 * child j else 0)
+      + (∑ idx : Fin nz_count,
+          let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩
+          if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t.1
+          then 2 * delta2 * child j else 0)) :
     raw_conv_dense = raw_conv_sparse := by
   sorry
+  -- funext t; rw [h_dense, h_sparse];
+  -- obtain ⟨h₁, h₂⟩ := sparse_cross_term_eq_dense ... t
+  -- rw [h₁, h₂]
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART D: Subtree Prune Rebuild (Claim 4.33)
@@ -257,34 +357,41 @@ theorem raw_conv_sparse_eq_dense
 -- After a subtree prune, child bins are reset and raw_conv is fully
 -- recomputed. The nz_list must be rebuilt from scratch. We must prove
 -- that the rebuild produces a valid nz_list for the new child state.
+--
+-- Code reference: run_cascade.py:1478-1487
+--   nz_count = 0
+--   for ii in range(d_child):
+--       if child[ii] != 0:
+--           nz_list[nz_count] = ii; nz_pos[ii] = nz_count; nz_count += 1
+--       else:
+--           nz_pos[ii] = -1
+--
+-- This is identical to the initial nz_list construction (lines 1091-1096),
+-- so Claim 4.33 also covers initialization correctness.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Claim 4.33: Rebuilding nz_list from scratch by iterating all d_child
     bins and collecting nonzero indices produces a valid nz_list satisfying
     the invariant of Claim 4.26.
 
-    This is straightforward: the rebuild loop is identical to the
-    initialization loop. The only subtlety is that nz_pos must also
-    be reset (zero bins get nz_pos = -1, nonzero bins get their
-    position in the list). -/
+    This covers both the post-subtree-prune rebuild AND the initial
+    construction (same procedure). The proof is identical to Claim 4.26
+    instantiated with the rebuild postconditions. -/
 theorem rebuild_nz_list_correct
     {d : ℕ} (child : Fin d → ℤ)
-    -- Rebuild procedure: scan all bins, collect nonzero
-    (nz_list : Fin d → ℕ) (nz_pos : Fin d → ℤ) (nz_count : ℕ)
-    -- Rebuild postconditions
-    (h_count : nz_count = (Finset.filter (fun i => child i ≠ 0) Finset.univ).card)
+    (nz_list : Fin d → ℕ) (nz_count : ℕ)
+    (hnz_count : nz_count ≤ d)
+    (h_valid : ∀ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ < d)
+    (h_distinct : ∀ k₁ k₂ : Fin nz_count,
+      nz_list ⟨k₁.1, by omega⟩ = nz_list ⟨k₂.1, by omega⟩ → k₁ = k₂)
     (h_nonzero : ∀ k : Fin nz_count,
-      child ⟨nz_list ⟨k.1, by omega⟩, by omega⟩ ≠ 0)
+      child ⟨nz_list ⟨k.1, by omega⟩, h_valid k⟩ ≠ 0)
     (h_complete : ∀ i : Fin d, child i ≠ 0 →
-      ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1)
-    (h_pos_nz : ∀ i : Fin d, child i ≠ 0 →
-      nz_list ⟨(nz_pos i).toNat, by omega⟩ = i.1)
-    (h_pos_zero : ∀ i : Fin d, child i = 0 → nz_pos i = -1) :
-    -- The invariant holds
-    (Finset.image (fun k : Fin nz_count => (⟨nz_list ⟨k.1, by omega⟩, by omega⟩ : Fin d))
-      Finset.univ) =
-    Finset.filter (fun i => child i ≠ 0) Finset.univ := by
-  sorry
+      ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1) :
+    -- The biconditional invariant holds
+    ∀ i : Fin d, child i ≠ 0 ↔
+      ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1 := by
+  sorry  -- Identical to nz_list_invariant; factor into shared lemma if desired
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART E: Gating Correctness (Claim 4.34)
@@ -313,7 +420,7 @@ theorem sparse_gate_correctness
     (h_deterministic : ∀ r₁ r₂ : Fin (2 * d - 1) → ℤ,
       r₁ = r₂ → pruned r₁ = pruned r₂) :
     pruned raw_conv_dense = pruned raw_conv_sparse := by
-  sorry  -- Immediate from h_eq and h_deterministic
+  sorry  -- Immediate: exact h_deterministic _ _ h_eq
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART F: End-to-End Soundness (Claim 4.35)
@@ -333,7 +440,7 @@ theorem sparse_gate_correctness
        (the Gray code traversal is unchanged — Claims 4.9, 4.22).
     2. For each child, the incremental autoconvolution update produces
        identical raw_conv arrays (Claim 4.32):
-       - Self-terms and mutual term: unchanged between sparse and dense.
+       - Self-terms and mutual term: computed identically (before the branch).
        - Cross-terms: identical by Claims 4.26, 4.31.
        - After subtree prune rebuild: invariant restored (Claim 4.33).
     3. The pruning test reads only raw_conv and child, both identical,
@@ -341,16 +448,33 @@ theorem sparse_gate_correctness
     4. The quick-check, canonicalization, and survivor storage are
        unchanged, so the output sets are identical.
 
+    The hypotheses formalize this chain: both survivor sets are defined
+    as the same enumeration filtered by the same test, and the test
+    produces the same result for each child because raw_conv is identical.
+
     Depends on: GrayCode (4.9), IncrementalAutoconv (4.2),
                 GrayCodeSubtreePruning (4.22), Claims 4.26–4.34. -/
 theorem sparse_cross_term_sound
     {d_parent : ℕ} (parent : Fin d_parent → ℕ)
     (lo hi : Fin d_parent → ℕ)
     (m : ℕ) (c_target : ℝ) (n_half_child : ℕ)
-    -- S_sparse: survivors with sparse optimization
-    -- S_dense: survivors without sparse optimization
-    (S_sparse S_dense : Finset (Fin (2 * d_parent) → ℕ)) :
+    -- The Cartesian product of all children of this parent
+    (children : Finset (Fin (2 * d_parent) → ℕ))
+    -- Pruning decision: does this child survive? (depends on raw_conv)
+    (survives_dense survives_sparse : (Fin (2 * d_parent) → ℕ) → Prop)
+    -- Key: both paths make the same decision for each child.
+    -- Justified by Claim 4.32 (raw_conv identical) + Claim 4.34 (gate).
+    (h_same : ∀ child ∈ children, (survives_sparse child ↔ survives_dense child))
+    -- Survivor sets defined by membership
+    (S_sparse S_dense : Finset (Fin (2 * d_parent) → ℕ))
+    (h_S_dense : ∀ c, c ∈ S_dense ↔ c ∈ children ∧ survives_dense c)
+    (h_S_sparse : ∀ c, c ∈ S_sparse ↔ c ∈ children ∧ survives_sparse c) :
     S_sparse = S_dense := by
   sorry
+  -- Finset.ext; intro c
+  -- rw [h_S_sparse, h_S_dense]
+  -- constructor
+  -- · rintro ⟨hc, hp⟩; exact ⟨hc, (h_same c hc).mp hp⟩
+  -- · rintro ⟨hc, hp⟩; exact ⟨hc, (h_same c hc).mpr hp⟩
 
 end -- noncomputable section
