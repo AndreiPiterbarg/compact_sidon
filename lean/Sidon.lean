@@ -44,7 +44,13 @@ import Sidon.SlidingWindow
 -- Gray code subtree pruning (Claims 4.14–4.25)
 import Sidon.GrayCodeSubtreePruning
 
--- Univariate sweep skip (Claims 4.36–4.46)
+-- Threshold lookup table optimization (Claims 5.3–5.12)
+import Sidon.ThresholdLookupTable
+
+-- Staging buffer optimization (Claims 5.13–5.25)
+import Sidon.StagingBuffer
+
+-- Univariate sweep skip (Claims 4.36–4.48)
 import Sidon.UnivariateSweepSkip
 
 -- Asymmetry bound (Claim 2.1)
