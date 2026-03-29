@@ -83,4 +83,13 @@ SYNC_EXCLUDES = [
     "*.dll",
     "*.so",
     "*.egg-info",
+    "lean",
+    ".lake",
+    "proof",
+    "prompts",
+    "docs",
+    "baseline",
+    "*.npy",
+    "*.dat",
+    "*.pdf",
 ]
