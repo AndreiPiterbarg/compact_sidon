@@ -4,7 +4,7 @@ import Sidon.Defs
 set_option linter.mathlibStandardSet false
 
 open scoped BigOperators
-open scoped Real
+open scoped Realok 
 open scoped Nat
 open scoped Classical
 open scoped Pointwise

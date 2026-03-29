@@ -53,8 +53,7 @@ quick-check stores a previously-valid (ell, s_lo) pair, so qc_ell is
 always in [2, 2*d_child]. This is derivable from the loop structure
 of run_cascade.py and does not require a separate theorem.
 
-STATUS: PROOF OBLIGATIONS — proofs marked `sorry` are open obligations.
-Claims 5.3 and 5.12 are proved (definitional equality / rewriting).
+STATUS: ALL PROOFS COMPLETE — 0 sorry, all 9 theorems verified by Lean 4.
 -/
 
 import Mathlib
@@ -180,10 +179,10 @@ theorem runtime_threshold_eq_dyn_it
 theorem w_int_main_scan_in_range
     {d : ℕ} (child : Fin d → ℕ) (m : ℕ)
     (h_sum : ∑ i, child i = m)
-    (lo_bin hi_bin : ℕ) (hlo : lo_bin ≤ hi_bin) (hhi : hi_bin < d) :
+    (lo_bin hi_bin : ℕ) (_hlo : lo_bin ≤ hi_bin) (_hhi : hi_bin < d) :
     (∑ i ∈ Finset.univ.filter (fun (i : Fin d) =>
       lo_bin ≤ i.val ∧ i.val ≤ hi_bin), child i) ≤ m := by
-  sorry  -- Finset.sum_le_univ_sum_of_nonneg + h_sum: filtered sum ≤ univ sum = m
+  exact h_sum ▸ Finset.sum_le_sum_of_subset ( fun i hi => by aesop )
 
 /-- Claim 5.6: In subtree pruning, W_int_max = W_int_fixed + W_int_unfixed ≤ m.
 
@@ -211,9 +210,19 @@ theorem w_int_max_subtree_in_range
       ∑ i ∈ Finset.univ.filter (fun (i : Fin d_parent) =>
         p_boundary ≤ i.val), parent i) :
     W_int_fixed + W_int_unfixed ≤ m := by
-  sorry  -- Key step: reindex child sums in [0,2p) as parent sums in [0,p) via h_split.
-         -- Then: parent[0,p) + parent[p,d) = ∑ parent = m.
-         -- Both hWf_bound and hWu_bound are ≤ these respective parent sums.
+  refine le_trans ( add_le_add hWf_bound hWu_bound ) ?_;
+  have h_child_sum_fixed : ∑ i ∈ Finset.univ.filter (fun i => i.val < 2 * p_boundary), child i = ∑ i ∈ Finset.univ.filter (fun i => i.val < p_boundary), parent i := by
+    have h_child_sum_fixed : Finset.filter (fun i : Fin (2 * d_parent) => i.val < 2 * p_boundary) Finset.univ = Finset.image (fun p : Fin d_parent => ⟨2 * p.val, by linarith [Fin.is_lt p, hp]⟩) (Finset.univ.filter (fun p : Fin d_parent => p.val < p_boundary)) ∪ Finset.image (fun p : Fin d_parent => ⟨2 * p.val + 1, by linarith [Fin.is_lt p, hp]⟩) (Finset.univ.filter (fun p : Fin d_parent => p.val < p_boundary)) := by
+      ext ⟨i, hi⟩; simp [Finset.mem_union, Finset.mem_image];
+      exact ⟨ fun hi => by rcases Nat.even_or_odd' i with ⟨ k, rfl | rfl ⟩ <;> [ left; right ] <;> exact ⟨ ⟨ k, by linarith ⟩, by linarith, rfl ⟩, fun hi => by rcases hi with ( ⟨ a, ha, rfl ⟩ | ⟨ a, ha, rfl ⟩ ) <;> linarith ⟩;
+    simp_all +decide;
+    rw [ Finset.sum_union ] <;> norm_num [ ← h_split ];
+    · rw [ Finset.sum_add_distrib, Finset.sum_image, Finset.sum_image ] <;> norm_num [ Fin.ext_iff ];
+    · norm_num [ Finset.disjoint_left ];
+      intros; omega;
+  rw [ ← h_sum_parent, h_child_sum_fixed ];
+  rw [ ← Finset.sum_union ] ; exact Finset.sum_le_sum_of_subset ( by aesop_cat ) ;
+  exact Finset.disjoint_filter.mpr fun _ _ _ _ => by linarith;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART C: Table Index Bounds (Claim 5.7)
@@ -232,8 +241,11 @@ theorem table_index_in_bounds
     (h_ell : ell_idx < ell_count)
     (h_w : W_int ≤ m) :
     ell_idx * (m + 1) + W_int < ell_count * (m + 1) := by
-  sorry  -- nlinarith [Nat.lt_succ_of_le h_w, Nat.succ_le_of_lt h_ell,
-         --            Nat.mul_le_mul_right (m + 1) (Nat.succ_le_of_lt h_ell)]
+  have h1 : ell_idx + 1 ≤ ell_count := by omega
+  calc ell_idx * (m + 1) + W_int
+      < ell_idx * (m + 1) + (m + 1) := by omega
+    _ = (ell_idx + 1) * (m + 1) := by ring
+    _ ≤ ell_count * (m + 1) := Nat.mul_le_mul_right _ h1
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART D: Pruning Soundness (Claims 5.11, 5.12)
@@ -245,26 +257,33 @@ theorem table_index_in_bounds
     1. h_exceeds_table: ws > table_entry(ℓ, W_int)
     2. table_entry = runtime_threshold         (Claim 5.3, rfl)
     3. runtime_threshold = dyn_it              (runtime_threshold_eq_dyn_it)
-    4. → ws > dyn_it(ℓ, W_int)                (from 1-3)
-    5. dyn_it ≥ ⌊exact_threshold⌋             (DynamicThreshold.dyn_it_conservative)
-    6. → ws > ⌊exact_threshold⌋               (from 4-5)
+    4. Rewrite h_exceeds_table: ws > dyn_it(ℓ, W_int)  (from 1-3)
+    5. Apply pruning_soundness from DynamicThreshold.lean (uses dyn_it_conservative
+       internally to show ⌊exact_threshold⌋ ≤ dyn_it)
+    6. → ws > ⌊exact_threshold⌋
 
     The exact threshold is A = c_target·m²·ℓ/(4n) + 1 + 2·W_int, from the
     mathematical pruning condition: if ∑conv[k] > ⌊A⌋ then the composition
-    can be soundly pruned. -/
+    can be soundly pruned.
+
+    The hypothesis hℓn : ℓ ≤ 4 * n_half_child matches the algorithm's
+    window range ℓ ∈ {2, ..., 2·d_child} = {2, ..., 4·n_half_child}. -/
 theorem pruning_soundness_with_lut
     (c_target : ℝ) (m n_half_child ℓ : ℕ) (W_int : ℕ) (ws : ℕ)
-    (hm : 0 < m) (hn : 0 < n_half_child) (hℓ : 0 < ℓ) (hW : W_int ≤ m)
+    (hm : 0 < m) (hn : 0 < n_half_child) (hW : W_int ≤ m)
     (hct : 0 ≤ c_target) (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200)
+    (hℓn : ℓ ≤ 4 * n_half_child)
     (h_exceeds_table : pruning_condition ws
       (table_entry c_target m n_half_child ℓ W_int)) :
     let exact_threshold :=
       ⌊c_target * (m : ℝ) ^ 2 * (ℓ : ℝ) / (4 * (n_half_child : ℝ))
        + 1 + 2 * (W_int : ℝ)⌋
     pruning_condition ws exact_threshold := by
-  sorry  -- Rewrite table_entry → runtime_threshold (rfl) → dyn_it
-         -- (runtime_threshold_eq_dyn_it), then apply
-         -- DynamicThreshold.pruning_soundness with matching hypotheses.
+  -- Chain: table_entry = runtime_threshold = dyn_it, then apply pruning_soundness
+  have h1 := table_entry_eq_runtime c_target m n_half_child ℓ W_int
+  have h2 := runtime_threshold_eq_dyn_it c_target m n_half_child ℓ W_int
+  rw [h1, h2] at h_exceeds_table
+  exact pruning_soundness c_target m n_half_child ℓ W_int ws hm hn hW hct hct_upper hm_upper hℓn h_exceeds_table
 
 /-- Claim 5.12: The pruning predicate is identical whether the threshold
     comes from the table or the runtime formula. Since table_entry and

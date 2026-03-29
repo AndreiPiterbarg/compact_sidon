@@ -40,8 +40,7 @@ Removed from prior version (trivially tautological — see audit):
   5.21      Was: n_surv counts all (conclusion was rfl)
   5.24      Was: overflow detection preserved (conclusion was Iff.rfl)
 
-STATUS: PROOF OBLIGATIONS ONLY — no proofs are attempted here.
-Each `sorry` marks an open obligation.
+STATUS: ALL PROOFS COMPLETE — 12 theorems, 0 sorry.
 -/
 
 import Mathlib
@@ -111,14 +110,15 @@ def staging_invariant {d_child : ℕ} (s : StagingState d_child) : Prop :=
 theorem staging_cap_positive (d_child : ℕ) (hd : 0 < d_child) :
     let stage_cap := if d_child ≤ 32 then 512 else 256
     0 < stage_cap := by
-  sorry  -- split_ifs + norm_num
+  split_ifs <;> omega
 
 /-- Initial state satisfies the invariant. -/
 theorem staging_initial_invariant (d_child : ℕ) (max_survivors : ℕ)
     (hd : 0 < d_child) (hm : 0 < max_survivors) :
     let stage_cap := if d_child ≤ 32 then 512 else 256
-    staging_invariant ⟨0, 0, stage_cap, max_survivors⟩ := by
-  sorry  -- n_staged=0 satisfies all three conjuncts; split_ifs + simp + omega
+    staging_invariant (⟨0, 0, stage_cap, max_survivors⟩ : StagingState d_child) := by
+  simp only [staging_invariant, Nat.min_def]
+  split_ifs <;> omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART B: Staging Write Correctness (Claim 5.14)
@@ -143,7 +143,7 @@ theorem n_staged_invariant_maintained
     let n_staged_after_write := n_staged_before + 1
     let n_staged_after := if n_staged_after_write = stage_cap then 0 else n_staged_after_write
     n_staged_after ≤ stage_cap := by
-  sorry  -- split_ifs + omega
+  dsimp only; split_ifs <;> omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART C: Flush Correctness (Claims 5.16–5.17)
@@ -174,7 +174,7 @@ theorem flush_base_correct
     (h_enough : stage_cap ≤ n_surv + 1) :
     let flush_base := n_surv + 1 - stage_cap
     flush_base + stage_cap - 1 = n_surv := by
-  sorry  -- omega
+  omega
 
 /-- Claim 5.17: The flush writes staged rows to valid out_buf positions.
 
@@ -188,7 +188,7 @@ theorem flush_writes_correct_positions
     (fi : ℕ) (hfi : fi < stage_cap) :
     let flush_base := n_surv + 1 - stage_cap
     flush_base + fi < max_survivors := by
-  sorry  -- omega
+  omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART D: Final Flush Correctness (Claims 5.19–5.20)
@@ -215,7 +215,7 @@ theorem final_flush_base_correct
     (h_staged_le : n_staged ≤ min n_surv max_survivors) :
     let flush_base := min n_surv max_survivors - n_staged
     flush_base + n_staged = min n_surv max_survivors := by
-  sorry  -- Nat.sub_add_cancel h_staged_le
+  omega
 
 /-- Claim 5.20: The final flush writes all remaining rows to valid
     out_buf positions. -/
@@ -226,7 +226,7 @@ theorem final_flush_writes_valid
     (fi : ℕ) (hfi : fi < n_staged) :
     let flush_base := min n_surv max_survivors - n_staged
     flush_base + fi < max_survivors := by
-  sorry  -- omega from hfi, h_staged_le, and min_le_right
+  omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART E: No Data Loss (Claim 5.22)
@@ -260,9 +260,8 @@ theorem no_survivor_lost
       k % stage_cap < stage_cap ∧
       -- (c) the out_buf write position is in bounds
       k < max_survivors := by
-  sorry  -- (a) Nat.div_add_mod k stage_cap
-         -- (b) Nat.mod_lt k h_cap
-         -- (c) omega from h_fit (since written = total_survivors when h_fit holds)
+  intro written k hk
+  exact ⟨Nat.div_add_mod' k stage_cap, Nat.mod_lt k h_cap, by omega⟩
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART F: Data Integrity (Claim 5.23)
@@ -301,7 +300,7 @@ theorem survivor_content_identical
     (h_flush : ∀ i : Fin d_child, flushed_row i = staged_row i) :
     -- out_buf content equals original kernel's output
     ∀ i : Fin d_child, flushed_row i = original_row i := by
-  sorry  -- intro i; rw [h_flush i, h_staged i, h_orig i]
+  intro i; simp [h_flush i, h_staged i, h_orig i]
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART G: Index Mapping (Claim 5.26)
@@ -336,7 +335,7 @@ theorem staging_preserves_mapping
     (h_last : n_surv_at_flush = batch_start + stage_cap - 1) :
     let flush_base := n_surv_at_flush + 1 - stage_cap
     flush_base = batch_start := by
-  sorry  -- omega
+  omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART H: Overflow Boundary (Claim 5.27)
@@ -371,11 +370,11 @@ theorem overflow_preserves_invariant
     let s' : StagingState d_child :=
       ⟨s.n_staged, s.n_surv + 1, s.stage_cap, s.max_survivors⟩
     staging_invariant s' := by
-  sorry  -- unfold staging_invariant at *
-         -- obtain ⟨h1, h2, h3⟩ := h_inv
-         -- refine ⟨h1, ?_, h3⟩
-         -- simp only [Nat.min_def] at h2 ⊢
-         -- omega
+  unfold staging_invariant at *
+  obtain ⟨h1, h2, h3⟩ := h_inv
+  refine ⟨h1, ?_, h3⟩
+  simp only [Nat.min_def] at h2 ⊢
+  split_ifs at * <;> omega
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART I: End-to-End Equivalence (Claim 5.25)
@@ -426,7 +425,7 @@ theorem staged_kernel_equivalence
     -- Conclusion: output buffers agree on all written positions
     ∀ (k : Fin max_survivors), k.1 < min n_surv max_survivors →
       ∀ i : Fin d_child, out_buf_orig k i = out_buf_staged k i := by
-  sorry  -- intro k hk i
-         -- exact (h_stage_matches_orig k hk i).symm.trans (h_flush_correct k hk i).symm
+  intro k hk i
+  exact (h_stage_matches_orig k hk i).symm.trans (h_flush_correct k hk i).symm
 
 end -- noncomputable section
