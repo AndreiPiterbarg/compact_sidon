@@ -1163,22 +1163,34 @@ then either $P'$ or $\rev(P')$ is in the parent list, and $C'$ or
 $\rev(C')$ is among the tested children.
 \end{proposition}
 
-\subsection{Fused Generate-and-Prune Kernel}
+\subsection{Gray-Code Fused Kernel}
 
 At deep cascade levels, each parent may have millions of children.
-The fused kernel generates and tests each child inline via a
-Cartesian-product odometer, never materializing the full children
-array:
+The current CPU kernel enumerates the same child set as the naive
+Cartesian-product generator, but does so in mixed-radix Gray-code
+order and fuses generation, pruning, canonicalization, and survivor
+buffering into a single pass.  Consecutive children differ in exactly
+one split coordinate, so the autoconvolution and tracked window mass
+can be updated locally instead of recomputed from scratch:
 
 \begin{itemize}
-  \item \textbf{Incremental autoconvolution:} when only the last
-    cursor position changes, the raw
-    autoconvolution is updated in $O(d)$ instead of $O(d^2)$.
-  \item \textbf{Quick-check:} re-tries the previous killing window
-    before a full scan.
-  \item \textbf{Subtree pruning:} on deep carries, checks the
-    partial autoconvolution of fixed bins against worst-case unfixed
-    mass; if it exceeds the threshold, the entire subtree is skipped.
+  \item \textbf{Incremental updates:} every Gray-code step changes one
+    parent split, giving an $O(d)$ raw-convolution update and an
+    $O(1)$ update of the tracked quick-check window mass.
+  \item \textbf{Quick-check and ordered scans:} the previous killing
+    window is retried first; if that fails, windows are scanned in a
+    profile-guided order, but every admissible
+    $(\ell,s_{\mathrm{lo}})$ is still checked before a child is
+    declared a survivor.
+  \item \textbf{Lookup-table thresholds and staged survivor writes:}
+    the conservative integer threshold is precomputed as a table in
+    $(\ell,W_{\mathrm{int}})$, and surviving rows are batched through
+    an L1-resident staging buffer before they are flushed to the main
+    output array.
+  \item \textbf{Block skipping:} subtree pruning uses partial
+    autoconvolutions of fixed prefixes, and the innermost Gray-code
+    sweep can be fast-forwarded when a univariate range check proves
+    that the same killing window eliminates the rest of that sweep.
 \end{itemize}
 
 
@@ -1210,10 +1222,10 @@ array:
     $x_{\text{cap}} = \min(x_{\text{cap}}^{\mathrm{TV}},
     x_{\text{cap}}^{\mathrm{CS}})$
   \ForAll{parent $P \in \text{survivors}_{k-1}$}
-    \ForAll{children $C$ of $P$ (dyadic split with energy cap)}
+    \ForAll{children $C$ of $P$ in mixed-radix Gray-code order (dyadic split with energy cap)}
       \State Apply asymmetry pruning to $C$
       \If{not asymmetry-pruned}
-        \State Scan all windows of $C$ via prefix-sum autoconvolution
+        \State Re-try the previous killing window; if needed, scan all windows of $C$ in profile-guided order using the lookup-table threshold
         \If{some window exceeds the dynamic threshold}
           \State Prune $C$
         \Else
@@ -1325,8 +1337,9 @@ shown to be covered by a checked ancestor and all its refinements.
 For each composition that is not eliminated by asymmetry, every valid
 window $(\ell, k)$ with $2 \le \ell \le 2d$ and all valid starting
 positions $k$ must be tested before the composition is declared a
-survivor.  Early exit is permitted only after a pruning window has been
-found.
+survivor.  The scan order may be profile-guided and may begin with a
+quick-check window carried over from the previous child, but early exit
+is permitted only after a pruning window has been found.
 
 \subsection{Invariant 3: Conservative Arithmetic}
 
