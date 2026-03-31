@@ -80,17 +80,17 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
         for i in range(d):
-            ci = np.int32(batch_int[b, i])
+            ci = np.int64(batch_int[b, i])
             if ci != 0:
-                conv[2 * i] += ci * ci
+                conv[2 * i] += np.int32(ci * ci)
                 for j in range(i + 1, d):
-                    cj = np.int32(batch_int[b, j])
+                    cj = np.int64(batch_int[b, j])
                     if cj != 0:
-                        conv[i + j] += np.int32(2) * ci * cj
+                        conv[i + j] += np.int32(2 * ci * cj)
 
         prefix_c = np.zeros(d + 1, dtype=np.int32)
         for i in range(d):
-            prefix_c[i + 1] = prefix_c[i] + np.int32(batch_int[b, i])
+            prefix_c[i + 1] = prefix_c[i] + np.int32(np.int64(batch_int[b, i]))
 
         pruned = False
         for ell in range(2, max_ell + 1):
