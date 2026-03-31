@@ -1369,13 +1369,30 @@ level.  The dyadic splitting with energy cap generates all valid
 children (Section~\ref{subsec:energy-cap}), and children exceeding the
 energy cap are provably pruned.
 
+\subsection{Invariant 5: Optimization Preservation}
+
+The current implementation layers several performance-only
+transformations on top of the logical search: mixed-radix Gray-code
+enumeration, lookup-table threshold evaluation, staged survivor writes,
+subtree pruning, and univariate sweep skipping.  For the proof, these
+optimizations are admissible only if they preserve two things:
+\begin{itemize}
+  \item the set of children that are logically visited at each level;
+  \item the prune/survive verdict associated to each visited child.
+\end{itemize}
+The repository therefore keeps these obligations separate from the core
+continuous-to-discrete reduction: the analytic theorem depends only on
+the terminal certificate, while the implementation audit tracks why the
+optimized kernel still computes that certificate correctly.
+
 
 % ======================================================================
 \section{Computational Verification}\label{sec:verification}
 % ======================================================================
 
-The implementation was audited at three levels: enumeration,
-test-value evaluation, and terminal certification.
+The implementation was audited at four levels: enumeration,
+test-value evaluation, implementation-preserving kernel
+optimizations, and terminal certification.
 
 \subsection{Composition Generators}
 
@@ -1412,6 +1429,24 @@ test-value evaluation, and terminal certification.
     functions and is symmetric under reversal.
 \end{itemize}
 
+\subsection{Implementation-Preserving Kernel Optimizations}
+
+\begin{itemize}
+  \item The mixed-radix Gray-code kernel was checked against the
+    earlier lexicographic fused kernel on representative parents across
+    multiple child dimensions, confirming identical canonical survivor
+    sets and complete child coverage.
+  \item The threshold lookup table is only a cache of the same
+    conservative integer comparison used by the direct per-window
+    computation, so it changes evaluation cost rather than the pruning
+    predicate.
+  \item The staging buffer, subtree-pruning fast-forward, and
+    univariate sweep-skip mechanisms are treated as separate audit
+    items: each must preserve the survivor stream and may skip blocks
+    only when those blocks are already certified prunable by a sound
+    comparison.
+\end{itemize}
+
 \subsection{Formula Cross-Check}
 
 The integer threshold used in the search is algebraically equivalent to
@@ -1444,7 +1479,12 @@ continuous test values, discretization error, pruning lemmas, and the
 final normalization argument.  The key analytic files for the present
 paper are \path{Sidon/TestValueBounds.lean},
 \path{Sidon/DiscretizationError.lean}, and
-\path{Sidon/FinalResult.lean}.
+\path{Sidon/FinalResult.lean}.  Separate implementation-audit files
+\path{Sidon/GrayCodeSubtreePruning.lean},
+\path{Sidon/ThresholdLookupTable.lean},
+\path{Sidon/StagingBuffer.lean}, and
+\path{Sidon/UnivariateSweepSkip.lean} isolate the proof obligations
+introduced by the current Gray-code CPU kernel.
 
 Because \path{autoconvolution_ratio} is encoded using
 \path{ENNReal.toReal}, the formal theorem carries an explicit
