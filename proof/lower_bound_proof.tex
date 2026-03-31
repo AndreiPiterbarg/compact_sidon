@@ -989,9 +989,13 @@ and only the stubborn survivors need to be examined more closely.
     computational budget is reached.
 \end{enumerate}
 
-Figure~\ref{fig:cascade-flow} summarizes the recorded certificate run
+Figure~\ref{fig:cascade-flow} summarizes the archived certificate run
 \path{data/cpu_cascade_20260319_201644.json}, including the exact
-survivor counts at each dyadic level.
+survivor counts at each dyadic level.  The repository also contains
+later run artefacts, notably \path{data/cpu_cascade_20260325_162306.json}
+and \path{data/checkpoint_meta.json}; these record subsequent
+implementation runs and resume metadata, not the terminal certificate
+quoted in Theorem~\ref{thm:cascade-sound}.
 
 \begin{figure}[t]
 \centering
@@ -1125,7 +1129,11 @@ Section~\ref{sec:correctness} explain why that terminal outcome implies
 the universal quantification appearing above.  The intermediate cascade
 levels matter only as an efficient route to this terminal statement;
 the final Lean theorem depends only on the quantification over all
-compositions in $\N^{128}$.
+compositions in $\N^{128}$.  Later repository files
+\path{data/cpu_cascade_20260325_162306.json} (a lower-target run) and
+\path{data/checkpoint_meta.json} (checkpoint metadata for a resumable
+target-$\tfrac75$ search) are therefore supplementary implementation
+records rather than replacements for the archived certificate.
 \end{proof}
 
 \subsection{Canonical Handling Across Levels}
@@ -1466,7 +1474,11 @@ the accompanying Lean formalization, this finite computation is
 packaged as the axiom \path{cascade_all_pruned}, which states
 directly that every terminal composition at $d=128$ (equivalently,
 $n=64$) with total mass $m=20$ has some window whose test value
-exceeds the corrected dynamic threshold at target $\tfrac75$.
+exceeds the corrected dynamic threshold at target $\tfrac75$.  The
+newer files \path{data/cpu_cascade_20260325_162306.json} and
+\path{data/checkpoint_meta.json} are kept in the repository as later
+run and resume artefacts, but they are not the terminal certificate
+imported by Lean.
 
 \subsection{Lean Formalization Status}
 
