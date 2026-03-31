@@ -86,7 +86,7 @@ where $W = \frac{1}{m} \sum_{i \in \mathcal{B}} c_i$ is the total mass in bins c
 
 **What needs proof:** This dynamic threshold is a valid (sound) refinement of Lemma 3 of CS14. It is tighter than the uniform per-window correction $(4n/\ell)(2/m + 1/m^2)$ because $W \leq 1$ always, and for windows that don't cover all bins, $W < 1$ strictly.
 
-**Code reference:** `run_cascade.py:64` — `dyn_base = c_target * m^2 + 1 + 1e-9*m^2`, then per-window `dyn_it = floor((dyn_base + 2*W_int) * ell/(4*n) * (1 - 4*DBL_EPS))`.
+**Code reference:** `run_cascade.py` — `dyn_it = floor((c_target*m^2*ell/(4*n) + 1 + 1e-9*m^2 + 2*W_int) * (1 - 4*DBL_EPS))`. Only `c_target*m^2` is scaled by `ell/(4n)`; correction terms `(1 + eps + 2*W_int)` are NOT scaled.
 
 **Proof coverage:** `proof/part1_framework.md` Verification 4, `proof/part3_autoconvolution_test_values_and_window_scan.md` Item 5 (normalization equivalence), Item 9 (contributing bins). **PROVED + VERIFIED.**
 
@@ -172,12 +172,12 @@ $$\text{ws} > \text{dyn\_it}$$
 
 where $\text{ws} = \sum_{k=s_{\text{lo}}}^{s_{\text{lo}} + \ell - 2} \text{conv}[k]$ (integer convolution prefix-sum difference) and:
 
-$$\text{dyn\_it} = \lfloor (c_{\text{target}} \cdot m^2 + 1 + 10^{-9} m^2 + 2 W_{\text{int}}) \cdot \frac{\ell}{4n} \cdot (1 - 4\varepsilon) \rfloor$$
+$$\text{dyn\_it} = \lfloor (c_{\text{target}} \cdot m^2 \cdot \frac{\ell}{4n} + 1 + 10^{-9} m^2 + 2 W_{\text{int}}) \cdot (1 - 4\varepsilon) \rfloor$$
 
-with $W_{\text{int}} = \sum_{i \in \mathcal{B}} c_i$ (contributing bin masses in integer coords) and $\varepsilon = 2.22 \times 10^{-16}$ (machine epsilon).
+with $W_{\text{int}} = \sum_{i \in \mathcal{B}} c_i$ (contributing bin masses in integer coords) and $\varepsilon = 2.22 \times 10^{-16}$ (machine epsilon). **Only $c_{\text{target}} \cdot m^2$ is scaled by $\ell/(4n)$; the correction terms $(1 + 10^{-9}m^2 + 2W_{\text{int}})$ are NOT scaled.**
 
 **What needs proof:**
-1. The integer-space formula is algebraically equivalent to the MATLAB continuous-space formula.
+1. The integer-space formula correctly implements the per-window dynamic threshold from CS14 Lemma 3, with correction $(4n/\ell)(1/m^2 + 2W/m)$ in the test-value domain.
 2. The $+10^{-9} m^2$ term makes the threshold **strictly higher** (more conservative — harder to prune).
 3. The $(1 - 4\varepsilon)$ factor guards against floating-point rounding, dominated by the conservative $10^{-9}$ term.
 4. Using strict `>` (integer comparison) for pruning is sound given the floor operation.

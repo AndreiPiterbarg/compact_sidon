@@ -137,11 +137,11 @@ The number of ways to choose d-1 bar positions from S+d-1 total positions is C(S
 
 **Statement.** The integer-space dynamic threshold is:
 
-    dyn_base = c_target·m² + 1 + 1e-9·m²
-    dyn_x = (dyn_base + 2·W_int) · ℓ/(4n)
+    dyn_x = c_target·m²·ℓ/(4n) + 1 + 1e-9·m² + 2·W_int
     dyn_it = ⌊dyn_x · (1 - 4·ε_mach)⌋
 
-and pruning when ws > dyn_it is sound.
+Only c_target·m² is scaled by ℓ/(4n). The correction terms (1 + eps + 2·W_int) are NOT scaled.
+Pruning when ws > dyn_it is sound.
 
 **Derivation from MATLAB.**
 
@@ -426,7 +426,7 @@ Combined with 0 ≤ i ≤ d-1: i ∈ [max(0, s_lo-(d-1)), min(d-1, s_lo+ℓ-2)].
 | correction(n,m) = 2n·(2/m + 1/m²) | pruning.py:11-13 | **VALID** | Global upper bound on window correction; per-window: (4n/ℓ)·(2/m + 1/m²) |
 | asymmetry_threshold = √(c_target/2) | pruning.py:16-22 | **VALID** | Direct Cauchy-Schwarz argument |
 | count_compositions = C(S+d-1, d-1) | pruning.py:25-29 | **VALID** | Stars-and-bars |
-| dyn_base = c_target·m²+1+1e-9·m² | run_cascade.py:63-64 | **VALID** | Exact MATLAB match + FP margin |
+| dyn_x = c_target·m²·ℓ/(4n)+1+eps+2·W_int | run_cascade.py | **VALID** | Only c_target·m² scaled by ℓ/(4n) |
 | one_minus_4eps = 1-4·DBL_EPS | run_cascade.py:66-67 | **VALID** | Conservative floor guarantee |
 | x_cap test-value | run_cascade.py:997-999 | **VALID** | ℓ=2 diagonal bound |
 | x_cap Cauchy-Schwarz | run_cascade.py:1000-1003 | **VALID** | Direct bound, no correction |

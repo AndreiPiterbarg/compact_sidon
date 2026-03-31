@@ -248,18 +248,11 @@ Additionally, `_canonicalize_inplace` was verified against pure-Python `min(chil
 
 ### Proof of Equivalence (Up to FMA Boundary Cases)
 
-**Threshold equivalence:** The fused kernel (lines 554-601) precomputes:
+**Threshold equivalence:** Both the fused kernel and `_prune_dynamic_int32` precompute:
 ```
-dyn_base = c_target * m^2 + 1 + 1e-9 * m^2
-dyn_base_ell_arr[ell-2] = dyn_base * ell / (4 * n_half_child)
-two_ell_arr[ell-2]      = 2 * ell / (4 * n_half_child)
+ct_base_ell_arr[ell] = c_target * m^2 * ell / (4 * n_half_child)
 ```
-
-`_prune_dynamic_int32` (lines 64-77) precomputes the identical values with a different index convention:
-```
-dyn_base_ell_arr[ell] = dyn_base * ell / (4 * n_half)
-two_ell_inv_4n_arr[ell] = 2 * ell / (4 * n_half)
-```
+Only `c_target * m^2` is scaled by `ell/(4n)`. The correction terms `(1 + 1e-9*m^2 + 2*W_int)` are added directly in the inner loop without the `ell/(4n)` factor.
 
 With `n_half_child = d_child/2 = d_parent`, both compute identical floating-point constants.
 

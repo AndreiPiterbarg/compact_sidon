@@ -31,7 +31,7 @@ All six independent audits confirm the code is mathematically correct and conser
 The integer-space threshold formula is algebraically equivalent to the MATLAB's continuous-space formula:
 
 - **MATLAB:** `boundToBeat = (lowerBound + gridSpace^2) + 2*gridSpace*(contributing_masses)`
-- **Python:** `dyn_base = c_target*m^2 + 1 + 1e-9*m^2`, then `dyn_it = int64((dyn_base + 2*W_int) * ell/(4*n_half) * (1 - 4*DBL_EPS))`
+- **Python:** `dyn_it = int64((c_target*m^2*ell/(4*n_half) + 1 + 1e-9*m^2 + 2*W_int) * (1 - 4*DBL_EPS))` — only `c_target*m^2` is scaled by `ell/(4n)`; correction terms `(1 + eps + 2*W_int)` are NOT scaled
 
 Two safety margins are present:
 
