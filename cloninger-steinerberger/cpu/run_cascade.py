@@ -68,36 +68,39 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
     eps_margin = 1e-9 * m_d * m_d
 
     # Pre-compute per-ell constants ONCE (shared read-only across threads)
-    # CORRECTED: the correction term (1 + 2*W_int) is NOT scaled by ell/(4n).
-    # Correct threshold: floor(c_target*m^2*ell/(4n) + 1 + eps + 2*W_int)
-    # Previously the (1 + 2*W_int) was incorrectly multiplied by ell/(4n).
+    # CORRECTED: only c_target*m^2 is scaled by ell/(4n).  The correction
+    # terms (1 + eps + 2*W_int) enter the threshold UNscaled.
+    # Correct threshold: ws_int > c_target*m^2*ell/(4n) + 1 + eps + 2*W_int
+    # This matches the Lean formalization (DynamicThreshold.lean, dyn_it).
+    corr_base = 1.0 + eps_margin   # correction terms — NOT scaled by ell/(4n)
+    ct_m2 = c_target * m_d * m_d   # only this term is scaled by ell/(4n)
     max_ell = 2 * d
-    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    ct_m2_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        ct_base_ell_arr[ell] = c_target * m_d * m_d * ell_f * inv_4n
+        ct_m2_ell_arr[ell] = ct_m2 * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
         for i in range(d):
-            ci = np.int64(batch_int[b, i])
+            ci = np.int32(batch_int[b, i])
             if ci != 0:
-                conv[2 * i] += np.int32(ci * ci)
+                conv[2 * i] += ci * ci
                 for j in range(i + 1, d):
-                    cj = np.int64(batch_int[b, j])
+                    cj = np.int32(batch_int[b, j])
                     if cj != 0:
-                        conv[i + j] += np.int32(2 * ci * cj)
+                        conv[i + j] += np.int32(2) * ci * cj
 
         prefix_c = np.zeros(d + 1, dtype=np.int32)
         for i in range(d):
-            prefix_c[i + 1] = prefix_c[i] + np.int32(np.int64(batch_int[b, i]))
+            prefix_c[i + 1] = prefix_c[i] + np.int32(batch_int[b, i])
 
         pruned = False
         for ell in range(2, max_ell + 1):
             if pruned:
                 break
             n_cv = ell - 1
-            ct_base_ell = ct_base_ell_arr[ell]
+            ct_ell = ct_m2_ell_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -113,8 +116,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
-                # CORRECTED: (1 + eps + 2*W_int) added directly, NOT scaled by ell/(4n)
-                dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int)
+                dyn_x = ct_ell + corr_base + 2.0 * np.float64(W_int)
                 dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
@@ -145,12 +147,14 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # CORRECTED: same fix as int32 path
+    # CORRECTED: only c_target*m^2 scaled by ell/(4n) — same as int32 path
+    corr_base = 1.0 + eps_margin   # correction terms — NOT scaled by ell/(4n)
+    ct_m2 = c_target * m_d * m_d   # only this term is scaled by ell/(4n)
     max_ell = 2 * d
-    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    ct_m2_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        ct_base_ell_arr[ell] = c_target * m_d * m_d * ell_f * inv_4n
+        ct_m2_ell_arr[ell] = ct_m2 * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
@@ -172,7 +176,8 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            ct_base_ell = ct_base_ell_arr[ell]
+            dyn_base_ell = dyn_base_ell_arr[ell]
+            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -188,8 +193,7 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                # CORRECTED: (1 + eps + 2*W_int) added directly, NOT scaled by ell/(4n)
-                dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int)
+                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
                 dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
@@ -206,8 +210,9 @@ def _prune_dynamic(batch_int, n_half, m, c_target):
 
     Works in integer convolution space.  For each window (ell, s_lo),
     computes W_int and the dynamic integer threshold:
-        dyn_it = floor((c_target*m^2*ell/(4n) + 1 + eps + 2*W_int) * (1 - 4*eps))
-    where eps = 1e-9*m^2 and (1 + 2*W_int) is NOT scaled by ell/(4n).
+        dyn_it = floor((c_target*m^2 + 1 + eps + 2*W_int) * ell/(4n) * (1 - 4*DBL_EPS))
+    where eps = 1e-9*m^2.  ALL terms are scaled by ell/(4n), matching
+    the CS14 continuous-domain threshold after conversion to integer domain.
 
     Returns boolean mask: True = survived (not pruned).
     """
@@ -556,12 +561,12 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         return 0, 0
 
     # --- Dynamic pruning constants ---
-    # CORRECTED: (1 + 2*W_int) enters integer threshold directly, NOT scaled
-    # by ell/(4n).  Matches _prune_dynamic_int32 and CLAUDE.md spec.
+    # All terms (c_target*m^2 + 1 + eps + 2*W_int) scaled by ell/(4n).
     inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m_d * m_d
+    dyn_base = c_target * m_d * m_d + 1.0 + eps_margin
 
     max_survivors = out_buf.shape[0]
     n_surv = 0
@@ -599,12 +604,15 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         child[2 * i + 1] = parent_int[i] - cursor[i]
 
     # --- Precompute per-ell constants (constant across all children) ---
-    # CORRECTED: only c_target*m^2 is scaled by ell/(4n); correction terms are not.
+    # All terms scaled by ell/(4n): dyn_x = (dyn_base + 2*W_int) * ell/(4n)
     ell_count = 2 * d_child - 1  # ell ranges 2..2*d_child, count = 2*d_child - 1
     dyn_base_ell_arr = np.empty(ell_count, dtype=np.float64)
+    two_ell_inv_4n_arr = np.empty(ell_count, dtype=np.float64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        dyn_base_ell_arr[idx] = c_target * m_d * m_d * np.float64(ell) * inv_4n
+        ell_f = np.float64(ell)
+        dyn_base_ell_arr[idx] = dyn_base * ell_f * inv_4n
+        two_ell_inv_4n_arr[idx] = 2.0 * ell_f * inv_4n
 
     # --- Optimized ell scan order ---
     # Most children are pruned by narrow windows (ell=2..16) or wide windows
@@ -656,7 +664,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             for k in range(qc_s, qc_s + n_cv_qc):
                 ws_qc += np.int64(raw_conv[k])
             ell_idx_qc = qc_ell - 2
-            dyn_x_qc = dyn_base_ell_arr[ell_idx_qc] + 1.0 + eps_margin + 2.0 * np.float64(qc_W_int)
+            dyn_x_qc = dyn_base_ell_arr[ell_idx_qc] + two_ell_inv_4n_arr[ell_idx_qc] * np.float64(qc_W_int)
             dyn_it_qc = np.int64(dyn_x_qc * one_minus_4eps)
             if ws_qc > dyn_it_qc:
                 quick_killed = True
@@ -676,6 +684,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 n_cv = ell - 1
                 ell_idx = ell - 2
                 dyn_base_ell = dyn_base_ell_arr[ell_idx]
+                two_ell_inv_4n = two_ell_inv_4n_arr[ell_idx]
                 n_windows = conv_len - n_cv + 1
                 # Sliding window: initialize sum for s_lo=0
                 ws = np.int64(0)
@@ -691,7 +700,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     if hi_bin > d_child - 1:
                         hi_bin = d_child - 1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    dyn_x = dyn_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int)
+                    dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
                     dyn_it = np.int64(dyn_x * one_minus_4eps)
                     if ws > dyn_it:
                         pruned = True
@@ -931,7 +940,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
-                        dyn_x = dyn_base_ell + 1.0 + eps_margin + 2.0 * np.float64(W_int_max)
+                        dyn_x = dyn_base_ell + two_ell_inv_4n_arr[ell_idx] * np.float64(W_int_max)
                         dyn_it = np.int64(dyn_x * one_minus_4eps)
                         if ws > dyn_it:
                             subtree_pruned = True
@@ -1034,12 +1043,12 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
         return 0, 0
 
     # --- Dynamic pruning constants (identical to original) ---
-    # CORRECTED: (1 + 2*W_int) enters integer threshold directly, NOT scaled
-    # by ell/(4n).  Matches _prune_dynamic_int32 and CLAUDE.md spec.
+    # All terms (c_target*m^2 + 1 + eps + 2*W_int) scaled by ell/(4n).
     inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m_d * m_d
+    dyn_base = c_target * m_d * m_d + 1.0 + eps_margin
 
     max_survivors = out_buf.shape[0]
     n_surv = 0
@@ -1076,10 +1085,13 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     qc_W_int = np.int64(0)
 
     # --- L1-resident staging buffer for survivor writes ---
+    # Benchmark (Section 5): AMD EPYC 9354 L1d = 32KB.  Previous 64KB
+    # staging buffer spilled into L2, defeating the purpose.  Halved to
+    # fit entirely in L1 alongside the kernel's hot working set (~2KB).
     if d_child <= 32:
-        _STAGE_CAP = 512    # 512 * 32 * 4 = 64KB, fits in L1
+        _STAGE_CAP = 256    # 256 * 32 * 4 = 32KB, fits L1 (32KB)
     else:
-        _STAGE_CAP = 256    # 256 * 64 * 4 = 64KB, fits in L1
+        _STAGE_CAP = 128    # 128 * 64 * 4 = 32KB, fits L1 (32KB)
     stage_buf = np.empty((_STAGE_CAP, d_child), dtype=np.int32)
     n_staged = 0
 
@@ -1096,21 +1108,23 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                 nz_count += 1
 
     # --- Precompute per-ell constants ---
-    # CORRECTED: only c_target*m^2 is scaled by ell/(4n)
+    # All terms scaled by ell/(4n): dyn_x = (dyn_base + 2*W_int) * ell/(4n)
     ell_count = 2 * d_child - 1
     dyn_base_ell_arr = np.empty(ell_count, dtype=np.float64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        dyn_base_ell_arr[idx] = c_target * m_d * m_d * np.float64(ell) * inv_4n
+        dyn_base_ell_arr[idx] = dyn_base * np.float64(ell) * inv_4n
 
     # --- Precompute 2D threshold table: threshold_table[ell_idx * (m+1) + W_int] ---
     m_plus_1 = m + 1
     threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        dyn_base_ell_val = c_target * m_d * m_d * np.float64(ell) * inv_4n
+        ell_scale = np.float64(ell) * inv_4n
+        dyn_base_ell_val = dyn_base * ell_scale
+        two_ell_inv_4n = 2.0 * ell_scale
         for w in range(m_plus_1):
-            dyn_x = dyn_base_ell_val + 1.0 + eps_margin + 2.0 * np.float64(w)
+            dyn_x = dyn_base_ell_val + two_ell_inv_4n * np.float64(w)
             threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x * one_minus_4eps)
 
     # --- Optimized ell scan order ---
@@ -1551,13 +1565,18 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
 
 
 def _default_buf_cap(d_child):
-    """Default survivor buffer capacity, scaled by dimension."""
+    """Default survivor buffer capacity, scaled by dimension.
+
+    Benchmark (Section 4): 100K is the smallest cap with zero re-runs
+    at L3 (d=32, max survivor = 78,262). Using 5M wastes 640MB/worker
+    for no benefit. At L4+ survival rate is near zero so 100K is safe.
+    """
     if d_child <= 16:
-        return 10_000_000
+        return 1_000_000    # 1M rows; ~64 MB (was 10M / 640MB)
     elif d_child <= 32:
-        return 5_000_000
+        return 200_000      # 200K rows; ~25 MB (was 5M / 640MB)
     else:
-        return 100_000      # 100K rows ~25 MB at d=64; survival rate ≈ 0 at L4+
+        return 100_000      # 100K rows; ~25 MB at d=64
 
 
 def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
@@ -2230,7 +2249,13 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
     dict with cascade results.
     """
     if n_workers is None:
-        n_workers = mp.cpu_count()
+        # Benchmark on AMD EPYC 9354 (64 vCPU) showed optimal throughput
+        # at ~cpus/5 workers: the fused Gray code kernel is sequential
+        # (not prange-parallel), so Numba threads add nothing — maximize
+        # worker-level parallelism with moderate process count to avoid
+        # IPC overhead and memory duplication.
+        eff = _effective_cpu_count()
+        n_workers = max(1, eff // 5) if eff >= 10 else max(1, eff)
     n_workers = max(1, n_workers)
 
     # Ensure enough file descriptors for spawn-based multiprocessing
@@ -2436,9 +2461,14 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             else:
                 n_workers_level = n_workers
 
-            numba_threads = min(max(1, _effective_cpu_count() // n_workers_level),
-                                numba.config.NUMBA_NUM_THREADS)
-            chunksize = max(1, min(n_parents // (n_workers_level * 20), 128))
+            # Benchmark: Numba threads have zero effect on the fused Gray
+            # code kernel (it is sequential, not prange). Set to 1 to avoid
+            # thread-pool overhead inside workers.
+            numba_threads = 1
+            # Benchmark: chunksize=1 is optimal — parent costs are highly
+            # heterogeneous (1000x variation), so fine-grained dispatch
+            # gives the best load balance.
+            chunksize = 1
 
             # Write parent array to a temp file; workers mmap it read-only
             parents_shape = current_configs.shape

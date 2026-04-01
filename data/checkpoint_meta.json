@@ -2,9 +2,9 @@
   "n_half": 2,
   "m": 20,
   "c_target": 1.4,
-  "level_completed": 0,
-  "d_survivors": 4,
-  "n_survived": 467,
+  "level_completed": 1,
+  "d_survivors": 8,
+  "n_survived": 167313,
   "info": {
     "n_half": 2,
     "m": 20,
@@ -15,6 +15,18 @@
     "l0_survivors": 467,
     "l0_pruned_asym": 190,
     "l0_pruned_test": 234,
-    "levels": []
+    "levels": [
+      {
+        "level": 1,
+        "d_parent": 4,
+        "d_child": 8,
+        "parents_in": 467,
+        "total_children": 271448,
+        "children_per_parent": 581.2591006423983,
+        "survivors_out": 167313,
+        "expansion_factor": 358.27194860813705,
+        "elapsed": 10.59182596206665
+      }
+    ]
   }
 }
