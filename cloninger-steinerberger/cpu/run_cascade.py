@@ -68,17 +68,18 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
     eps_margin = 1e-9 * m_d * m_d
 
     # Pre-compute per-ell constants ONCE (shared read-only across threads)
-    # CORRECTED: only c_target*m^2 is scaled by ell/(4n).  The correction
-    # terms (1 + eps + 2*W_int) enter the threshold UNscaled.
-    # Correct threshold: ws_int > c_target*m^2*ell/(4n) + 1 + eps + 2*W_int
-    # This matches the Lean formalization (DynamicThreshold.lean, dyn_it).
-    corr_base = 1.0 + eps_margin   # correction terms — NOT scaled by ell/(4n)
-    ct_m2 = c_target * m_d * m_d   # only this term is scaled by ell/(4n)
+    # All terms (c_target*m^2 + 1 + eps + 2*W_int) scaled by ell/(4n).
+    # Threshold: ws_int > (c_target*m^2 + 1 + eps + 2*W_int) * ell/(4n)
+    # Derivation: test-value prune condition TV > c_target + 1/m^2 + 2*W/m,
+    # multiplied by m^2*ell/(4n).  See Verification 4, proof/part1_framework.md.
+    dyn_base = c_target * m_d * m_d + 1.0 + eps_margin
     max_ell = 2 * d
-    ct_m2_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        ct_m2_ell_arr[ell] = ct_m2 * ell_f * inv_4n
+        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
+        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
@@ -100,7 +101,8 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            ct_ell = ct_m2_ell_arr[ell]
+            dyn_base_ell = dyn_base_ell_arr[ell]
+            two_ell_inv_4n = two_ell_inv_4n_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -116,7 +118,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
-                dyn_x = ct_ell + corr_base + 2.0 * np.float64(W_int)
+                dyn_x = dyn_base_ell + two_ell_inv_4n * np.float64(W_int)
                 dyn_it = np.int64(dyn_x * one_minus_4eps)
                 if ws > dyn_it:
                     pruned = True
@@ -147,14 +149,18 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # CORRECTED: only c_target*m^2 scaled by ell/(4n) — same as int32 path
-    corr_base = 1.0 + eps_margin   # correction terms — NOT scaled by ell/(4n)
-    ct_m2 = c_target * m_d * m_d   # only this term is scaled by ell/(4n)
+    # All terms (c_target*m^2 + 1 + eps + 2*W_int) scaled by ell/(4n).
+    # Threshold: ws_int > (c_target*m^2 + 1 + eps + 2*W_int) * ell/(4n)
+    # Derivation: test-value prune condition TV > c_target + 1/m^2 + 2*W/m,
+    # multiplied by m^2*ell/(4n).  See Verification 4, proof/part1_framework.md.
+    dyn_base = c_target * m_d * m_d + 1.0 + eps_margin
     max_ell = 2 * d
-    ct_m2_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    dyn_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
+    two_ell_inv_4n_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
         ell_f = np.float64(ell)
-        ct_m2_ell_arr[ell] = ct_m2 * ell_f * inv_4n
+        dyn_base_ell_arr[ell] = dyn_base * ell_f * inv_4n
+        two_ell_inv_4n_arr[ell] = 2.0 * ell_f * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
