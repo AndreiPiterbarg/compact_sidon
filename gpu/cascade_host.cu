@@ -40,7 +40,8 @@ extern __global__ void cascade_kernel(
     int num_parents, int d_parent, int d_child, int m,
     int ell_count, int conv_len,
     double threshold_asym,
-    int max_survivors);
+    int max_survivors,
+    int surv_cap);
 
 /* g_next_parent is a global-memory int32 counter, allocated alongside
  * survivor_count.  The host monitors it for progress reporting. */
@@ -70,15 +71,17 @@ extern __global__ void cascade_kernel(
 /* ═══════════════════════════════════════════════════════════════════
  *  build_threshold_table
  *
- *  Precomputes int64 thresholds on the CPU.  All terms are scaled
- *  by ell/(4n):
+ *  Precomputes int32 thresholds on the CPU.  Only c_target*m^2 is
+ *  scaled by ell/(4n); the correction (1 + eps + 2*W_int) is NOT:
  *
- *    dyn_x = (c_target * m^2 + 1.0 + eps_margin + 2.0 * W_int) * ell / (4*n)
- *    dyn_it = (int64_t)(dyn_x * one_minus_4eps)
+ *    dyn_x = c_target * m^2 * ell/(4n) + 1.0 + eps_margin + 2.0 * W_int
+ *    dyn_it = (int32_t)(dyn_x * one_minus_4eps)
  *
- *  Derivation: test-value prune condition TV > c_target + 1/m^2 + 2*W/m,
- *  multiplied by m^2*ell/(4n).  See Verification 4, proof/part1_framework.md.
- *  Matches the CPU fused kernel (_fused_generate_and_prune_gray).
+ *  Derivation: test-value prune condition
+ *    TV > c_target + (4n/ell)*(1/m^2 + 2*W/m),
+ *  multiplied by m^2*ell/(4n).  See Theorem 3.7 (dynamic_threshold_sound)
+ *  in proof/lower_bound_proof.tex.  Matches the Lean formal proof and
+ *  the CPU fused kernel (_fused_generate_and_prune_gray).
  *
  *  where:
  *    n = n_half_child = d_child / 2
@@ -96,17 +99,15 @@ void build_threshold_table(int32_t* table,
     double DBL_EPS = 2.220446049250313e-16;
     double one_minus_4eps = 1.0 - 4.0 * DBL_EPS;
     double eps_margin = 1e-9 * m_d * m_d;
-    double dyn_base = c_target * m_d * m_d + 1.0 + eps_margin;
+    double c_target_m2 = c_target * m_d * m_d;
 
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int ell_idx = ell - 2;
-        double ell_scale = (double)ell * inv_4n;
-        double dyn_base_ell = dyn_base * ell_scale;
-        double two_ell_inv_4n = 2.0 * ell_scale;
+        double c_target_m2_ell = c_target_m2 * (double)ell * inv_4n;
         for (int w = 0; w <= m; w++) {
-            double dyn_x = dyn_base_ell + two_ell_inv_4n * (double)w;
-            /* int32 is safe: max threshold = (c_target*m^2 + 1 + eps + 2*m)
-             * * max_ell/(4*n) ~ 601 for m=20, ~56401 for m=200.
+            double dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * (double)w;
+            /* int32 is safe: max threshold = c_target*m^2 + 1 + eps + 2*m
+             * ~ 601 for m=20, ~56401 for m=200.
              * All values << INT32_MAX (2,147,483,647). */
             table[ell_idx * (m + 1) + w] = (int32_t)(dyn_x * one_minus_4eps);
         }
@@ -213,10 +214,18 @@ int launch_cascade_kernel(const CascadeParams* p)
     printf("  GPU: %s (%d SMs, compute %d.%d)\n",
            prop.name, sm_count, prop.major, prop.minor);
 
-    /* Dynamic shared memory = threshold_table + ell_order. */
+    /* Survivor staging buffer capacity — Idea 3: adaptive sizing.
+     * At d_child>=64 (L4), survival rate ~0.001%, use small buffer.
+     * At d_child<=32 (L2→L3), survival rate ~43%, use full buffer.
+     * Allocate (surv_cap+1) slots: canonicalize_and_stage writes BEFORE
+     * the flush check, so the extra slot absorbs the overflow entry. */
+    int surv_cap = (p->d_child >= 64) ? 4 : 64;
+
+    /* Dynamic shared memory = threshold_table + ell_order + surv_buf. */
     size_t smem_threshold = (size_t)p->ell_count * (p->m + 1) * sizeof(int32_t);
     size_t smem_ell_order = (size_t)p->ell_count * sizeof(int32_t);
-    size_t dynamic_smem_bytes = smem_threshold + smem_ell_order;
+    size_t smem_surv_buf  = (size_t)(surv_cap + 1) * p->d_child * sizeof(int32_t);
+    size_t dynamic_smem_bytes = smem_threshold + smem_ell_order + smem_surv_buf;
 
     /* Increase CUDA printf buffer.  The default 1MB fills quickly even
      * without explicit TRACE, because watchdog/error printfs exist.
@@ -290,7 +299,8 @@ int launch_cascade_kernel(const CascadeParams* p)
         p->num_parents, p->d_parent, p->d_child, p->m,
         p->ell_count, p->conv_len,
         p->threshold_asym,
-        p->max_survivors);
+        p->max_survivors,
+        surv_cap);
 
     CUDA_CHECK(cudaGetLastError());
 
@@ -553,6 +563,169 @@ static bool compute_bin_ranges(
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ *  tighten_ranges — Arc consistency constraint propagation
+ *
+ *  For each cursor position p and each edge value v, computes a lower
+ *  bound on the window sum when all other positions take their minimum-
+ *  contribution values (full autoconvolution including cross-terms).
+ *  If this lower bound exceeds the pruning threshold for any window,
+ *  v is provably infeasible and removed from the cursor range.
+ *
+ *  Uses W_int_max (maximum possible mass in window) for the threshold
+ *  to ensure soundness: min_ws > threshold(W_int_max) >= threshold(W_int).
+ *
+ *  Modifies lo[] and hi[] in place.  Returns false if any range empties.
+ * ═══════════════════════════════════════════════════════════════════ */
+static bool tighten_ranges(
+    const int32_t* parent, int d_parent, int d_child,
+    int m, double c_target,
+    int32_t* lo, int32_t* hi)
+{
+    int conv_len = 2 * d_child - 1;
+    int n_half_child = d_child / 2;
+    double m_d = (double)m;
+    double inv_4n = 1.0 / (4.0 * (double)n_half_child);
+    double DBL_EPS = 2.220446049250313e-16;
+    double one_minus_4eps = 1.0 - 4.0 * DBL_EPS;
+    double eps_margin = 1e-9 * m_d * m_d;
+    double c_target_m2 = c_target * m_d * m_d;
+    int m_plus_1 = m + 1;
+    int ell_count = conv_len;
+
+    /* Build threshold table (GPU formula: only c_target*m^2 scaled) */
+    std::vector<int32_t> threshold_table(ell_count * m_plus_1);
+    for (int ell = 2; ell <= 2 * d_child; ell++) {
+        int idx = ell - 2;
+        double c_m2_ell = c_target_m2 * (double)ell * inv_4n;
+        for (int w = 0; w <= m; w++) {
+            double dyn_x = c_m2_ell + 1.0 + eps_margin + 2.0 * (double)w;
+            threshold_table[idx * m_plus_1 + w] = (int32_t)(dyn_x * one_minus_4eps);
+        }
+    }
+
+    std::vector<int64_t> conv_min(conv_len);
+    std::vector<int64_t> test_conv(conv_len);
+    std::vector<int32_t> child_min(d_child);
+    std::vector<int64_t> max_child_prefix(d_child + 1);
+
+    for (int round = 0; round <= d_parent; round++) {
+        bool any_changed = false;
+
+        /* Build child_min: each bin at its independent minimum. */
+        for (int q = 0; q < d_parent; q++) {
+            child_min[2*q]   = lo[q];
+            child_min[2*q+1] = parent[q] - hi[q];
+        }
+
+        /* Full autoconvolution of child_min → lower bound. */
+        std::fill(conv_min.begin(), conv_min.end(), 0);
+        for (int i = 0; i < d_child; i++) {
+            int64_t ci = child_min[i];
+            if (ci == 0) continue;
+            conv_min[2*i] += ci * ci;
+            for (int j = i + 1; j < d_child; j++) {
+                int64_t cj = child_min[j];
+                if (cj != 0)
+                    conv_min[i+j] += 2 * ci * cj;
+            }
+        }
+
+        /* Max child prefix sum for W_int_max queries. */
+        max_child_prefix[0] = 0;
+        for (int q = 0; q < d_parent; q++) {
+            max_child_prefix[2*q+1] = max_child_prefix[2*q] + hi[q];
+            max_child_prefix[2*q+2] = max_child_prefix[2*q+1]
+                                      + (parent[q] - lo[q]);
+        }
+
+        for (int p = 0; p < d_parent; p++) {
+            if (lo[p] == hi[p]) continue;
+
+            int B_p = parent[p];
+            int k1 = 2 * p, k2 = 2 * p + 1;
+            int64_t old1 = child_min[k1], old2 = child_min[k2];
+            int new_lo = lo[p], new_hi = hi[p];
+
+            /* Lambda: check if value v at position p is infeasible. */
+            auto is_infeasible = [&](int v) -> bool {
+                int64_t n1 = v, n2 = B_p - v;
+                int64_t d1 = n1 - old1, d2 = n2 - old2;
+
+                for (int kk = 0; kk < conv_len; kk++)
+                    test_conv[kk] = conv_min[kk];
+                test_conv[2*k1]   += n1*n1 - old1*old1;
+                test_conv[2*k2]   += n2*n2 - old2*old2;
+                test_conv[k1+k2]  += 2*(n1*n2 - old1*old2);
+                for (int j = 0; j < d_child; j++) {
+                    if (j == k1 || j == k2) continue;
+                    int64_t cj = child_min[j];
+                    if (cj != 0) {
+                        test_conv[k1+j] += 2 * d1 * cj;
+                        test_conv[k2+j] += 2 * d2 * cj;
+                    }
+                }
+
+                for (int ell = 2; ell <= 2*d_child; ell++) {
+                    int n_cv = ell - 1;
+                    int n_windows = conv_len - n_cv + 1;
+                    if (n_windows <= 0) continue;
+                    int ell_idx = ell - 2;
+
+                    int64_t ws = 0;
+                    for (int kk = 0; kk < n_cv; kk++)
+                        ws += test_conv[kk];
+
+                    int hb = std::min(d_child - 1, ell - 2);
+                    int64_t W_max = max_child_prefix[hb + 1];
+                    if (W_max > m) W_max = m;
+                    if (ws > threshold_table[ell_idx * m_plus_1 + (int)W_max])
+                        return true;
+
+                    for (int s = 1; s < n_windows; s++) {
+                        ws += test_conv[s + n_cv - 1] - test_conv[s - 1];
+                        int lb = s - (d_child - 1);
+                        if (lb < 0) lb = 0;
+                        hb = s + ell - 2;
+                        if (hb > d_child - 1) hb = d_child - 1;
+                        W_max = max_child_prefix[hb+1] - max_child_prefix[lb];
+                        if (W_max > m) W_max = m;
+                        if (ws > threshold_table[ell_idx*m_plus_1 + (int)W_max])
+                            return true;
+                    }
+                }
+                return false;
+            };
+
+            /* Tighten from low end. */
+            for (int v = lo[p]; v <= hi[p]; v++) {
+                if (is_infeasible(v)) {
+                    if (v == new_lo) new_lo = v + 1;
+                    else break;
+                } else break;
+            }
+
+            /* Tighten from high end. */
+            for (int v = hi[p]; v >= new_lo; v--) {
+                if (is_infeasible(v)) {
+                    if (v == new_hi) new_hi = v - 1;
+                    else break;
+                } else break;
+            }
+
+            if (new_lo != lo[p] || new_hi != hi[p]) {
+                lo[p] = new_lo;
+                hi[p] = new_hi;
+                any_changed = true;
+                if (new_lo > new_hi) return false;
+            }
+        }
+
+        if (!any_changed) break;
+    }
+    return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  *  main — End-to-end driver
  *
  *  Usage:
@@ -616,6 +789,7 @@ int main(int argc, char** argv)
     std::vector<int32_t> h_hi(num_parents * d_parent);
     std::vector<int>     valid_indices;
     valid_indices.reserve(num_parents);
+    int64_t total_children_all = 0;
 
     for (int i = 0; i < num_parents; i++) {
         int64_t tc;
@@ -624,11 +798,26 @@ int main(int argc, char** argv)
                                &h_lo[i * d_parent], &h_hi[i * d_parent],
                                &tc))
         {
+            /* Arc consistency: tighten ranges before enumeration. */
+            if (!tighten_ranges(&h_parents[i * d_parent], d_parent, d_child,
+                                m, c_target,
+                                &h_lo[i * d_parent], &h_hi[i * d_parent]))
+            {
+                continue;  /* All ranges emptied — skip this parent. */
+            }
+            /* Recompute total_children with tightened ranges. */
+            tc = 1;
+            for (int j = 0; j < d_parent; j++)
+                tc *= (int64_t)(h_hi[i * d_parent + j]
+                                - h_lo[i * d_parent + j] + 1);
             valid_indices.push_back(i);
+            total_children_all += tc;
         }
     }
     printf("  Valid parents (non-empty range): %zu / %d\n",
            valid_indices.size(), num_parents);
+    printf("  Total children to enumerate:     %lld\n",
+           (long long)total_children_all);
 
     /* Pack valid parents into contiguous arrays. */
     int n_valid = (int)valid_indices.size();
@@ -709,11 +898,30 @@ int main(int argc, char** argv)
     params.threshold_asym  = sqrt(c_target / 2.0);
     params.max_survivors   = max_survivors;
 
+    auto main_t0 = std::chrono::high_resolution_clock::now();
     int rc = launch_cascade_kernel(&params);
+    auto main_t1 = std::chrono::high_resolution_clock::now();
     if (rc != 0) {
         fprintf(stderr, "Kernel launch failed\n");
         return 1;
     }
+
+    /* ── Throughput summary ── */
+    double main_elapsed_s = std::chrono::duration<double>(main_t1 - main_t0).count();
+    double children_per_sec = (main_elapsed_s > 0)
+        ? (double)total_children_all / main_elapsed_s : 0;
+    printf("\n");
+    printf("  ═══ THROUGHPUT SUMMARY ═══\n");
+    printf("  Total children enumerated: %lld\n", (long long)total_children_all);
+    printf("  Wall time:                 %.3f s\n", main_elapsed_s);
+    printf("  Throughput:                %.2e children/s\n", children_per_sec);
+    if (children_per_sec > 1e9)
+        printf("  Throughput:                %.2f billion children/s\n",
+               children_per_sec / 1e9);
+    else if (children_per_sec > 1e6)
+        printf("  Throughput:                %.2f million children/s\n",
+               children_per_sec / 1e6);
+    printf("\n");
 
     /* ── Read back results ── */
     int32_t h_count = 0;
