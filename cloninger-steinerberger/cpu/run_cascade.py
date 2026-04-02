@@ -1064,6 +1064,8 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     J_MIN = 7
     n_subtree_pruned = 0
     partial_conv = np.empty(conv_len, dtype=np.int32)
+    min_contrib = np.empty(conv_len, dtype=np.int64)
+    min_contrib_prefix = np.empty(conv_len, dtype=np.int64)
 
     # Prefix sum of parent bins (for W_int_unfixed in subtree pruning)
     parent_prefix = np.empty(d_parent + 1, dtype=np.int64)
@@ -1398,23 +1400,143 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                 first_unfixed_parent = fixed_parent_boundary
                 subtree_pruned = False
 
+                # --- Idea 02: guaranteed minimum contributions from unfixed bins ---
+                for kk in range(conv_len):
+                    min_contrib[kk] = np.int64(0)
+
+                # (A) Inner active positions (digits 0..J_MIN-1)
+                for kk in range(J_MIN):
+                    p_unf = active_pos[kk]
+                    k1u = 2 * p_unf
+                    k2u = 2 * p_unf + 1
+                    ml = np.int64(lo_arr[p_unf])
+                    mh = np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
+                    # Self-terms
+                    min_contrib[2 * k1u] += ml * ml
+                    min_contrib[2 * k2u] += mh * mh
+                    min_contrib[k1u + k2u] += np.int64(2) * ml * mh
+                    # Cross with fixed bins
+                    for ii in range(fixed_len):
+                        ci64 = np.int64(child[ii])
+                        if ci64 > 0:
+                            if ml > 0:
+                                min_contrib[ii + k1u] += np.int64(2) * ci64 * ml
+                            if mh > 0:
+                                min_contrib[ii + k2u] += np.int64(2) * ci64 * mh
+                    # Cross with other inner unfixed
+                    for kk2 in range(kk + 1, J_MIN):
+                        p2 = active_pos[kk2]
+                        k1u2 = 2 * p2
+                        k2u2 = 2 * p2 + 1
+                        ml2 = np.int64(lo_arr[p2])
+                        mh2 = np.int64(parent_int[p2]) - np.int64(hi_arr[p2])
+                        if ml > 0 and ml2 > 0:
+                            min_contrib[k1u + k1u2] += np.int64(2) * ml * ml2
+                        if ml > 0 and mh2 > 0:
+                            min_contrib[k1u + k2u2] += np.int64(2) * ml * mh2
+                        if mh > 0 and ml2 > 0:
+                            min_contrib[k2u + k1u2] += np.int64(2) * mh * ml2
+                        if mh > 0 and mh2 > 0:
+                            min_contrib[k2u + k2u2] += np.int64(2) * mh * mh2
+
+                # (B) Non-active unfixed parents beyond fixed prefix
+                for pp in range(first_unfixed_parent, d_parent):
+                    is_inner = False
+                    for kk in range(J_MIN):
+                        if active_pos[kk] == pp:
+                            is_inner = True
+                            break
+                    if is_inner:
+                        continue
+                    k1na = 2 * pp
+                    k2na = 2 * pp + 1
+                    cv1 = np.int64(lo_arr[pp])
+                    cv2 = np.int64(parent_int[pp]) - cv1
+                    # Self-terms
+                    min_contrib[2 * k1na] += cv1 * cv1
+                    min_contrib[2 * k2na] += cv2 * cv2
+                    min_contrib[k1na + k2na] += np.int64(2) * cv1 * cv2
+                    # Cross with fixed prefix
+                    for ii in range(fixed_len):
+                        ci64 = np.int64(child[ii])
+                        if ci64 > 0:
+                            if cv1 > 0:
+                                min_contrib[ii + k1na] += np.int64(2) * ci64 * cv1
+                            if cv2 > 0:
+                                min_contrib[ii + k2na] += np.int64(2) * ci64 * cv2
+                    # Cross with inner unfixed
+                    for kk in range(J_MIN):
+                        p_unf = active_pos[kk]
+                        k1u = 2 * p_unf
+                        k2u = 2 * p_unf + 1
+                        ml = np.int64(lo_arr[p_unf])
+                        mh = np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
+                        if cv1 > 0 and ml > 0:
+                            min_contrib[k1na + k1u] += np.int64(2) * cv1 * ml
+                        if cv1 > 0 and mh > 0:
+                            min_contrib[k1na + k2u] += np.int64(2) * cv1 * mh
+                        if cv2 > 0 and ml > 0:
+                            min_contrib[k2na + k1u] += np.int64(2) * cv2 * ml
+                        if cv2 > 0 and mh > 0:
+                            min_contrib[k2na + k2u] += np.int64(2) * cv2 * mh
+                    # Cross with other non-active unfixed
+                    for pp2 in range(pp + 1, d_parent):
+                        is_inner2 = False
+                        for kk2b in range(J_MIN):
+                            if active_pos[kk2b] == pp2:
+                                is_inner2 = True
+                                break
+                        if is_inner2:
+                            continue
+                        k1na2 = 2 * pp2
+                        k2na2 = 2 * pp2 + 1
+                        cv12 = np.int64(lo_arr[pp2])
+                        cv22 = np.int64(parent_int[pp2]) - cv12
+                        if cv1 > 0 and cv12 > 0:
+                            min_contrib[k1na + k1na2] += np.int64(2) * cv1 * cv12
+                        if cv1 > 0 and cv22 > 0:
+                            min_contrib[k1na + k2na2] += np.int64(2) * cv1 * cv22
+                        if cv2 > 0 and cv12 > 0:
+                            min_contrib[k2na + k1na2] += np.int64(2) * cv2 * cv12
+                        if cv2 > 0 and cv22 > 0:
+                            min_contrib[k2na + k2na2] += np.int64(2) * cv2 * cv22
+
+                # Build prefix sum of min_contrib
+                min_contrib_prefix[0] = min_contrib[0]
+                for kk in range(1, conv_len):
+                    min_contrib_prefix[kk] = min_contrib_prefix[kk - 1] + min_contrib[kk]
+
+                # Window scan: ALL positions (not just within partial_conv_len)
                 for ell_oi in range(ell_count):
                     if subtree_pruned:
                         break
                     ell = ell_order[ell_oi]
                     n_cv = ell - 1
                     ell_idx = ell - 2
-                    dyn_base_ell = dyn_base_ell_arr[ell_idx]
 
-                    n_windows_partial = partial_conv_len - n_cv + 1
-                    if n_windows_partial <= 0:
+                    n_windows_total = conv_len - n_cv + 1
+                    if n_windows_total <= 0:
                         continue
 
-                    for s_lo in range(n_windows_partial):
+                    for s_lo in range(n_windows_total):
                         s_hi = s_lo + n_cv - 1
-                        ws = np.int64(partial_conv[s_hi])
+
+                        # Fixed part: partial_conv in window ∩ [0, partial_conv_len)
+                        ws = np.int64(0)
+                        k_start = s_lo
+                        k_end = s_hi
+                        if k_end >= partial_conv_len:
+                            k_end = partial_conv_len - 1
+                        if k_end >= k_start:
+                            ws = np.int64(partial_conv[k_end])
+                            if k_start > 0:
+                                ws -= np.int64(partial_conv[k_start - 1])
+
+                        # Unfixed part: guaranteed minimum contributions
+                        mc_sum = min_contrib_prefix[s_hi]
                         if s_lo > 0:
-                            ws -= np.int64(partial_conv[s_lo - 1])
+                            mc_sum -= min_contrib_prefix[s_lo - 1]
+                        ws += mc_sum
 
                         lo_bin = s_lo - (d_child - 1)
                         if lo_bin < 0:
@@ -1455,6 +1577,8 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
+                        if W_int_max > np.int64(m):
+                            W_int_max = np.int64(m)
                         dyn_it = threshold_table[ell_idx * m_plus_1 + W_int_max]
                         if ws > dyn_it:
                             subtree_pruned = True
@@ -1570,6 +1694,251 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     return lo_arr, hi_arr, total_children
 
 
+@njit(cache=True)
+def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
+    """Arc consistency: tighten cursor ranges by removing provably-infeasible
+    edge values.
+
+    For each position p and each edge value v, computes a lower bound on the
+    window sum when all other positions take their minimum-contribution values
+    (full autoconvolution including cross-terms).  If this lower bound exceeds
+    the pruning threshold for ANY window, v cannot produce a surviving child
+    and is removed from the range.
+
+    Soundness: uses W_int_max (maximum possible mass in window) for the
+    threshold, which is the highest (hardest-to-exceed) threshold.  Since
+    min_ws > threshold(W_int_max) >= threshold(actual_W_int), any child with
+    cursor[p] = v will be pruned by the kernel.
+
+    Modifies lo_arr and hi_arr in place.
+    Returns the new total_children (product of range sizes), 0 if any range
+    becomes empty.
+    """
+    d_parent = parent_int.shape[0]
+    d_child = 2 * d_parent
+    conv_len = 2 * d_child - 1
+
+    # --- Threshold constants (must match _fused_generate_and_prune_gray) ---
+    m_d = np.float64(m)
+    inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
+    DBL_EPS = 2.220446049250313e-16
+    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
+    eps_margin = 1e-9 * m_d * m_d
+    dyn_base = c_target * m_d * m_d + 1.0 + eps_margin
+    m_plus_1 = m + 1
+    ell_count = conv_len
+
+    # Precompute threshold table (identical to CPU kernel)
+    threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
+    for ell in range(2, 2 * d_child + 1):
+        idx = ell - 2
+        ell_scale = np.float64(ell) * inv_4n
+        for w in range(m_plus_1):
+            dyn_x = (dyn_base + 2.0 * np.float64(w)) * ell_scale
+            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x * one_minus_4eps)
+
+    # Working array (reused across all (p, v) checks)
+    test_conv = np.empty(conv_len, dtype=np.int64)
+
+    max_rounds = d_parent + 1
+    for _round in range(max_rounds):
+        any_changed = False
+
+        # Build child_min: each bin at its independent minimum
+        child_min = np.empty(d_child, dtype=np.int32)
+        for q in range(d_parent):
+            child_min[2 * q] = lo_arr[q]
+            child_min[2 * q + 1] = parent_int[q] - hi_arr[q]
+
+        # Full autoconvolution of child_min → lower bound on each conv index
+        conv_min = np.zeros(conv_len, dtype=np.int64)
+        for i in range(d_child):
+            ci = np.int64(child_min[i])
+            if ci == 0:
+                continue
+            conv_min[2 * i] += ci * ci
+            for j in range(i + 1, d_child):
+                cj = np.int64(child_min[j])
+                if cj != 0:
+                    conv_min[i + j] += np.int64(2) * ci * cj
+
+        # Max child prefix sum for W_int_max queries
+        max_child_prefix = np.empty(d_child + 1, dtype=np.int64)
+        max_child_prefix[0] = np.int64(0)
+        for q in range(d_parent):
+            max_child_prefix[2 * q + 1] = (max_child_prefix[2 * q]
+                                            + np.int64(hi_arr[q]))
+            max_child_prefix[2 * q + 2] = (max_child_prefix[2 * q + 1]
+                                            + np.int64(parent_int[q] - lo_arr[q]))
+
+        for p in range(d_parent):
+            if lo_arr[p] == hi_arr[p]:
+                continue
+
+            B_p = parent_int[p]
+            k1 = 2 * p
+            k2 = 2 * p + 1
+            old1 = np.int64(child_min[k1])
+            old2 = np.int64(child_min[k2])
+
+            new_lo = lo_arr[p]
+            new_hi = hi_arr[p]
+
+            # --- Tighten from low end ---
+            for v in range(lo_arr[p], hi_arr[p] + 1):
+                new1 = np.int64(v)
+                new2 = np.int64(B_p - v)
+                delta1 = new1 - old1
+                delta2 = new2 - old2
+
+                # test_conv = conv_min + incremental deltas for position p
+                for kk in range(conv_len):
+                    test_conv[kk] = conv_min[kk]
+                test_conv[2 * k1] += new1 * new1 - old1 * old1
+                test_conv[2 * k2] += new2 * new2 - old2 * old2
+                test_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+                for j in range(d_child):
+                    if j == k1 or j == k2:
+                        continue
+                    cj = np.int64(child_min[j])
+                    if cj != 0:
+                        test_conv[k1 + j] += np.int64(2) * delta1 * cj
+                        test_conv[k2 + j] += np.int64(2) * delta2 * cj
+
+                # Check all windows via sliding window
+                infeasible = False
+                for ell in range(2, 2 * d_child + 1):
+                    if infeasible:
+                        break
+                    n_cv = ell - 1
+                    n_windows = conv_len - n_cv + 1
+                    if n_windows <= 0:
+                        continue
+                    ell_idx = ell - 2
+
+                    ws = np.int64(0)
+                    for kk in range(n_cv):
+                        ws += test_conv[kk]
+
+                    hb = ell - 2
+                    if hb > d_child - 1:
+                        hb = d_child - 1
+                    W_max = max_child_prefix[hb + 1]
+                    if W_max > np.int64(m):
+                        W_max = np.int64(m)
+                    if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                        infeasible = True
+                        break
+
+                    for s in range(1, n_windows):
+                        ws += test_conv[s + n_cv - 1] - test_conv[s - 1]
+                        lb = s - (d_child - 1)
+                        if lb < 0:
+                            lb = 0
+                        hb = s + ell - 2
+                        if hb > d_child - 1:
+                            hb = d_child - 1
+                        W_max = max_child_prefix[hb + 1] - max_child_prefix[lb]
+                        if W_max > np.int64(m):
+                            W_max = np.int64(m)
+                        if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                            infeasible = True
+                            break
+
+                if infeasible:
+                    if v == new_lo:
+                        new_lo = v + 1
+                    else:
+                        break
+                else:
+                    break
+
+            # --- Tighten from high end ---
+            for v in range(hi_arr[p], new_lo - 1, -1):
+                new1 = np.int64(v)
+                new2 = np.int64(B_p - v)
+                delta1 = new1 - old1
+                delta2 = new2 - old2
+
+                for kk in range(conv_len):
+                    test_conv[kk] = conv_min[kk]
+                test_conv[2 * k1] += new1 * new1 - old1 * old1
+                test_conv[2 * k2] += new2 * new2 - old2 * old2
+                test_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+                for j in range(d_child):
+                    if j == k1 or j == k2:
+                        continue
+                    cj = np.int64(child_min[j])
+                    if cj != 0:
+                        test_conv[k1 + j] += np.int64(2) * delta1 * cj
+                        test_conv[k2 + j] += np.int64(2) * delta2 * cj
+
+                infeasible = False
+                for ell in range(2, 2 * d_child + 1):
+                    if infeasible:
+                        break
+                    n_cv = ell - 1
+                    n_windows = conv_len - n_cv + 1
+                    if n_windows <= 0:
+                        continue
+                    ell_idx = ell - 2
+
+                    ws = np.int64(0)
+                    for kk in range(n_cv):
+                        ws += test_conv[kk]
+
+                    hb = ell - 2
+                    if hb > d_child - 1:
+                        hb = d_child - 1
+                    W_max = max_child_prefix[hb + 1]
+                    if W_max > np.int64(m):
+                        W_max = np.int64(m)
+                    if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                        infeasible = True
+                        break
+
+                    for s in range(1, n_windows):
+                        ws += test_conv[s + n_cv - 1] - test_conv[s - 1]
+                        lb = s - (d_child - 1)
+                        if lb < 0:
+                            lb = 0
+                        hb = s + ell - 2
+                        if hb > d_child - 1:
+                            hb = d_child - 1
+                        W_max = max_child_prefix[hb + 1] - max_child_prefix[lb]
+                        if W_max > np.int64(m):
+                            W_max = np.int64(m)
+                        if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                            infeasible = True
+                            break
+
+                if infeasible:
+                    if v == new_hi:
+                        new_hi = v - 1
+                    else:
+                        break
+                else:
+                    break
+
+            if new_lo != lo_arr[p] or new_hi != hi_arr[p]:
+                lo_arr[p] = new_lo
+                hi_arr[p] = new_hi
+                any_changed = True
+                if new_lo > new_hi:
+                    return 0
+
+        if not any_changed:
+            break
+
+    total = np.int64(1)
+    for i in range(d_parent):
+        r = hi_arr[i] - lo_arr[i] + 1
+        if r <= 0:
+            return 0
+        total *= np.int64(r)
+    return total
+
+
 def _default_buf_cap(d_child):
     """Default survivor buffer capacity, scaled by dimension.
 
@@ -1608,6 +1977,12 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
         return np.empty((0, d_child), dtype=np.int32), 0
     lo_arr, hi_arr, total_children = result
 
+    if total_children == 0:
+        return np.empty((0, d_child), dtype=np.int32), 0
+
+    # Arc consistency: tighten cursor ranges before enumeration
+    total_children = _tighten_ranges(parent_int, lo_arr, hi_arr,
+                                     m, c_target, n_half_child)
     if total_children == 0:
         return np.empty((0, d_child), dtype=np.int32), 0
 
