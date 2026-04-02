@@ -1,0 +1,13 @@
+{
+  "name": "L1_ctarget130",
+  "n_half": 2,
+  "m": 20,
+  "c_target": 1.3,
+  "level": 1,
+  "d_parent": 4,
+  "d_child": 8,
+  "n_parents": 85,
+  "n_survivors_cpu": 4453,
+  "total_children": 7446,
+  "elapsed_cpu": 0.01
+}
