@@ -614,26 +614,45 @@ def conv {d : ℕ} (c : Fin d → ℕ) (k : ℕ) : ℕ :=
 def window_sum {d : ℕ} (c : Fin d → ℕ) (s_lo ℓ : ℕ) : ℕ :=
   ∑ k ∈ Finset.Ico s_lo (s_lo + ℓ - 1), conv c k
 
-/-- Dynamic threshold for pruning. -/
-noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
-  ⌊(c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-   ((ℓ : ℝ) / (4 * (n : ℝ))) * (1 - 4 * 2.22e-16)⌋
+/-- Dynamic threshold for pruning.
 
-/-- Claim 2.4: Computed threshold is conservative (≥ exact threshold). -/
+    Only c_target*m² is scaled by ℓ/(4n); the correction (1+eps+2·W_int)
+    is NOT scaled.  Matches run_cascade.py:
+      c_target_m2_ell = c_target * m * m * ell * inv_4n
+      dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * W_int
+      dyn_it = int64(dyn_x * one_minus_4eps) -/
+noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
+  ⌊(c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+    1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
+   (1 - 4 * (2.220446049250313e-16 : ℝ))⌋
+
+/-- Claim 2.4: Computed threshold is conservative (≥ exact threshold).
+    A = c_target*m²*ℓ/(4n) + 1 + 2*W_int is the exact threshold.
+    B = (A + 1e-9*m²)*(1-4ε) is the computed threshold.
+    B ≥ A because 1e-9*m²*(1-4ε) ≥ 4ε*A (margin dominates). -/
 theorem dyn_it_conservative (c_target : ℝ) (m n ℓ W_int : ℕ)
-    (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (_hct : 0 ≤ c_target)
-    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
-    let B := (c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-             ((ℓ : ℝ) / (4 * (n : ℝ))) * (1 - 4 * 2.22e-16)
+    (hm : 0 < m) (hn : 0 < n) (_hℓ : 0 < ℓ) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
+    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
+    let B := (c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+              1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
+              (1 - 4 * (2.220446049250313e-16 : ℝ))
     ⌊A⌋ ≤ ⌊B⌋ := by
   refine' Int.floor_mono _;
-  have h_W_le_m : (W_int : ℝ) ≤ m := by
-    norm_cast;
-  have h_m_le_200 : (m : ℝ) ≤ 200 := by
-    norm_cast;
-  field_simp;
-  norm_num; nlinarith [ show ( 1 : ℝ ) ≤ m ^ 2 by exact_mod_cast pow_pos hm 2 ] ;
+  -- Upper bound on exact threshold A
+  have h_div : (ℓ : ℝ) / (4 * (n : ℝ)) ≤ 1 :=
+    div_le_one_of_le₀ (by exact_mod_cast hℓn) (by positivity)
+  have h_ct_m2 : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) ≤ c_target * (m : ℝ)^2 :=
+    mul_le_of_le_one_right (by positivity) h_div
+  have hP : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ) ≤ 80401 := by
+    nlinarith [show (m : ℝ) ≤ 200 by exact_mod_cast hm_upper,
+               show (W_int : ℝ) ≤ (m : ℝ) by exact_mod_cast hW]
+  -- Margin dominates: 4ε*80401 ≤ 1e-9*(1-4ε)
+  have hM : (4 : ℝ) * 2.220446049250313e-16 * 80401 ≤
+      1e-9 * (1 - 4 * 2.220446049250313e-16) := by norm_num +zetaDelta at *
+  have hm2 : (m : ℝ) ^ 2 ≥ 1 := by exact_mod_cast pow_pos hm 2
+  -- Chain: 4ε*A ≤ 4ε*80401 ≤ 1e-9*(1-4ε) ≤ 1e-9*m²*(1-4ε)
+  nlinarith
 
 /-- Pruning condition predicate. -/
 def pruning_condition (ws : ℕ) (threshold : ℤ) : Prop :=
@@ -642,14 +661,14 @@ def pruning_condition (ws : ℕ) (threshold : ℤ) : Prop :=
 /-- Pruning with computed threshold implies pruning with exact threshold. -/
 theorem pruning_soundness (c_target : ℝ) (m n ℓ W_int : ℕ) (ws : ℕ)
     (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
-    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
+    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
     let exact_threshold := ⌊A⌋
     let computed_threshold := dyn_it c_target m n ℓ W_int
     pruning_condition ws computed_threshold → pruning_condition ws exact_threshold := by
   intro A exact_threshold computed_threshold h_pruning
   have h_computed_gt_exact : computed_threshold ≥ exact_threshold := by
-    convert dyn_it_conservative c_target m n ℓ W_int hm hn hℓ hW hct hct_upper hm_upper using 1
+    convert dyn_it_conservative c_target m n ℓ W_int hm hn hℓ hW hct hct_upper hm_upper hℓn using 1
   exact h_pruning.trans_le' h_computed_gt_exact
 
 

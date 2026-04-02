@@ -34,21 +34,21 @@ def window_sum {d : ℕ} (c : Fin d → ℕ) (s_lo ℓ : ℕ) : ℕ :=
 /-- Dynamic threshold for pruning.
 
     Matches the Python code (run_cascade.py, all code paths):
-      dyn_base = c_target * m² + 1 + eps_margin
-      dyn_x = (dyn_base + 2 * W_int) * ℓ / (4n)
+      c_target_m2_ell = c_target * m * m * ell * inv_4n
+      dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * W_int
       dyn_it = int64(dyn_x * one_minus_4eps)
 
-    ALL terms are scaled by ℓ/(4n).  Derivation: the test-value domain
-    prune condition is TV > c_target + 1/m² + 2*W/m.  Multiplying both
-    sides by m²·ℓ/(4n) gives the integer-space threshold
-    (c_target·m² + 1 + 2·W_int) · ℓ/(4n).  The eps_margin and (1-4ε)
-    guard are safety margins for FP rounding.
+    Only c_target*m² is scaled by ℓ/(4n); the correction (1+eps+2·W_int)
+    is NOT scaled.  Derivation: the test-value domain prune condition is
+    TV > c_target + (4n/ℓ)·(1/m² + 2·W/m).  Multiplying both sides by
+    m²·ℓ/(4n) gives c_target·m²·ℓ/(4n) + 1 + 2·W_int.  The eps_margin
+    and (1-4ε) guard are safety margins for FP rounding.
     See Verification 4 in proof/part1_framework.md.
 
     The epsilon literal is the exact IEEE 754 float64 machine epsilon. -/
 noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
-  ⌊(c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-   ((ℓ : ℝ) / (4 * (n : ℝ))) *
+  ⌊(c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+    1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
    (1 - 4 * (2.220446049250313e-16 : ℝ))⌋
 
 /-
@@ -56,30 +56,24 @@ PROBLEM
 Upper bound on A used in the conservativeness proof.
 
 PROVIDED SOLUTION
-The exact threshold is A = (c_target * m² + 1 + 2*W_int) * ℓ/(4n).
-Since ℓ/(4n) ≤ 1 (from hℓn) and the inner sum ≤ 80401, A ≤ 80401.
+The exact threshold is A = c_target * m² * ℓ/(4n) + 1 + 2*W_int.
+Since ℓ/(4n) ≤ 1 (from hℓn), c_target*m²*ℓ/(4n) ≤ c_target*m² ≤ 80000.
 
 Key steps:
-1. c_target * m² ≤ 2 * 200² = 80000.
+1. c_target * m² * ℓ/(4n) ≤ c_target * m² ≤ 2 * 200² = 80000.
 2. 1 + 2*W_int ≤ 1 + 400 = 401.
-3. Inner = c_target*m² + 1 + 2*W_int ≤ 80401.
-4. ℓ/(4n) ≤ 1, so A = Inner * ℓ/(4n) ≤ Inner ≤ 80401.
+3. A = c_target*m²*ℓ/(4n) + 1 + 2*W_int ≤ 80000 + 401 = 80401.
 -/
 lemma A_upper_bound (c_target : ℝ) (m n ℓ W_int : ℕ)
     (hn : 0 < n) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
     (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
-    (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ))) ≤ 80401 := by
-  have h_inner : c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ) ≤ 80401 := by
-    nlinarith [show (m : ℝ) ≤ 200 by exact_mod_cast hm_upper,
-               show (W_int : ℝ) ≤ (m : ℝ) by exact_mod_cast hW]
-  have h_inner_nn : 0 ≤ c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ) := by positivity
+    c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ) ≤ 80401 := by
   have h_div : (ℓ : ℝ) / (4 * (n : ℝ)) ≤ 1 :=
     div_le_one_of_le₀ (by exact_mod_cast hℓn) (by positivity)
-  calc (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
-      ≤ (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * 1 :=
-        mul_le_mul_of_nonneg_left h_div h_inner_nn
-    _ = c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ) := by ring
-    _ ≤ 80401 := h_inner
+  have h_ct_m2 : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) ≤ c_target * (m : ℝ)^2 :=
+    mul_le_of_le_one_right (by positivity) h_div
+  nlinarith [show (m : ℝ) ≤ 200 by exact_mod_cast hm_upper,
+             show (W_int : ℝ) ≤ (m : ℝ) by exact_mod_cast hW]
 
 /-
 PROBLEM
@@ -98,40 +92,34 @@ PROBLEM
 Claim 2.4: Computed threshold is conservative (≥ exact threshold).
 
     The exact threshold (from the mathematical pruning condition) is:
-      A = (c_target * m² + 1 + 2 * W_int) * ℓ/(4n)
+      A = c_target * m² * ℓ/(4n) + 1 + 2 * W_int
     The computed threshold (dyn_it) is:
-      B = (c_target * m² + 1 + 1e-9*m² + 2*W_int) * ℓ/(4n) * (1-4ε)
+      B = (c_target * m² * ℓ/(4n) + 1 + 1e-9*m² + 2*W_int) * (1-4ε)
 
     We need ⌊A⌋ ≤ ⌊B⌋, which follows from A ≤ B.
 
-    Write P = c_target*m² + 1 + 2*W_int.  Then:
-      B = (P + 1e-9*m²) * s * (1-4ε)   where s = ℓ/(4n)
-      A = P * s
-      B - A = s * [(P + 1e-9*m²)*(1-4ε) - P]
-            = s * [1e-9*m²*(1-4ε) - 4ε*P]
+    B = (A + 1e-9*m²) * (1-4ε), so:
+      B - A = (A + 1e-9*m²)*(1-4ε) - A
+            = 1e-9*m²*(1-4ε) - 4ε*A
 
-    Since s ≥ 0 and 1e-9*m²*(1-4ε) ≥ 1e-9*(1-4ε) ≥ 4ε*80401 ≥ 4ε*P
+    Since 1e-9*m²*(1-4ε) ≥ 1e-9*(1-4ε) ≥ 4ε*80401 ≥ 4ε*A
     (from margin_dominates + A_upper_bound), we get B ≥ A.
 -/
 theorem dyn_it_conservative (c_target : ℝ) (m n ℓ W_int : ℕ)
     (hm : 0 < m) (hn : 0 < n) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
     (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
-    let B := (c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-              ((ℓ : ℝ) / (4 * (n : ℝ))) *
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
+    let B := (c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+              1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
               (1 - 4 * (2.220446049250313e-16 : ℝ))
     ⌊A⌋ ≤ ⌊B⌋ := by
   refine Int.floor_mono ?_
-  -- Suffices: (P + eps*m²)*(1-4ε) ≥ P, then multiply by s = ℓ/(4n) ≥ 0
-  have hs : 0 ≤ (ℓ : ℝ) / (4 * (n : ℝ)) := by positivity
-  -- Core inequality: 1e-9*m²*(1-4ε) ≥ 4ε*P where P ≤ 80401
-  have hP : c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ) ≤ 80401 := by
-    nlinarith [show (m : ℝ) ≤ 200 by exact_mod_cast hm_upper,
-               show (W_int : ℝ) ≤ (m : ℝ) by exact_mod_cast hW]
+  -- B = (A + 1e-9*m²) * (1-4ε).  Need B ≥ A, i.e., 1e-9*m²*(1-4ε) ≥ 4ε*A.
+  have hP : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ) ≤ 80401 :=
+    A_upper_bound c_target m n ℓ W_int hn hW hct hct_upper hm_upper hℓn
   have hM := margin_dominates
   have hm2 : (m : ℝ) ^ 2 ≥ 1 := by exact_mod_cast pow_pos hm 2
-  -- A = P * s, B = (P + eps*m²) * s * q where q = 1-4ε
-  -- B - A = s * ((P + eps*m²)*q - P) = s * (eps*m²*q - 4ε*P) ≥ 0
+  -- 4ε*A ≤ 4ε*80401 ≤ 1e-9*(1-4ε) ≤ 1e-9*m²*(1-4ε)
   nlinarith
 
 /-- Pruning condition predicate. -/
@@ -149,7 +137,7 @@ If ws > dyn_it then ws > ⌊A⌋ by transitivity.
 theorem pruning_soundness (c_target : ℝ) (m n ℓ W_int : ℕ) (ws : ℕ)
     (hm : 0 < m) (hn : 0 < n) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
     (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
     let exact_threshold := ⌊A⌋
     let computed_threshold := dyn_it c_target m n ℓ W_int
     pruning_condition ws computed_threshold → pruning_condition ws exact_threshold := by

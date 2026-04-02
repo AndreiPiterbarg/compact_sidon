@@ -91,7 +91,7 @@ private lemma sum_quadratic_finset {ι : Type*} [DecidableEq ι]
     ∃ A B C : ℤ, ∀ x : ℤ, (∑ i ∈ S, f i x) = A * x ^ 2 + B * x + C := by
   induction S using Finset.induction with
   | empty => exact ⟨0, 0, 0, fun x => by simp⟩
-  | insert ha ih =>
+  | @insert a S ha ih =>
     obtain ⟨A1, B1, C1, h1⟩ := hf _ (Finset.mem_insert_self _ _)
     obtain ⟨A2, B2, C2, h2⟩ := ih (fun i hi => hf i (Finset.mem_insert_of_mem hi))
     exact ⟨A1 + A2, B1 + B2, C1 + C2, fun x => by
@@ -170,7 +170,7 @@ private lemma sum_affine_finset {ι : Type*} [DecidableEq ι]
     ∃ α β : ℤ, ∀ x : ℤ, (∑ i ∈ S, f i x) = α * x + β := by
   induction S using Finset.induction with
   | empty => exact ⟨0, 0, fun x => by simp⟩
-  | insert ha ih =>
+  | @insert a S ha ih =>
     obtain ⟨α1, β1, h1⟩ := hf _ (Finset.mem_insert_self _ _)
     obtain ⟨α2, β2, h2⟩ := ih (fun i hi => hf i (Finset.mem_insert_of_mem hi))
     exact ⟨α1 + α2, β1 + β2, fun x => by rw [Finset.sum_insert ha, h1, h2]; ring⟩
