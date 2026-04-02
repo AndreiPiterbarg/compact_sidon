@@ -1,0 +1,104 @@
+{
+  "sweep_params": {
+    "c_target": 1.35,
+    "max_parents_per_level": 10000,
+    "m_values": [
+      15,
+      20,
+      30,
+      15,
+      20,
+      30
+    ],
+    "n_half_values": [
+      2,
+      3
+    ]
+  },
+  "results": [
+    {
+      "n_half": 2,
+      "m": 15,
+      "d0": 4,
+      "correction": 0.5511111111111111,
+      "l0_compositions": 816,
+      "sample_size": 10000,
+      "l0_time": 0.04547452926635742,
+      "l0_survivors": 132,
+      "l0_pruned_asym": 88,
+      "l0_pruned_test": 188,
+      "levels": [
+        {
+          "level": 1,
+          "d_parent": 4,
+          "d_child": 8,
+          "parents_processed": 132,
+          "parents_requested": 132,
+          "parents_available": 132,
+          "projected_parents": 132,
+          "survivors_out": 6506,
+          "projected_survivors": 6506,
+          "elapsed": 0.13333654403686523,
+          "projected_time": 0.13333654403686523,
+          "total_children": 38382,
+          "throughput": 287858.0682981257,
+          "expansion_factor": 49.28787878787879,
+          "timed_out": false
+        },
+        {
+          "level": 2,
+          "d_parent": 8,
+          "d_child": 16,
+          "parents_processed": 6506,
+          "parents_requested": 6506,
+          "parents_available": 6506,
+          "projected_parents": 6506,
+          "survivors_out": 125882,
+          "projected_survivors": 125882,
+          "elapsed": 1.4285554885864258,
+          "projected_time": 1.4285554885864258,
+          "total_children": 10552142,
+          "throughput": 7386581.819402396,
+          "expansion_factor": 19.348601291115894,
+          "timed_out": false
+        },
+        {
+          "level": 3,
+          "d_parent": 16,
+          "d_child": 32,
+          "parents_processed": 10000,
+          "parents_requested": 10000,
+          "parents_available": 125882,
+          "projected_parents": 125882,
+          "survivors_out": 2966,
+          "projected_survivors": 37336,
+          "elapsed": 9.43688178062439,
+          "projected_time": 118.79335523085597,
+          "total_children": 76148765,
+          "throughput": 8069271.902541692,
+          "expansion_factor": 0.2966,
+          "timed_out": false
+        },
+        {
+          "level": 4,
+          "d_parent": 32,
+          "d_child": 64,
+          "parents_processed": 2966,
+          "parents_requested": 2966,
+          "parents_available": 2966,
+          "projected_parents": 37336,
+          "survivors_out": 0,
+          "projected_survivors": 0,
+          "elapsed": 15.410215854644775,
+          "projected_time": 193.9868792214394,
+          "total_children": 69815296,
+          "throughput": 4530455.423760794,
+          "expansion_factor": 0.0,
+          "timed_out": false
+        }
+      ],
+      "proven_at": "L4",
+      "projected_total": 314.387601014185
+    }
+  ]
+}
