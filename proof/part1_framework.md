@@ -143,31 +143,38 @@ The number of ways to choose d-1 bar positions from S+d-1 total positions is C(S
 Only c_target·m² is scaled by ℓ/(4n). The correction terms (1 + eps + 2·W_int) are NOT scaled.
 Pruning when ws > dyn_it is sound.
 
-**Derivation from MATLAB.**
+**Derivation from Theorem 3.7 (dynamic_threshold_sound).**
 
-MATLAB (line 219): prune when TV_continuous ≥ c_target + ε² + 2ε·W.
+Theorem 3.7 in lower_bound_proof.tex (and the Lean formalization) states:
+
+    TV > c_target + (4n/ℓ) · (1/m² + 2·W/m)
+
+where W = W_int/m is the normalized contributing-bin mass.  The correction
+includes a (4n/ℓ) factor because the discretization error in the windowed
+test value scales as (4n/ℓ)·(1/m² + 2W/m) (Lemma disc-error).
 
 Converting to integer space. TV in Python = ws_int · (4n)/(m²·ℓ) where ws_int = Σ conv_int[k].
 (Derivation: conv_a[k] = (4n/m)² · conv_c[k], so ws_a = (4n/m)² · ws_c.
 TV = ws_a/(4n·ℓ) = ws_c · (4n/m)² / (4n·ℓ) = ws_c · 4n/(m²·ℓ).)
 
 The prune condition TV > threshold becomes:
-    ws_c · 4n/(m²·ℓ) > c_target + 1/m² + 2·W_int/m²
-
-(Here W_int = Σ cᵢ for contributing bins, and 2ε·W = 2·(1/m)·(W_int/m) = 2·W_int/m².)
+    ws_c · 4n/(m²·ℓ) > c_target + (4n/ℓ) · (1/m² + 2·W_int/m²)
 
 Multiply both sides by m²·ℓ/(4n):
-    ws_c > (c_target·m² + 1 + 2·W_int) · ℓ/(4n)
+    ws_c > c_target·m²·ℓ/(4n) + (4n/ℓ)·(1/m² + 2·W_int/m²)·m²·ℓ/(4n)
+         = c_target·m²·ℓ/(4n) + (1 + 2·W_int)
 
-The Python threshold (without margins) = (c_target·m² + 1 + 2·W_int) · ℓ/(4n).
+The (4n/ℓ) in the correction cancels with ℓ/(4n) from the multiplication.
+The Python threshold (without margins) = c_target·m²·ℓ/(4n) + 1 + 2·W_int.
+Only c_target·m² is scaled by ℓ/(4n); the correction terms are NOT scaled.
 
-This **exactly matches** the MATLAB `boundToBeat` converted to integer space. ✓
+This matches the integer-coordinate form in Remark after Theorem 3.7 (line 665). ✓
 
 **Safety margins.** The Python adds:
-- +1e-9·m² to dyn_base: makes dyn_x LARGER → dyn_it LARGER → ws > dyn_it HARDER → fewer prunes (conservative)
+- +1e-9·m² to corr_base: makes dyn_x LARGER → dyn_it LARGER → ws > dyn_it HARDER → fewer prunes (conservative)
 - ×(1-4ε_mach): reduces dyn_x by ~9e-13 → dyn_it slightly SMALLER; but this is dwarfed by the +1e-9·m² margin
 
-Net effect: Python threshold ≥ MATLAB threshold. Python prunes ≤ MATLAB prunes. Conservative/sound. ✓
+Net effect: Python threshold ≥ exact threshold. Python prunes ≤ exact prunes. Conservative/sound. ✓
 
 ---
 
