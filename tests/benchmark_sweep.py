@@ -51,8 +51,8 @@ def compute_x_cap(m, d_child, c_target, n_half_child):
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Also apply Cauchy-Schwarz bound (no correction)
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    # Cauchy-Schwarz bound (+1 for discretization adjustment)
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
     x_cap = min(x_cap, x_cap_cs, m)
     x_cap = max(x_cap, 0)
     return x_cap

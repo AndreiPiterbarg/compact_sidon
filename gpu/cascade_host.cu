@@ -544,7 +544,7 @@ static bool compute_bin_ranges(
     double corr = factor * base_corr;
     double thresh = c_target + corr + 1e-9;
     int x_cap = (int)floor((double)m * sqrt(thresh / (double)d_child));
-    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child));
+    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child)) + 1;
     x_cap = std::min(x_cap, x_cap_cs);
     x_cap = std::min(x_cap, m);
     x_cap = std::max(x_cap, 0);
