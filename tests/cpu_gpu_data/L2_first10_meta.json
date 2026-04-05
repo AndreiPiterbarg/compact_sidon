@@ -7,7 +7,7 @@
   "d_parent": 8,
   "d_child": 16,
   "n_parents": 10,
-  "n_survivors_cpu": 656,
-  "total_children": 656,
-  "elapsed_cpu": 0.0
+  "n_survivors_cpu": 3642,
+  "total_children": 64824,
+  "elapsed_cpu": 0.03
 }

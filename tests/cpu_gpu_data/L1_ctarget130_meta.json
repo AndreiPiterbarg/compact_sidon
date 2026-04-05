@@ -6,8 +6,8 @@
   "level": 1,
   "d_parent": 4,
   "d_child": 8,
-  "n_parents": 85,
-  "n_survivors_cpu": 4453,
-  "total_children": 7446,
-  "elapsed_cpu": 0.0
+  "n_parents": 213,
+  "n_survivors_cpu": 14260,
+  "total_children": 157691,
+  "elapsed_cpu": 0.04
 }
