@@ -1,42 +1,42 @@
 {
   "n_half": 2,
   "m": 20,
-  "c_target": 1.4,
+  "c_target": 1.28,
   "level_completed": 2,
   "d_survivors": 16,
-  "n_survived": 868456,
+  "n_survived": 24828,
   "info": {
     "n_half": 2,
     "m": 20,
     "d0": 4,
-    "c_target": 1.4,
-    "correction": 0.41000000000000003,
-    "l0_time": 0.15354013442993164,
-    "l0_survivors": 467,
-    "l0_pruned_asym": 190,
-    "l0_pruned_test": 234,
+    "c_target": 1.28,
+    "correction": 0.10250000000000001,
+    "l0_time": 0.0690000057220459,
+    "l0_survivors": 213,
+    "l0_pruned_asym": 200,
+    "l0_pruned_test": 478,
     "levels": [
       {
         "level": 1,
         "d_parent": 4,
         "d_child": 8,
-        "parents_in": 467,
-        "total_children": 271448,
-        "children_per_parent": 581.2591006423983,
-        "survivors_out": 167313,
-        "expansion_factor": 358.27194860813705,
-        "elapsed": 10.59182596206665
+        "parents_in": 213,
+        "total_children": 157691,
+        "children_per_parent": 740.3333333333334,
+        "survivors_out": 8708,
+        "expansion_factor": 40.882629107981224,
+        "elapsed": 1.9550068378448486
       },
       {
         "level": 2,
         "d_parent": 8,
         "d_child": 16,
-        "parents_in": 4690,
-        "total_children": 934392,
-        "children_per_parent": 199.23070362473348,
-        "survivors_out": 868456,
-        "expansion_factor": 185.17185501066098,
-        "elapsed": 17.328087091445923
+        "parents_in": 8708,
+        "total_children": 63112592,
+        "children_per_parent": 7247.656407900781,
+        "survivors_out": 24828,
+        "expansion_factor": 2.851171336701883,
+        "elapsed": 4.808368921279907
       }
     ]
   }
