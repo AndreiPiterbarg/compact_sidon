@@ -9,20 +9,16 @@ from math import comb
 
 
 def correction(m, n_half=None, ell_min=2):
-    """Discretization error bound (Lemma 3, corrected).
+    """Discretization error bound (C&S Lemma 3).
 
-    The per-window correction includes a (4n/ell) factor from the test_value
-    normalization. For the max over all windows, the worst case is ell=ell_min=2:
-      correction = (4*n_half/ell_min) * (2/m + 1/m^2)
+    C&S Lemma 3 bounds ||g*g - f*f||_∞ ≤ 2/m + 1/m² (pointwise on the
+    autoconvolution, NOT per-window on the test value).  The correction
+    is window-independent and level-independent — no 4n/ℓ factor.
 
-    When n_half is None, returns the legacy (incorrect) flat correction for
-    backward compatibility with code that handles the factor separately.
+    The n_half and ell_min parameters are accepted for API compatibility
+    but are no longer used in the correction formula.
     """
-    base = 2.0 / m + 1.0 / (m * m)
-    if n_half is None:
-        return base
-    factor = max(1.0, 4.0 * n_half / ell_min)
-    return factor * base
+    return 2.0 / m + 1.0 / (m * m)
 
 
 def asymmetry_threshold(c_target):
