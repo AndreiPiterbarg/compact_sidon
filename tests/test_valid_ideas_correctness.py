@@ -49,8 +49,8 @@ def compute_threshold(c_target, m, n_half_child, ell, W_int):
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m * m
     inv_4n = 1.0 / (4.0 * n_half_child)
-    c_target_m2_ell = c_target * m * m * ell * inv_4n
-    dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * W_int
+    cs_corr_base = c_target * m * m + 3.0 + eps_margin
+    dyn_x = (cs_corr_base + 2.0 * W_int) * ell * inv_4n
     return int(dyn_x * one_minus_4eps)
 
 
@@ -96,7 +96,7 @@ def compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child):
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
     x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)

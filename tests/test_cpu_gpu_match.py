@@ -261,7 +261,7 @@ def compare_threshold_tables():
         for ell_idx in range(ell_count):
             ell = ell_idx + 2
             for W_int in range(m + 1):
-                dyn_x = (c_target * m * m + 1.0 + eps_margin + 2.0 * W_int) \
+                dyn_x = (c_target * m * m + 3.0 + eps_margin + 2.0 * W_int) \
                          * ell / (4.0 * n)
                 # GPU: (int32_t)(dyn_x * one_minus_4eps)  — C truncation
                 gpu_t = int(dyn_x * one_minus_4eps)
@@ -308,7 +308,7 @@ def compare_bin_ranges():
         corr_val = factor * base_corr
         thresh = c_target + corr_val + 1e-9
         x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         x_cap = min(x_cap, x_cap_cs, m)
         x_cap = max(x_cap, 0)
 

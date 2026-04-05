@@ -82,9 +82,10 @@ def compute_threshold_table(m, c_target, d_child, n_half_child):
     table = np.empty(ell_count * m_plus_1, dtype=np.int64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        c_ell = c_target_m2 * float(ell) * inv_4n
+        cs_base = (c_target_m2 + 3.0 + eps_margin) * float(ell) * inv_4n
+        w_scale = 2.0 * float(ell) * inv_4n
         for w in range(m_plus_1):
-            dyn_x = c_ell + 1.0 + eps_margin + 2.0 * float(w)
+            dyn_x = cs_base + w_scale * float(w)
             table[idx * m_plus_1 + w] = int(dyn_x * one_minus_4eps)
     return table
 

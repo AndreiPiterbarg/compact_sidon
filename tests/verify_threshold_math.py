@@ -117,20 +117,20 @@ for ell in range(2, 2 * d + 1):
         matlab_int_thresh = (c_target * m * m + 1 + 2 * W_int) * ell / (4 * n_half)
 
         # =============================================
-        # ORIGINAL CPU formula (pre-commit 6e43a6d)
+        # ORIGINAL CPU formula (pre-commit 6e43a6d, updated to +3)
         # Everything scaled by ell/(4n)
         # =============================================
-        dyn_base_orig = c_target * m * m + 1.0 + eps_margin
+        dyn_base_orig = c_target * m * m + 3.0 + eps_margin
         orig_dyn_x = (dyn_base_orig + 2.0 * W_int) * ell * inv_4n
         orig_dyn_it = int(orig_dyn_x * one_minus_4eps)
         orig_prunes = (ws_int > orig_dyn_it)
 
         # =============================================
-        # CURRENT CPU formula (post-commit 6e43a6d)
-        # Only c_target*m^2 scaled by ell/(4n)
+        # CURRENT CPU formula (corrected C&S + W_g)
+        # Entire threshold scaled by ell/(4n), +3 for W_g correction
         # =============================================
-        ct_base_ell = c_target * m * m * ell * inv_4n
-        curr_dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * W_int
+        cs_corr_base = c_target * m * m + 3.0 + eps_margin
+        curr_dyn_x = (cs_corr_base + 2.0 * W_int) * ell * inv_4n
         curr_dyn_it = int(curr_dyn_x * one_minus_4eps)
         curr_prunes = (ws_int > curr_dyn_it)
 
@@ -178,14 +178,14 @@ for ell in range(2, 2 * d + 1):
         if test_val >= matlab_bound:
             matlab_pruned = True
 
-        dyn_base_orig = c_target * m * m + 1.0 + eps_margin
+        dyn_base_orig = c_target * m * m + 3.0 + eps_margin
         orig_dyn_x = (dyn_base_orig + 2.0 * W_int) * ell * inv_4n
         orig_dyn_it = int(orig_dyn_x * one_minus_4eps)
         if ws_int > orig_dyn_it:
             orig_pruned = True
 
-        ct_base_ell = c_target * m * m * ell * inv_4n
-        curr_dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * W_int
+        cs_corr_base = c_target * m * m + 3.0 + eps_margin
+        curr_dyn_x = (cs_corr_base + 2.0 * W_int) * ell * inv_4n
         curr_dyn_it = int(curr_dyn_x * one_minus_4eps)
         if ws_int > curr_dyn_it:
             curr_pruned = True

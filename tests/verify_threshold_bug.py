@@ -78,11 +78,11 @@ def W_int_for_window(c, ell, s_lo, d):
 
 def threshold_buggy(c_target, m, n_half, ell, W_int):
     """
-    BUGGY formula: ALL terms scaled by ell/(4n).
-    threshold = floor((c_target*m^2 + 1 + eps + 2*W_int) * ell/(4*n_half))
+    CORRECT formula: ALL terms scaled by ell/(4n), +3 for W_g correction.
+    threshold = floor((c_target*m^2 + 3 + eps + 2*W_int) * ell/(4*n_half))
     """
     eps_margin = 1e-9 * m * m
-    dyn_base = c_target * m * m + 1.0 + eps_margin + 2.0 * W_int
+    dyn_base = c_target * m * m + 3.0 + eps_margin + 2.0 * W_int
     dyn_x = dyn_base * ell / (4.0 * n_half)
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
@@ -90,7 +90,7 @@ def threshold_buggy(c_target, m, n_half, ell, W_int):
 
 def threshold_corrected(c_target, m, n_half, ell, W_int):
     """
-    CORRECTED formula: only c_target*m^2 scaled by ell/(4n).
+    OLD formula (Theorem 3.7): only c_target*m^2 scaled by ell/(4n).
     threshold = floor(c_target*m^2*ell/(4*n_half) + 1 + eps + 2*W_int)
     """
     eps_margin = 1e-9 * m * m
@@ -318,12 +318,13 @@ print("PART 5: What does the CURRENT code actually do?")
 print("=" * 70)
 
 print("""
-Current code (run_cascade.py lines 76-78, 117):
-  ct_base_ell_arr[ell] = c_target * m^2 * ell * inv_4n   # = c_target * m^2 * ell/(4n)
-  dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * W_int   # correction NOT scaled
+Current code (run_cascade.py):
+  cs_corr_base = c_target * m^2 + 3.0 + eps_margin
+  ct_base_ell_arr[ell] = cs_corr_base * ell * inv_4n
+  dyn_x = ct_base_ell + w_scale * W_int   # entire threshold scaled by ell/(4n)
 
-This matches the CORRECTED formula:
-  threshold = floor((c_target*m^2*ell/(4n) + 1 + eps + 2*W_int) * (1-4*DBL_EPS))
+This matches the CORRECT formula (C&S Lemma 3 + W_g correction):
+  threshold = floor((c_target*m^2 + 3 + eps + 2*W_int) * ell/(4n) * (1-4*DBL_EPS))
 
 The OLD code (before commit 6e43a6d) had:
   dyn_base = c_target * m^2 + 1.0 + 1e-9*m^2

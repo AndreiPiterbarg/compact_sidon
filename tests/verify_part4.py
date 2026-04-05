@@ -121,7 +121,7 @@ def reference_prune_one_child(child, n_half_child, m, c_target):
         prefix_c[i + 1] = prefix_c[i] + int(child[i])
 
     # 3) Dynamic pruning
-    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
+    dyn_base = c_target * m_d * m_d + 3.0 + 1e-9 * m_d * m_d
     inv_4n = 1.0 / (4.0 * float(n_half_child))
     DBL_EPS = 2.220446049250313e-16
     one_minus_4eps = 1.0 - 4.0 * DBL_EPS
@@ -325,7 +325,7 @@ def verify_item2():
         d_child = 2 * d_parent
 
         # Expected x_cap (Cauchy-Schwarz bound = MATLAB's formula)
-        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         # Test-value bound (corrected: factor * base where factor = max(1, 4*n_half_child/ell_min))
         n_half_child = d_child // 2
         corr = correction(m, n_half_child)
@@ -873,7 +873,7 @@ def verify_item6():
                 prefix_c = [0] * (d_c + 1)
                 for i_c in range(d_c):
                     prefix_c[i_c + 1] = prefix_c[i_c] + int(child[i_c])
-                dyn_base = c_target * float(m) * float(m) + 1.0 + 1e-9 * float(m) * float(m)
+                dyn_base = c_target * float(m) * float(m) + 3.0 + 1e-9 * float(m) * float(m)
                 inv_4n = 1.0 / (4.0 * float(n_half_child))
                 DBL_EPS = 2.220446049250313e-16
                 one_m4e = 1.0 - 4.0 * DBL_EPS

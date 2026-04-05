@@ -48,8 +48,10 @@ def is_pruned_bruteforce(child, c_target, m, n_half_child):
             lo_bin = max(0, s_lo - (d_child - 1))
             hi_bin = min(d_child - 1, s_lo + ell - 2)
             W_int = int(np.sum(child[lo_bin:hi_bin + 1]))
-            c_ell = c_target_m2 * ell * inv_4n
-            dyn_x = c_ell + 1.0 + eps_margin + 2.0 * W_int
+            # C&S Lemma 3 + eq(1) W-refined, corrected for discrete W_g:
+            # +3 = +1 (|ε*ε|≤1/m²) + 2 (W_f≤W_g+1/m, cumulative rounding)
+            cs_corr_base = c_target_m2 + 3.0 + eps_margin
+            dyn_x = (cs_corr_base + 2.0 * W_int) * ell * inv_4n
             dyn_it = int(dyn_x * one_minus_4eps)
             if ws > dyn_it:
                 return True
@@ -61,7 +63,7 @@ def compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child):
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
     x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)

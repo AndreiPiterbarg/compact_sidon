@@ -70,7 +70,7 @@ def compute_threshold(n_half_child, m, c_target, ell, W_int):
     """Compute the dynamic integer threshold (fused kernel formula)."""
     m_d = float(m)
     inv_4n = 1.0 / (4.0 * float(n_half_child))
-    dyn_base = c_target * m_d * m_d + 1.0 + 1e-9 * m_d * m_d
+    dyn_base = c_target * m_d * m_d + 3.0 + 1e-9 * m_d * m_d
     dyn_base_ell = dyn_base * float(ell) * inv_4n
     two_ell_inv_4n = 2.0 * float(ell) * inv_4n
     dyn_x = dyn_base_ell + two_ell_inv_4n * float(W_int)
