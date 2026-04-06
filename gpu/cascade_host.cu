@@ -71,17 +71,18 @@ extern __global__ void cascade_kernel(
 /* ═══════════════════════════════════════════════════════════════════
  *  build_threshold_table
  *
- *  Precomputes int32 thresholds on the CPU.  Only c_target*m^2 is
- *  scaled by ell/(4n); the correction (1 + eps + 2*W_int) is NOT:
+ *  Precomputes int32 thresholds on the CPU.  The ENTIRE expression
+ *  (c_target*m^2 + 3 + eps_margin + 2*W_int) is scaled by ell/(4n):
  *
- *    dyn_x = c_target * m^2 * ell/(4n) + 1.0 + eps_margin + 2.0 * W_int
+ *    dyn_x = (c_target * m^2 + 3.0 + eps_margin + 2.0 * W_int) * ell/(4n)
  *    dyn_it = (int32_t)(dyn_x * one_minus_4eps)
  *
- *  Derivation: test-value prune condition
- *    TV > c_target + (4n/ell)*(1/m^2 + 2*W/m),
- *  multiplied by m^2*ell/(4n).  See Theorem 3.7 (dynamic_threshold_sound)
- *  in proof/lower_bound_proof.tex.  Matches the Lean formal proof and
- *  the CPU fused kernel (_fused_generate_and_prune_gray).
+ *  Derivation (C&S Lemma 3 + eq(1) W-refinement):
+ *    Pointwise: (g*g)(x) <= (f*f)(x) + 2*W_f(x)/m + 1/m^2
+ *    Since W_f <= W_g + 1/m (cumulative rounding): correction <= 2*W_g/m + 3/m^2
+ *    Multiply by m^2*ell/(4n): threshold = (c*m^2 + 3 + 2*W_int) * ell/(4n)
+ *  See Theorem 3.7 (dynamic_threshold_sound) in proof/lower_bound_proof.tex.
+ *  Matches the CPU fused kernel (_fused_generate_and_prune_gray).
  *
  *  where:
  *    n = n_half_child = d_child / 2
@@ -99,15 +100,18 @@ void build_threshold_table(int32_t* table,
     double DBL_EPS = 2.220446049250313e-16;
     double one_minus_4eps = 1.0 - 4.0 * DBL_EPS;
     double eps_margin = 1e-9 * m_d * m_d;
-    double c_target_m2 = c_target * m_d * m_d;
+    double cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin;
 
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int ell_idx = ell - 2;
-        double c_target_m2_ell = c_target_m2 * (double)ell * inv_4n;
+        double ell_scale = (double)ell * inv_4n;
+        double ct_base_ell = cs_corr_base * ell_scale;
+        double w_scale = 2.0 * ell_scale;
         for (int w = 0; w <= m; w++) {
-            double dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * (double)w;
-            /* int32 is safe: max threshold = c_target*m^2 + 1 + eps + 2*m
-             * ~ 601 for m=20, ~56401 for m=200.
+            double dyn_x = ct_base_ell + w_scale * (double)w;
+            /* int32 is safe: max threshold = (c_target*m^2+3+eps+2*m)*ell/(4n)
+             * At ell=2*d_child, ell/(4n) = 1, so max ~ c_target*m^2+3+eps+2*m
+             * ~ 603 for m=20, ~56403 for m=200.
              * All values << INT32_MAX (2,147,483,647). */
             table[ell_idx * (m + 1) + w] = (int32_t)(dyn_x * one_minus_4eps);
         }
@@ -592,13 +596,16 @@ static bool tighten_ranges(
     int m_plus_1 = m + 1;
     int ell_count = conv_len;
 
-    /* Build threshold table (GPU formula: only c_target*m^2 scaled) */
+    /* Build threshold table (corrected: entire expression scaled by ell/(4n)) */
+    double cs_corr_base = c_target_m2 + 3.0 + eps_margin;
     std::vector<int32_t> threshold_table(ell_count * m_plus_1);
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int idx = ell - 2;
-        double c_m2_ell = c_target_m2 * (double)ell * inv_4n;
+        double ell_scale = (double)ell * inv_4n;
+        double ct_base_ell = cs_corr_base * ell_scale;
+        double w_scale = 2.0 * ell_scale;
         for (int w = 0; w <= m; w++) {
-            double dyn_x = c_m2_ell + 1.0 + eps_margin + 2.0 * (double)w;
+            double dyn_x = ct_base_ell + w_scale * (double)w;
             threshold_table[idx * m_plus_1 + w] = (int32_t)(dyn_x * one_minus_4eps);
         }
     }
