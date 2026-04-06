@@ -100,7 +100,7 @@ __device__ void incremental_conv_update(
     int delta2 = new2 - old2;
     int idx = k1 + lane;
 
-    if (idx < conv_len && lane <= d_child) {
+    if (idx < conv_len && lane < d_child) {
         int32_t delta_total = 0;
 
         /* Self-terms at specific indices:
@@ -138,16 +138,33 @@ __device__ void incremental_conv_update(
             conv[idx] += delta_total;
     }
 
-    /* Extra address: conv[k1+d_child] = conv[k2+d_child-1].
-     * Only the delta2 contribution from child[d_child-1].
-     * Handled by lane 0 (which writes to conv[k1+0], a different address). */
+    /* Extra address: conv[k1+d_child].
+     * The main body covers lanes 0..d_child-1.  The address conv[k1+d_child]
+     * is NOT covered by the main body, so lane 0 handles it here.
+     *
+     * Two contributions may land at this index:
+     *   1. Self-term conv[2*k2] when k1+2 == d_child (pos == d_parent-1)
+     *   2. Delta2 cross-term from child[d_child-1] (when d_child-1 ∉ {k1,k2})
+     */
     if (lane == 0) {
         int extra_idx = k1 + d_child;
-        int jlast = d_child - 1;
-        if (extra_idx < conv_len && jlast != k1 && jlast != k2) {
-            int cj = child[jlast];
-            if (cj != 0)
-                conv[extra_idx] += 2 * delta2 * cj;
+        if (extra_idx < conv_len) {
+            int32_t extra_delta = 0;
+
+            /* Self-term conv[2*k2] = conv[k1+k1+2] at lane=k1+2=d_child */
+            if (k1 + 2 == d_child)
+                extra_delta += new2 * new2 - old2 * old2;
+
+            /* Delta2 cross-term from child[d_child-1] */
+            int jlast = d_child - 1;
+            if (jlast != k1 && jlast != k2) {
+                int cj = child[jlast];
+                if (cj != 0)
+                    extra_delta += 2 * delta2 * cj;
+            }
+
+            if (extra_delta != 0)
+                conv[extra_idx] += extra_delta;
         }
     }
 
