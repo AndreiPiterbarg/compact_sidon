@@ -539,16 +539,16 @@ static bool compute_bin_ranges(
 {
     /* correction(m, n_half_child):
      * Matches pruning.py correction() exactly:
-     *   base = 2.0/m + 1.0/(m*m)
-     *   factor = max(1.0, 4.0*n_half_child/ell_min)  where ell_min=2
-     *   correction = factor * base */
-    int n_half_child = d_child / 2;
-    double base_corr = 2.0 / (double)m + 1.0 / ((double)m * (double)m);
-    double factor = std::max(1.0, 4.0 * (double)n_half_child / 2.0);
-    double corr = factor * base_corr;
+     *   correction = 2.0/m + 1.0/(m*m)
+     * The n_half parameter is accepted for API compat but not used.
+     * (Old formula multiplied by max(1, 4*n_half_child/2) — removed
+     * to match CPU source of truth; see pruning.py docstring.) */
+    double corr = 2.0 / (double)m + 1.0 / ((double)m * (double)m);
     double thresh = c_target + corr + 1e-9;
     int x_cap = (int)floor((double)m * sqrt(thresh / (double)d_child));
-    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child)) + 1;
+    /* Cauchy-Schwarz bound: no correction needed (doesn't go through
+     * test-value).  No +1: matches CPU _compute_bin_ranges exactly. */
+    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child));
     x_cap = std::min(x_cap, x_cap_cs);
     x_cap = std::min(x_cap, m);
     x_cap = std::max(x_cap, 0);

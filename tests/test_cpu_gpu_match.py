@@ -302,13 +302,11 @@ def compare_bin_ranges():
         d_child = 2 * d_parent
         n_half_child = d_child // 2
 
-        # Compute x_cap the same way as GPU host code
-        base_corr = 2.0 / m + 1.0 / (m * m)
-        factor = max(1.0, 4.0 * n_half_child / 2.0)
-        corr_val = factor * base_corr
+        # Compute x_cap the same way as GPU host code (matches CPU)
+        corr_val = 2.0 / m + 1.0 / (m * m)
         thresh = c_target + corr_val + 1e-9
         x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
+        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
         x_cap = min(x_cap, x_cap_cs, m)
         x_cap = max(x_cap, 0)
 
