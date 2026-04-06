@@ -59,31 +59,18 @@ def full_cascade(m, c_target, n_workers=None):
 
         t_lv = time.time()
 
-        if n_parents > 100 and n_workers > 1:
-            # Parallel processing
-            args = [(surv[i], m, c_target, n_half_child) for i in range(n_parents)]
-            with mp.Pool(n_workers) as pool:
-                all_results = []
-                done = 0
-                for ch in pool.imap_unordered(process_one_parent, args, chunksize=max(1, n_parents//(n_workers*4))):
-                    done += 1
-                    if len(ch) > 0:
-                        all_results.append(ch)
-                    if done % max(1, n_parents//10) == 0:
-                        elapsed = time.time() - t_lv
-                        rate = done / elapsed
-                        eta = (n_parents - done) / rate if rate > 0 else 0
-                        n_ch = sum(len(c) for c in all_results)
-                        print("    L%d: %d/%d (%.0f/s ETA %.0fs) %d children" % (
-                            level, done, n_parents, rate, eta, n_ch), flush=True)
-            all_ch = all_results
-        else:
-            # Sequential
-            all_ch = []
-            for pi in range(n_parents):
-                ch, _ = process_parent_fused(surv[pi], m, c_target, n_half_child)
-                if len(ch) > 0:
-                    all_ch.append(ch)
+        all_ch = []
+        for pi in range(n_parents):
+            ch, _ = process_parent_fused(surv[pi], m, c_target, n_half_child)
+            if len(ch) > 0:
+                all_ch.append(ch)
+            if (pi+1) % max(1, n_parents//10) == 0:
+                elapsed_lv = time.time() - t_lv
+                rate = (pi+1) / elapsed_lv
+                eta = (n_parents - pi - 1) / rate if rate > 0 else 0
+                n_ch = sum(len(c) for c in all_ch)
+                print("    L%d: %d/%d (%.0f/s ETA %.0fs) %d children" % (
+                    level, pi+1, n_parents, rate, eta, n_ch), flush=True)
 
         if all_ch:
             surv = np.unique(np.vstack(all_ch), axis=0)
@@ -169,5 +156,4 @@ def main():
 
 
 if __name__ == '__main__':
-    mp.set_start_method('spawn', force=True)
     main()
