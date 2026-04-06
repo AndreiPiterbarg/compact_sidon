@@ -157,7 +157,8 @@ class Session:
 
         return rc
 
-    def launch(self, level, max_survivors=None, auto_teardown=False):
+    def launch(self, level, max_survivors=None, auto_teardown=False,
+               m=None, c_target=None):
         """Launch cascade prover in a detached tmux session."""
         from .remote import launch_cascade, check_job_status
 
@@ -187,7 +188,8 @@ class Session:
         rc = launch_cascade(self.ssh_host, self.ssh_port, level,
                             max_survivors=max_survivors,
                             auto_teardown=auto_teardown,
-                            api_key=api_key, pod_id=self.pod_id)
+                            api_key=api_key, pod_id=self.pod_id,
+                            m=m, c_target=c_target)
         if rc != 0:
             print(f"Failed to launch (exit code {rc})")
             sys.exit(1)
@@ -197,6 +199,69 @@ class Session:
         print(f"  gpupod logs -f     # follow live")
         print(f"  gpupod fetch       # pull results")
         print(f"  gpupod teardown    # stop + collect")
+
+    def prove(self, m=35, c_target=1.33, max_level=3, auto_teardown=False,
+              detached=True):
+        """Run the full cascade proof (L0 generation + all GPU levels)."""
+        from .remote import (run_full_proof, launch_full_proof,
+                             check_job_status)
+
+        self._require_active()
+        ok, msg = self.budget.check()
+        print(msg)
+        if not ok:
+            print("Budget exceeded. Tear down the pod.")
+            sys.exit(1)
+
+        status = check_job_status(self.ssh_host, self.ssh_port)
+        if status == "RUNNING":
+            print("A GPU job is already running on the pod!")
+            print("Use 'logs' to check it, or 'logs -f' to follow live.")
+            sys.exit(1)
+
+        if detached:
+            api_key = None
+            if auto_teardown:
+                from .config import RUNPOD_API_KEY
+                if not RUNPOD_API_KEY or not self.pod_id:
+                    print("WARNING: --auto-teardown requires RUNPOD_API_KEY.")
+                    auto_teardown = False
+                else:
+                    api_key = RUNPOD_API_KEY
+
+            print(f"Launching full proof: m={m}, c_target={c_target}, "
+                  f"max_level={max_level} (detached)...")
+            rc = launch_full_proof(
+                self.ssh_host, self.ssh_port,
+                m=m, c_target=c_target, max_level=max_level,
+                auto_teardown=auto_teardown,
+                api_key=api_key, pod_id=self.pod_id)
+            if rc != 0:
+                print(f"Failed to launch (exit code {rc})")
+                sys.exit(1)
+
+            print(f"\nFull proof launched in background.")
+            print(f"  gpupod logs        # see output")
+            print(f"  gpupod logs -f     # follow live")
+            print(f"  gpupod fetch       # pull results")
+            print(f"  gpupod teardown    # stop + collect")
+        else:
+            timeout = int(self.budget.max_remaining_seconds())
+            if timeout < 60:
+                print(f"Only {timeout}s of budget remaining.")
+                sys.exit(1)
+
+            log_dir = str(PROJECT_ROOT / "data")
+            rc = run_full_proof(
+                self.ssh_host, self.ssh_port,
+                m=m, c_target=c_target, max_level=max_level,
+                timeout=timeout, log_dir=log_dir)
+
+            print(self.budget.status_line())
+            if auto_teardown:
+                print("\n=== AUTO-TEARDOWN ===")
+                self.teardown()
+            return rc
 
     def status(self):
         """Show pod state, job state, and budget."""

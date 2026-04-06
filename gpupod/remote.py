@@ -116,7 +116,7 @@ def build_cuda(ssh_host, ssh_port):
 
 
 def install_deps(ssh_host, ssh_port):
-    """Install Python dependencies (numpy only — needed for .npy I/O checks)."""
+    """Install Python dependencies (numpy + numba for L0 generation)."""
     print("Installing dependencies on pod...")
 
     # Ensure tmux is available
@@ -133,19 +133,19 @@ def install_deps(ssh_host, ssh_port):
     except subprocess.TimeoutExpired:
         print("Warning: tmux install timed out (non-fatal)")
 
-    # The pytorch docker image already has numpy, but install anyway
-    cmd = "pip install -q numpy 2>&1 | tail -3"
-    result = ssh_run(ssh_host, ssh_port, cmd, timeout=120)
+    # numpy + numba: needed for L0 checkpoint generation (run_cascade.py uses numba JIT)
+    cmd = "pip install -q numpy numba 2>&1 | tail -5"
+    result = ssh_run(ssh_host, ssh_port, cmd, timeout=300)
     if isinstance(result, int):
         pass
     elif result.returncode != 0:
         print(f"Warning: pip install issues: {result.stderr}")
     else:
-        print("  numpy: OK")
+        print("  numpy + numba: OK")
 
 
 def run_cascade(ssh_host, ssh_port, level, max_survivors=None,
-                timeout=None, log_dir=None):
+                timeout=None, log_dir=None, m=None, c_target=None):
     """Run the GPU cascade prover for a specific level."""
     from datetime import datetime
 
@@ -156,10 +156,16 @@ def run_cascade(ssh_host, ssh_port, level, max_survivors=None,
         log_file = os.path.join(log_dir, f"gpu_L{level}_{timestamp}.log")
         print(f"Logging to: {log_file}")
 
+    env_prefix = ""
+    if m is not None:
+        env_prefix += f"M={m} "
+    if c_target is not None:
+        env_prefix += f"C_TARGET={c_target} "
+
     cmd = (
         f"cd {REMOTE_WORKDIR}/gpu && "
         f"chmod +x run.sh && "
-        f"./run.sh {level}"
+        f"{env_prefix}./run.sh {level}"
     )
     if max_survivors:
         cmd += f" {max_survivors}"
@@ -169,6 +175,32 @@ def run_cascade(ssh_host, ssh_port, level, max_survivors=None,
                  log_file=log_file)
     if rc != 0:
         print(f"Cascade level {level} exited with code {rc}")
+    return rc
+
+
+def run_full_proof(ssh_host, ssh_port, m=35, c_target=1.33, max_level=3,
+                   timeout=None, log_dir=None):
+    """Run the full GPU cascade proof (L0 generation + all levels)."""
+    from datetime import datetime
+
+    log_file = None
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join(log_dir, f"gpu_proof_m{m}_c{c_target}_{timestamp}.log")
+        print(f"Logging to: {log_file}")
+
+    cmd = (
+        f"cd {REMOTE_WORKDIR}/gpu && "
+        f"chmod +x run_full_proof.sh && "
+        f"./run_full_proof.sh --m {m} --c_target {c_target} --max_level {max_level}"
+    )
+
+    print(f"Running full proof: m={m}, c_target={c_target}, max_level={max_level}...")
+    rc = ssh_run(ssh_host, ssh_port, cmd, timeout=timeout, stream=True,
+                 log_file=log_file)
+    if rc != 0:
+        print(f"Full proof exited with code {rc}")
     return rc
 
 
@@ -194,7 +226,8 @@ TMUX_SESSION = "gpujob"
 
 
 def launch_cascade(ssh_host, ssh_port, level, max_survivors=None,
-                   auto_teardown=False, api_key=None, pod_id=None):
+                   auto_teardown=False, api_key=None, pod_id=None,
+                   m=None, c_target=None):
     """Launch cascade prover in a detached tmux session."""
     try:
         ssh_run(ssh_host, ssh_port,
@@ -214,9 +247,60 @@ def launch_cascade(ssh_host, ssh_port, level, max_survivors=None,
             f">> {REMOTE_LOG} 2>&1; "
         )
 
-    run_cmd = f"cd {REMOTE_WORKDIR}/gpu && ./run.sh {level}"
+    env_prefix = ""
+    if m is not None:
+        env_prefix += f"M={m} "
+    if c_target is not None:
+        env_prefix += f"C_TARGET={c_target} "
+
+    run_cmd = f"cd {REMOTE_WORKDIR}/gpu && {env_prefix}./run.sh {level}"
     if max_survivors:
         run_cmd += f" {max_survivors}"
+
+    tmux_inner = (
+        f"set -o pipefail; "
+        f"{run_cmd} 2>&1 | tee {REMOTE_LOG}; "
+        f"echo ===JOB_EXIT_CODE=$?=== >> {REMOTE_LOG}; "
+        f"{teardown_cmd}"
+        f"true"
+    )
+    cmd = (
+        f"mkdir -p {REMOTE_WORKDIR}/data && "
+        f"tmux new-session -d -s {TMUX_SESSION} "
+        f"bash -c '{tmux_inner}'"
+    )
+    result = ssh_run(ssh_host, ssh_port, cmd, timeout=30)
+    if isinstance(result, int):
+        return result
+    return result.returncode
+
+
+def launch_full_proof(ssh_host, ssh_port, m=35, c_target=1.33, max_level=3,
+                      auto_teardown=False, api_key=None, pod_id=None):
+    """Launch the full cascade proof in a detached tmux session."""
+    try:
+        ssh_run(ssh_host, ssh_port,
+                f"tmux kill-session -t {TMUX_SESSION} 2>/dev/null; true",
+                timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
+
+    teardown_cmd = ""
+    if auto_teardown and api_key and pod_id:
+        teardown_cmd = (
+            f"echo '=== AUTO-TEARDOWN: terminating pod ===' >> {REMOTE_LOG}; "
+            f"curl -s -X POST https://api.runpod.io/graphql "
+            f"-H 'Content-Type: application/json' "
+            f"-H 'api-key: {api_key}' "
+            f"-d '{{\"query\":\"mutation {{ podTerminate(input: {{podId: \\\"{pod_id}\\\"}}) }}\"}}' "
+            f">> {REMOTE_LOG} 2>&1; "
+        )
+
+    run_cmd = (
+        f"cd {REMOTE_WORKDIR}/gpu && "
+        f"chmod +x run_full_proof.sh && "
+        f"./run_full_proof.sh --m {m} --c_target {c_target} --max_level {max_level}"
+    )
 
     tmux_inner = (
         f"set -o pipefail; "

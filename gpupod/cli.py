@@ -10,6 +10,7 @@ Commands:
     upload <file.npy>    Upload checkpoint to pod's data/ directory
     run <level>          Run cascade level interactively (1-4)
     launch <level>       Run cascade level detached (survives disconnect)
+    prove                Full proof: generate L0 + run all GPU levels (detached)
     logs [-f]            Show output from launched job
     fetch                Pull results from pod to local data/
     status               Show pod state, job state, + budget
@@ -17,7 +18,16 @@ Commands:
     teardown             Collect results + destroy pod
     cleanup              Emergency: terminate ALL pods
 
-Typical workflow:
+Quick proof (recommended):
+    gpupod start
+    gpupod prove                                  # m=35, c=1.33 (default)
+    gpupod prove --m 35 --c_target 1.33           # explicit
+    gpupod prove --auto-teardown                  # auto-destroy pod when done
+    gpupod logs -f                                # follow progress
+    gpupod fetch
+    gpupod teardown
+
+Level-by-level workflow:
     gpupod start
     gpupod upload data/checkpoint_L0_survivors.npy
     gpupod run 1          # L0→L1, watch progress
@@ -72,16 +82,39 @@ def main():
 
     elif command == "launch":
         if len(sys.argv) < 3:
-            print("Usage: gpupod launch <level> [--auto-teardown]")
+            print("Usage: gpupod launch <level> [--auto-teardown] [--m M] [--c_target C]")
             sys.exit(1)
         auto_teardown = "--auto-teardown" in sys.argv
         level = int(sys.argv[2])
         max_survivors = None
+        m = None
+        c_target = None
         for i, arg in enumerate(sys.argv):
             if arg == "--max-survivors" and i + 1 < len(sys.argv):
                 max_survivors = int(sys.argv[i + 1])
+            elif arg == "--m" and i + 1 < len(sys.argv):
+                m = int(sys.argv[i + 1])
+            elif arg == "--c_target" and i + 1 < len(sys.argv):
+                c_target = float(sys.argv[i + 1])
         session.launch(level, max_survivors=max_survivors,
-                       auto_teardown=auto_teardown)
+                       auto_teardown=auto_teardown, m=m, c_target=c_target)
+
+    elif command == "prove":
+        auto_teardown = "--auto-teardown" in sys.argv
+        interactive = "--interactive" in sys.argv
+        m = 35
+        c_target = 1.33
+        max_level = 3
+        for i, arg in enumerate(sys.argv):
+            if arg == "--m" and i + 1 < len(sys.argv):
+                m = int(sys.argv[i + 1])
+            elif arg == "--c_target" and i + 1 < len(sys.argv):
+                c_target = float(sys.argv[i + 1])
+            elif arg == "--max_level" and i + 1 < len(sys.argv):
+                max_level = int(sys.argv[i + 1])
+        session.prove(m=m, c_target=c_target, max_level=max_level,
+                      auto_teardown=auto_teardown,
+                      detached=not interactive)
 
     elif command == "logs":
         follow = "-f" in sys.argv[2:]
