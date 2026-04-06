@@ -6,11 +6,14 @@
 #   ./run.sh <level> [max_survivors]    # override survivor cap
 #   ./run.sh custom <parents.npy> <output.npy> --d_parent D --m M --c_target C
 #
-# Levels (with default parameters: n_half=2, m=20, c_target=1.4):
-#   1: L0→L1  (d_parent=4,  d_child=8,   ~467 parents)
-#   2: L1→L2  (d_parent=8,  d_child=16,  ~167K parents)
-#   3: L2→L3  (d_parent=16, d_child=32,  ~7.5M parents)
-#   4: L3→L4  (d_parent=32, d_child=64,  ~147M parents)
+# Environment variables (override defaults):
+#   M=35 C_TARGET=1.33 ./run.sh 3
+#
+# Levels:
+#   1: L0→L1  (d_parent=4,  d_child=8)
+#   2: L1→L2  (d_parent=8,  d_child=16)
+#   3: L2→L3  (d_parent=16, d_child=32)
+#   4: L3→L4  (d_parent=32, d_child=64)
 
 set -euo pipefail
 
@@ -24,9 +27,9 @@ if [ ! -x "$PROVER" ]; then
     exit 1
 fi
 
-# Parameters
-M=20
-C_TARGET=1.4
+# Parameters — override via environment variables
+M="${M:-20}"
+C_TARGET="${C_TARGET:-1.4}"
 
 if [ "${1:-}" = "custom" ]; then
     shift
