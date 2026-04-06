@@ -1,46 +1,70 @@
 #!/bin/bash
-# Run this INSIDE the RunPod SSH session.
-# It clones the repo, installs deps, builds the GPU kernel, and runs proofs.
+# deploy_and_run.sh — Run this INSIDE the RunPod GPU pod SSH session.
+#
+# Sets up the environment, builds the CUDA kernel, and runs the full
+# cascade proof for c_target=1.33, m=35.
+#
+# Usage (from SSH into RunPod pod):
+#   bash deploy_and_run.sh
+#   bash deploy_and_run.sh --c_target 1.35
+#   bash deploy_and_run.sh --m 35 --c_target 1.33 --max_level 3
 
-set -e
+set -euo pipefail
 
-echo "=== SETUP ==="
-cd /workspace
+# Default proof parameters
+M="${M:-35}"
+C_TARGET="${C_TARGET:-1.33}"
+MAX_LEVEL="${MAX_LEVEL:-3}"
 
-# Clone repo (or pull if exists)
-if [ -d compact_sidon ]; then
-    cd compact_sidon && git pull && cd ..
-else
-    git clone https://github.com/AndreiPiterbarg/compact_sidon.git 2>/dev/null || {
-        echo "Git clone failed. Trying to copy files..."
-        echo "Please upload the repo manually."
-        exit 1
-    }
-fi
-cd compact_sidon
+# Parse arguments (override defaults)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --m)        M="$2"; shift 2;;
+        --c_target) C_TARGET="$2"; shift 2;;
+        --max_level) MAX_LEVEL="$2"; shift 2;;
+        *)          shift;;  # ignore unknown args
+    esac
+done
 
-# Install Python deps
-pip install numpy numba 2>/dev/null || pip3 install numpy numba 2>/dev/null
+WORKDIR="/workspace/sidon-autocorrelation"
 
-echo "=== BUILDING GPU KERNEL ==="
-mkdir -p /tmp/sidon_gpu
-cp gpu/cascade_kernel.cu gpu/cascade_host.cu gpu/cascade_kernel.h /tmp/sidon_gpu/
-cd /tmp/sidon_gpu
+echo "══════════════════════════════════════════════════════════════"
+echo "  Sidon GPU Proof — Deploy & Run"
+echo "  m=$M  c_target=$C_TARGET  max_level=$MAX_LEVEL"
+echo "═══════════════════���══════════════════════════════════════════"
+echo ""
 
-# Detect GPU arch
-GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
-echo "GPU compute capability: sm_${GPU_ARCH}"
+# ── Step 1: Verify GPU ──
+echo "=== GPU CHECK ==="
+nvidia-smi --query-gpu=name,memory.total,driver_version,compute_cap --format=csv,noheader
+echo ""
 
-nvcc -arch=sm_${GPU_ARCH} -O3 -ftz=false -prec-div=true -prec-sqrt=true -fmad=false \
-    -lineinfo cascade_kernel.cu cascade_host.cu -o cascade_prover.exe && echo "BUILD OK" || {
-    echo "BUILD FAILED"
+# ── Step 2: Verify code is synced ──
+if [ ! -d "$WORKDIR/gpu" ]; then
+    echo "Error: $WORKDIR/gpu not found."
+    echo "Code must be synced first (gpupod start does this automatically)."
+    echo "Or run: gpupod sync"
     exit 1
-}
+fi
+echo "Code directory: $WORKDIR"
 
-echo "=== RUNNING PROOFS ==="
-cd /workspace/compact_sidon
+# ── Step 3: Install Python deps (for L0 generation) ──
+echo ""
+echo "=== INSTALLING DEPENDENCIES ==="
+pip install -q numpy numba 2>&1 | tail -3
+echo "  numpy + numba: OK"
 
-# Run the CPU cascade proof script
-python3 run_proof.py --m 35 --c_targets 1.28,1.30,1.33,1.35,1.37,1.40 --workers $(nproc)
+# ── Step 4: Build CUDA kernel ──
+echo ""
+echo "=== BUILDING CUDA KERNEL ==="
+cd "$WORKDIR/gpu"
+chmod +x build.sh run_full_proof.sh
+./build.sh release
 
-echo "=== DONE ==="
+# ── Step 5: Run the full proof ��─
+echo ""
+echo "=== RUNNING FULL CASCADE PROOF ==="
+./run_full_proof.sh --m "$M" --c_target "$C_TARGET" --max_level "$MAX_LEVEL"
+
+echo ""
+echo "=== DEPLOY & RUN COMPLETE ==="
