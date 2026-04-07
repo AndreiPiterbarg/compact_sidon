@@ -157,13 +157,11 @@ and the \emph{autoconvolution constant} is
 \]
 \end{definition}
 
-\begin{remark}[Normalization and the formal ratio]
 By homogeneity, $R(\lambda f)=R(f)$ for every $\lambda>0$, so one may
-normalize $\int f=1$.  The Lean definition
-\path{autoconvolution_ratio} uses the essential supremum
-\path{eLpNorm} of $f*f$; for $f\in\mathcal{F}$ this agrees with the
-maximum of $f*f$ on $[-\tfrac12,\tfrac12]$ because $f*f$ is continuous.
-\end{remark}
+normalize $\int f=1$ without loss of generality.  The Lean definition
+\texttt{autoconvolution\_ratio} uses the essential supremum via
+\texttt{eLpNorm}; for $f\in\mathcal{F}$ this agrees with the pointwise
+maximum because $f*f$ is continuous.
 
 \medskip
 
@@ -323,11 +321,8 @@ the sum of the bin integrals is $\int f=1$, and the second identity is
 obtained by multiplying by $4n$.
 \end{proof}
 
-\begin{remark}[Formal counterpart]
-The Lean lemma \path{sum_bin_masses_eq_one} is exactly the first
-identity above.  It is used repeatedly to normalize the cumulative
-discretization map introduced in Section~\ref{sec:disc}.
-\end{remark}
+The Lean counterpart is the lemma
+\texttt{sum\_bin\_masses\_eq\_one}.
 
 \begin{definition}
 The \emph{normalized mass simplex} and the \emph{bin-average simplex}
@@ -405,22 +400,16 @@ $\|h\|_{L^\infty}\ge |J|^{-1}\int_J h$ to this interval gives the
 claimed lower bound.
 \end{proof}
 
-\begin{remark}[Formal counterpart]
-The Lean theorem \path{continuous_test_value_le_ratio} is the
-formal version of Lemma~\ref{lem:bin-reduction}.  Its statement is
-\emph{per window}: for each admissible $(\ell,s_{\mathrm{lo}})$ with
-$\ell\ge 2$, the continuous windowed test value is bounded above by the
-autoconvolution ratio.  The maximized reduction used in the paper is
-obtained only after taking the maximum over all windows.
-\end{remark}
+The Lean counterpart is
+\texttt{continuous\_test\_value\_le\_ratio}, stated per window;
+the maximized version follows by taking the supremum over all admissible
+$(\ell,s_{\mathrm{lo}})$.
 
-\begin{remark}[Intuition]
-The products $a_i a_j$ quantify how much mass from bins $i$ and $j$
-can contribute to the autoconvolution.  Narrow windows carry the
-favorable prefactor $\tfrac{1}{4n\ell}$ but capture fewer pairs; wider
-windows capture more pairs but average over a longer interval.  The
-branch-and-prune computation exploits this competition.
-\end{remark}
+Geometrically, the products $a_i a_j$ quantify how much mass from
+bins $i$ and $j$ can contribute to the autoconvolution.  Narrow windows
+carry the favorable prefactor $\tfrac{1}{4n\ell}$ but capture fewer
+pairs; wider windows capture more pairs but average over a longer
+interval.  The branch-and-prune computation exploits this trade-off.
 
 
 % ======================================================================
@@ -497,10 +486,9 @@ $c=(c_0,\dots,c_{d-1})$ by
 The associated normalized lattice point is $w_i=c_i/m$.
 \end{definition}
 
-\begin{remark}[Exact formal definition]
-The Lean definition \path{canonical_discretization} is applied
-directly to the function $f$.  It forms the same cumulative-floor
-expression, but writes
+More precisely, the Lean definition
+\texttt{canonical\_discretization} is applied to the function $f$ and
+writes
 \[
   D_f(k)
   \;=\;
@@ -510,9 +498,8 @@ expression, but writes
   \right\rfloor
 \]
 in terms of the bin masses $\mu_i=\int_{I_i}f$.  By
-Lemma~\ref{lem:sum-bin-masses}, the denominator is $1$ once
-$\int f=1$.
-\end{remark}
+Lemma~\ref{lem:sum-bin-masses}, the denominator is~$1$ once
+$\int f=1$, recovering Definition~\ref{def:canonical-disc}.
 
 \begin{proposition}[Basic properties of the canonical discretization]
 \label{prop:canonical-disc-basic}
@@ -540,9 +527,9 @@ For the coordinate error, write
 \]
 and use the elementary floor bounds
 $-1<\lfloor x\rfloor-x\le 0$.  In Lean these statements are formalized
-by \path{canonical_discretization_sum_eq_m} together with the
+by \texttt{canonical\_discretization\_sum\_eq\_m} together with the
 coordinatewise estimate proved in
-\path{Sidon/DiscretizationError.lean}.
+\texttt{Sidon/DiscretizationError.lean}.
 \end{proof}
 
 \subsection{The Discretization Error Bound}
@@ -570,7 +557,7 @@ Equivalently,
   \right\},
 \]
 which is the content of the Lean theorem
-\path{contributing_bins_iff}.
+\texttt{contributing\_bins\_iff}.
 
 The next estimate is the exact per-window bound used later in the main
 theorem.
@@ -670,15 +657,7 @@ and the second shows that the discrete test value exceeds the
 continuous one by at most the correction term displayed above.
 \end{proof}
 
-\begin{remark}[Formal counterpart]
-The Lean theorem \path{dynamic_threshold_sound} is the formal
-statement of Theorem~\ref{lem:dynamic-correction}.  Its hypotheses are
-organized in terms of the explicit composition
-$c$, written in Lean as \path{canonical_discretization f n m}, the normalized
-contributing-bin mass
-$W = m^{-1}\sum_{i\in\mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} c_i$, and a
-single window whose discrete test value exceeds the threshold.
-\end{remark}
+The Lean counterpart is \texttt{dynamic\_threshold\_sound}.
 
 \begin{remark}[Integer-coordinate form]
 If
@@ -726,12 +705,10 @@ In words: compute the autoconvolution, slide a window of each possible
 width $\ell$ across it, sum the $\ell - 1$ consecutive entries in each
 window position, normalize by $4n\ell$, and take the maximum.
 
-\begin{remark}[Lean indexing convention]
-The Lean definition \path{max_test_value} lets the starting index
-$s_{\mathrm{lo}}$ range over all values $0,\dots,2d-1$, even when the
-window extends past the support of $\conv$.  The extra positions only
-append zero entries, so this convention does not change the maximum.
-\end{remark}
+(The Lean definition \texttt{max\_test\_value} lets~$s_{\mathrm{lo}}$
+range over all values $0,\dots,2d-1$; positions where the window extends
+past the support of~$\conv$ contribute only zeros and do not change the
+maximum.)
 
 \begin{remark}[Integer composition coordinates]
 The code stores compositions
@@ -757,13 +734,10 @@ $s_{\text{hi}}$ is:
   \qquad (\text{with } P[-1] = 0).
 \]
 
-\begin{remark}[Complexity]
-Computing the autoconvolution takes $O(d^2)$ time.  An FFT-based method
-would give $O(d \log d)$, but for the small $d$ values used here the
-direct method is faster in practice.  The prefix sum takes $O(d)$, and
-the complete window scan takes another $O(d^2)$.  Thus the overall
-cost per lattice point is $O(d^2)$.
-\end{remark}
+The autoconvolution costs $O(d^2)$ per lattice point (an FFT-based
+method would give $O(d \log d)$ but is slower in practice for the
+moderate~$d$ values used here).  The prefix-sum construction and the
+complete window scan each cost $O(d^2)$.
 
 \subsection{Reversal Symmetry}\label{subsec:reversal}
 
@@ -1015,13 +989,8 @@ and only the stubborn survivors need to be examined more closely.
     computational budget is reached.
 \end{enumerate}
 
-Figure~\ref{fig:cascade-flow} summarizes the archived certificate run
-\path{data/cpu_cascade_20260319_201644.json}, including the exact
-survivor counts at each dyadic level.  The repository also contains
-later run artefacts, notably \path{data/cpu_cascade_20260325_162306.json}
-and \path{data/checkpoint_meta.json}; these record subsequent
-implementation runs and resume metadata, not the terminal certificate
-quoted in Theorem~\ref{thm:cascade-sound}.
+Figure~\ref{fig:cascade-flow} summarizes the terminal certificate run,
+including the exact survivor counts at each dyadic level.
 
 \begin{figure}[t]
 \centering
@@ -1144,23 +1113,14 @@ where $\mathcal{B}_{64,\ell,s_{\mathrm{lo}}}$ is the set of contributing
 bins for that window.
 \end{theorem}
 
-\begin{proof}[Status]
-This is the finite computational statement imported into Lean as the
-axiom \path{cascade_all_pruned} in
-\path{Sidon/FinalResult.lean}.  The archived cascade run
-\path{data/cpu_cascade_20260319_201644.json} records that the dyadic
-search from $d=4$ to $d=128$ terminates with zero survivors at level
-$L_5$.  The completeness properties discussed in
-Section~\ref{sec:correctness} explain why that terminal outcome implies
-the universal quantification appearing above.  The intermediate cascade
-levels matter only as an efficient route to this terminal statement;
-the final Lean theorem depends only on the quantification over all
-compositions in $\N^{128}$.  Later repository files
-\path{data/cpu_cascade_20260325_162306.json} (a lower-target run) and
-\path{data/checkpoint_meta.json} (checkpoint metadata for a resumable
-target-$\tfrac75$ search) are therefore supplementary implementation
-records rather than replacements for the archived certificate.
-\end{proof}
+This is the computational claim imported into the Lean formalization as
+the axiom \texttt{cascade\_all\_pruned}.  The dyadic cascade from $d=4$
+to $d=128$ terminates with zero survivors at level~$L_5$; the
+completeness properties in Section~\ref{sec:correctness} explain why
+this terminal outcome implies the universal quantification above.  The
+computation uses exact integer arithmetic for autoconvolutions and
+conservative floating-point rounding for threshold comparisons; no
+conclusion depends on floating-point correctness.
 
 \subsection{Canonical Handling Across Levels}
 
@@ -1290,9 +1250,9 @@ so that $\int g = 1$.  The autoconvolution ratio is scale-invariant,
 so it suffices to prove $R(g)\ge \tfrac75$.
 
 At parameters $(n,m)=(64,20)$, the identity
-\path{sum_bin_masses_eq_one} gives total bin mass $1$, so the
+\texttt{sum\_bin\_masses\_eq\_one} gives total bin mass $1$, so the
 cumulative-floor construction
-\path{canonical_discretization} produces a composition
+\texttt{canonical\_discretization} produces a composition
 $c\in\N^{128}$ with $\sum_i c_i=20$.  By the terminal certificate
 Theorem~\ref{thm:cascade-sound}, there exist
 $(\ell,s_{\mathrm{lo}})$ such that
@@ -1311,8 +1271,8 @@ $(\ell,s_{\mathrm{lo}})$ such that
 \]
 This is exactly the hypothesis needed for
 Theorem~\ref{lem:dynamic-correction}, which in Lean is the theorem
-\path{dynamic_threshold_sound}.  Its proof combines the
-continuous lower bound \path{continuous_test_value_le_ratio} with
+\texttt{dynamic\_threshold\_sound}.  Its proof combines the
+continuous lower bound \texttt{continuous\_test\_value\_le\_ratio} with
 the per-window discretization estimate from
 Lemma~\ref{lem:disc-error}.  Therefore $R(g)\ge \tfrac75$, and scale
 invariance gives $R(f)\ge \tfrac75$.
@@ -1471,50 +1431,53 @@ margin before flooring, so the pruning rule is conservative.
 
 \subsection{Final Cascade Run}
 
-The recorded CPU cascade in
-\path{data/cpu_cascade_20260319_201644.json} reaches zero survivors at
-level $L_5$, corresponding to dyadic refinement from $d=4$ through
-$d=128$.  The companion log \path{data/cpu_job.log} records the same
-terminal outcome after roughly $70.08$ hours of wall-clock time.  In
-the accompanying Lean formalization, this finite computation is
-packaged as the axiom \path{cascade_all_pruned}, which states
-directly that every terminal composition at $d=128$ (equivalently,
-$n=64$) with total mass $m=20$ has some window whose test value
-exceeds the corrected dynamic threshold at target $\tfrac75$.  The
-newer files \path{data/cpu_cascade_20260325_162306.json} and
-\path{data/checkpoint_meta.json} are kept in the repository as later
-run and resume artefacts, but they are not the terminal certificate
-imported by Lean.
+The terminal cascade reached zero survivors at level~$L_5$,
+corresponding to dyadic refinement from $d=4$ through $d=128$, after
+approximately $70$ hours of wall-clock time on a 128-core machine.  In
+the Lean formalization this outcome is packaged as the axiom
+\texttt{cascade\_all\_pruned}, which states that every composition in
+$\N^{128}$ with total mass~$20$ has some window whose test value exceeds
+the corrected dynamic threshold at target~$\tfrac75$.
 
 \subsection{Lean Formalization Status}\label{sec:formalization}
 
-The accompanying formalization consists of a modular Lean 4 development
-under \path{lean/Sidon/} and a consolidated export in
-\path{lean/complete_proof.lean}.  It is carried out in Lean~4~\cite{Lean4},
-on top of the mathlib library~\cite{Mathlib}.  The development formalizes
-the reduction in separate files for definitions, step functions,
-continuous test values, discretization error, pruning lemmas, and the
-final normalization argument.  The key analytic files for the present
-paper are \path{Sidon/TestValueBounds.lean},
-\path{Sidon/DiscretizationError.lean}, and
-\path{Sidon/FinalResult.lean}.  Separate implementation-audit files
-\path{Sidon/GrayCodeSubtreePruning.lean},
-\path{Sidon/ThresholdLookupTable.lean},
-\path{Sidon/StagingBuffer.lean}, and
-\path{Sidon/UnivariateSweepSkip.lean} isolate the proof obligations
-introduced by the current Gray-code CPU kernel.
+The accompanying formalization, carried out in
+Lean~4~\cite{Lean4} on top of the Mathlib library~\cite{Mathlib},
+consists of a modular development whose key analytic files are listed
+in Table~\ref{tab:lean-map}.
 
-Because \path{autoconvolution_ratio} is encoded using
-\path{ENNReal.toReal}, the formal theorem carries an explicit
+Because \texttt{autoconvolution\_ratio} is encoded using
+\texttt{ENNReal.toReal}, the formal theorem carries an explicit
 finiteness hypothesis on the essential supremum of $f*f$.
 
-The development is not completely axiom-free.  The final reduction
-rests on one imported statement:
-\begin{itemize}
-  \item the computational certificate \path{cascade_all_pruned},
-    expressing the terminal-grid statement at $d=128$.
-\end{itemize}
-Everything else in the analytic reduction is proved in Lean.
+The development is not axiom-free.  The analytic reduction is fully
+proved in Lean; the single imported statement is the computational
+certificate \texttt{cascade\_all\_pruned}, expressing the terminal-grid
+statement at $d=128$.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lll}
+  \toprule
+  \textbf{Paper statement} & \textbf{Lean name} & \textbf{File} \\
+  \midrule
+  Theorem~\ref{thm:main} & \texttt{autoconvolution\_ratio\_ge\_7\_5}
+    & \texttt{FinalResult.lean} \\
+  Theorem~\ref{lem:dynamic-correction} & \texttt{dynamic\_threshold\_sound}
+    & \texttt{DiscretizationError.lean} \\
+  Lemma~\ref{lem:bin-reduction} & \texttt{continuous\_test\_value\_le\_ratio}
+    & \texttt{TestValueBounds.lean} \\
+  Lemma~\ref{lem:sum-bin-masses} & \texttt{sum\_bin\_masses\_eq\_one}
+    & \texttt{TestValueBounds.lean} \\
+  Lemma~\ref{lem:disc-error} & \texttt{discretization\_autoconv\_error}
+    & \texttt{DiscretizationError.lean} \\
+  Theorem~\ref{thm:cascade-sound} (axiom) & \texttt{cascade\_all\_pruned}
+    & \texttt{FinalResult.lean} \\
+  \bottomrule
+\end{tabular}
+\caption{Correspondence between paper statements and the Lean formalization.}
+\label{tab:lean-map}
+\end{table}
 
 
 % ======================================================================
@@ -1564,7 +1527,7 @@ Cloninger--Steinerberger~\cite{CS17}.  The key differences:
     cascade levels and higher computational cost.
 
   \item The Lean theorem imports the terminal certificate
-    \path{cascade_all_pruned} rather than replaying the full
+    \texttt{cascade\_all\_pruned} rather than replaying the full
     $70$-hour search inside the Lean kernel.  Eliminating this final
     axiom would require a kernel-level certification of the same finite
     computation.
