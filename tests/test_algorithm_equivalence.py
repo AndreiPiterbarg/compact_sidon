@@ -788,7 +788,7 @@ class TestBinRanges:
         corr_val = 2.0 / m + 1.0 / (m * m)
         thresh = c_target + corr_val + 1e-9
         x_cap_gpu = int(math.floor(m * math.sqrt(thresh / d_child)))
-        x_cap_cs_gpu = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_cs_gpu = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         x_cap_gpu = min(x_cap_gpu, x_cap_cs_gpu, m)
         x_cap_gpu = max(x_cap_gpu, 0)
 
@@ -797,7 +797,7 @@ class TestBinRanges:
         corr_cpu = correction(m, n_half_child)
         thresh_cpu = c_target + corr_cpu + 1e-9
         x_cap_cpu = int(math.floor(m * math.sqrt(thresh_cpu / d_child)))
-        x_cap_cs_cpu = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_cs_cpu = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         x_cap_cpu = min(x_cap_cpu, x_cap_cs_cpu, m)
         x_cap_cpu = max(x_cap_cpu, 0)
 
