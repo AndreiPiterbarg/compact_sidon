@@ -175,7 +175,7 @@ while true; do
         fi
     done
 
-    DONE_COUNT=$(ls "$OUTPUT_DIR"/output_chunk_*.npy "$OUTPUT_DIR"/*_empty.marker 2>/dev/null | wc -l)
+    DONE_COUNT=$(find "$OUTPUT_DIR" -maxdepth 1 \( -name 'output_chunk_*.npy' -o -name '*_empty.marker' \) 2>/dev/null | wc -l)
     ELAPSED=$(($(date +%s) - T_START))
     PCT=$((DONE_COUNT * 100 / NCHUNKS))
     if [ "$ELAPSED" -gt 0 ] && [ "$DONE_COUNT" -gt 0 ]; then
@@ -205,7 +205,7 @@ done
 
 T_END=$(date +%s)
 TOTAL_ELAPSED=$((T_END - T_START))
-DONE_COUNT=$(ls "$OUTPUT_DIR"/output_chunk_*.npy "$OUTPUT_DIR"/*_empty.marker 2>/dev/null | wc -l)
+DONE_COUNT=$(find "$OUTPUT_DIR" -maxdepth 1 \( -name 'output_chunk_*.npy' -o -name '*_empty.marker' \) 2>/dev/null | wc -l)
 FAILED=$((NCHUNKS - DONE_COUNT))
 
 echo ""
