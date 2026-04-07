@@ -1,0 +1,13 @@
+{
+  "name": "L2_first10",
+  "n_half": 2,
+  "m": 20,
+  "c_target": 1.4,
+  "level": 2,
+  "d_parent": 8,
+  "d_child": 16,
+  "n_parents": 10,
+  "n_survivors_cpu": 0,
+  "total_children": 0,
+  "elapsed_cpu": 0.0
+}

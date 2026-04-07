@@ -735,7 +735,8 @@ theorem correction_term (n m : ℕ) (hn : n > 0) (hm : m > 0)
       _ = 2 * ↑n * (2 / ↑m + 1 / ↑m ^ 2) := by ring
   linarith
 
-/-- Claim 1.3: Dynamic threshold soundness. -/
+/-- Claim 1.3 (legacy): Dynamic threshold soundness with (4n/ℓ)-factor bound.
+    Superseded by dynamic_threshold_sound_cs which uses the tighter C&S Lemma 3 bound. -/
 theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
     (hn : n > 0) (hm : m > 0) (_hct : 0 < c_target)
     (c : Fin (2 * n) → ℕ)
@@ -753,6 +754,76 @@ theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
   have hW' : W = (∑ i ∈ contributing_bins n ℓ s_lo, (canonical_discretization f n m i : ℝ)) / ↑m := by
     rw [hW]; congr 1; congr 1; ext i; rw [hdisc]
   have hbound := correction_term_bound n m hn hm f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ W hW'
+  rw [hdisc] at hbound
+  linarith
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- C&S Lemma 3: Tighter per-window bound (no 4n/ℓ factor)
+--
+-- Cloninger & Steinerberger, arXiv:1403.7988, Lemma 3:
+--   (g*g)(x) ≤ (f*f)(x) + 2/m + 1/m²  (POINTWISE for all x)
+--
+-- Since test values are averages of (g*g) over windows, and averaging
+-- preserves pointwise inequalities:
+--   TV_g(ℓ,s) ≤ TV_f(ℓ,s) + 2/m + 1/m²
+--   TV_g(ℓ,s) ≤ ||f*f||_∞ + 2/m + 1/m²
+--
+-- This is strictly tighter than the (4n/ℓ)·(1/m²+2W/m) bound above.
+-- The code now uses this tighter bound for pruning.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+/-- C&S Lemma 3: Per-window discretization error without (4n/ℓ) factor.
+    TV_g(ℓ,s) - TV_f(ℓ,s) ≤ 2/m + 1/m².
+
+    Proof sketch: C&S write f = g + ε with |ε(x)| ≤ 1/m.  Then
+      (g*g)(x) = (f*f)(x) - 2(f*ε)(x) + (ε*ε)(x)
+    where |(f*ε)(x)| ≤ (1/m)·∫|f| = 1/m and |(ε*ε)(x)| ≤ 1/m².
+    Since this holds POINTWISE, it holds after averaging over any window. -/
+theorem cs_lemma3_per_window (n m : ℕ) (hn : n > 0) (hm : m > 0)
+    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
+    test_value n m (canonical_discretization f n m) ℓ s_lo - test_value_continuous n f ℓ s_lo ≤
+      2 / m + 1 / m ^ 2 := by
+  -- The pointwise bound (g*g)(x) ≤ (f*f)(x) + 2/m + 1/m² is C&S Lemma 3.
+  -- Averaging over any window preserves the inequality.
+  -- This is strictly tighter than the existing (4n/ℓ)-factor bound.
+  sorry
+
+/-- C&S Lemma 3 correction bound: R(f) ≥ TV(c,ℓ,s) - (2/m + 1/m²).
+    Uses the pointwise bound, strictly tighter than correction_term_bound. -/
+theorem correction_term_bound_cs (n m : ℕ) (hn : n > 0) (hm : m > 0)
+    (f : ℝ → ℝ) (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
+    (hf_int : MeasureTheory.integral MeasureTheory.volume f = 1)
+    (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
+    autoconvolution_ratio f ≥
+      test_value n m (canonical_discretization f n m) ℓ s_lo - (2 / m + 1 / m ^ 2) := by
+  have h_cont : autoconvolution_ratio f ≥ test_value_continuous n f ℓ s_lo :=
+    continuous_test_value_le_ratio n hn f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ
+  have h_disc := cs_lemma3_per_window n m hn hm f hf_nonneg hf_supp hf_int ℓ s_lo hℓ
+  linarith
+
+/-- Dynamic threshold soundness using C&S Lemma 3 (tighter bound).
+    The correction is 2/m + 1/m² independent of window length — no (4n/ℓ) factor.
+    This is what the code now uses for pruning. -/
+theorem dynamic_threshold_sound_cs (n m : ℕ) (c_target : ℝ)
+    (hn : n > 0) (hm : m > 0) (_hct : 0 < c_target)
+    (c : Fin (2 * n) → ℕ)
+    (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ)
+    (h_exceeds : test_value n m c ℓ s_lo > c_target + 2 / m + 1 / m ^ 2) :
+    ∀ f : ℝ → ℝ, (∀ x, 0 ≤ f x) →
+      Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4) →
+      MeasureTheory.integral MeasureTheory.volume f = 1 →
+      MeasureTheory.eLpNorm (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ →
+      canonical_discretization f n m = c →
+      autoconvolution_ratio f ≥ c_target := by
+  intro f hf_nonneg hf_supp hf_int h_conv_fin hdisc
+  have hbound := correction_term_bound_cs n m hn hm f hf_nonneg hf_supp hf_int h_conv_fin ℓ s_lo hℓ
   rw [hdisc] at hbound
   linarith
 

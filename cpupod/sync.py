@@ -22,7 +22,7 @@ def _ssh_opts_str():
     return " ".join(SSH_OPTIONS_BASH)
 
 
-def _run_bash(pipeline, cwd=None, timeout=120):
+def _run_bash(pipeline, cwd=None, timeout=600):
     bash = _find_bash()
     return subprocess.run(
         [bash, "-c", pipeline],

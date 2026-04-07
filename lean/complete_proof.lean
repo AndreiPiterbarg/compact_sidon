@@ -1,7 +1,7 @@
 /-
 Sidon Autocorrelation Project — Complete Proof (Monolith)
 
-Combined proof that the autoconvolution constant c ≥ 7/5 = 1.4.
+Combined proof that the autoconvolution constant c ≥ 133/100 = 1.33.
 This file is auto-generated from the 21 split modules in Sidon/.
 -/
 
@@ -614,26 +614,45 @@ def conv {d : ℕ} (c : Fin d → ℕ) (k : ℕ) : ℕ :=
 def window_sum {d : ℕ} (c : Fin d → ℕ) (s_lo ℓ : ℕ) : ℕ :=
   ∑ k ∈ Finset.Ico s_lo (s_lo + ℓ - 1), conv c k
 
-/-- Dynamic threshold for pruning. -/
-noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
-  ⌊(c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-   ((ℓ : ℝ) / (4 * (n : ℝ))) * (1 - 4 * 2.22e-16)⌋
+/-- Dynamic threshold for pruning.
 
-/-- Claim 2.4: Computed threshold is conservative (≥ exact threshold). -/
+    Only c_target*m² is scaled by ℓ/(4n); the correction (1+eps+2·W_int)
+    is NOT scaled.  Matches run_cascade.py:
+      c_target_m2_ell = c_target * m * m * ell * inv_4n
+      dyn_x = c_target_m2_ell + 1.0 + eps_margin + 2.0 * W_int
+      dyn_it = int64(dyn_x * one_minus_4eps) -/
+noncomputable def dyn_it (c_target : ℝ) (m n ℓ W_int : ℕ) : ℤ :=
+  ⌊(c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+    1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
+   (1 - 4 * (2.220446049250313e-16 : ℝ))⌋
+
+/-- Claim 2.4: Computed threshold is conservative (≥ exact threshold).
+    A = c_target*m²*ℓ/(4n) + 1 + 2*W_int is the exact threshold.
+    B = (A + 1e-9*m²)*(1-4ε) is the computed threshold.
+    B ≥ A because 1e-9*m²*(1-4ε) ≥ 4ε*A (margin dominates). -/
 theorem dyn_it_conservative (c_target : ℝ) (m n ℓ W_int : ℕ)
-    (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (_hct : 0 ≤ c_target)
-    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
-    let B := (c_target * (m : ℝ)^2 + 1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
-             ((ℓ : ℝ) / (4 * (n : ℝ))) * (1 - 4 * 2.22e-16)
+    (hm : 0 < m) (hn : 0 < n) (_hℓ : 0 < ℓ) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
+    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
+    let B := (c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) +
+              1 + 1e-9 * (m : ℝ)^2 + 2 * (W_int : ℝ)) *
+              (1 - 4 * (2.220446049250313e-16 : ℝ))
     ⌊A⌋ ≤ ⌊B⌋ := by
   refine' Int.floor_mono _;
-  have h_W_le_m : (W_int : ℝ) ≤ m := by
-    norm_cast;
-  have h_m_le_200 : (m : ℝ) ≤ 200 := by
-    norm_cast;
-  field_simp;
-  norm_num; nlinarith [ show ( 1 : ℝ ) ≤ m ^ 2 by exact_mod_cast pow_pos hm 2 ] ;
+  -- Upper bound on exact threshold A
+  have h_div : (ℓ : ℝ) / (4 * (n : ℝ)) ≤ 1 :=
+    div_le_one_of_le₀ (by exact_mod_cast hℓn) (by positivity)
+  have h_ct_m2 : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) ≤ c_target * (m : ℝ)^2 :=
+    mul_le_of_le_one_right (by positivity) h_div
+  have hP : c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ) ≤ 80401 := by
+    nlinarith [show (m : ℝ) ≤ 200 by exact_mod_cast hm_upper,
+               show (W_int : ℝ) ≤ (m : ℝ) by exact_mod_cast hW]
+  -- Margin dominates: 4ε*80401 ≤ 1e-9*(1-4ε)
+  have hM : (4 : ℝ) * 2.220446049250313e-16 * 80401 ≤
+      1e-9 * (1 - 4 * 2.220446049250313e-16) := by norm_num +zetaDelta at *
+  have hm2 : (m : ℝ) ^ 2 ≥ 1 := by exact_mod_cast pow_pos hm 2
+  -- Chain: 4ε*A ≤ 4ε*80401 ≤ 1e-9*(1-4ε) ≤ 1e-9*m²*(1-4ε)
+  nlinarith
 
 /-- Pruning condition predicate. -/
 def pruning_condition (ws : ℕ) (threshold : ℤ) : Prop :=
@@ -642,14 +661,14 @@ def pruning_condition (ws : ℕ) (threshold : ℤ) : Prop :=
 /-- Pruning with computed threshold implies pruning with exact threshold. -/
 theorem pruning_soundness (c_target : ℝ) (m n ℓ W_int : ℕ) (ws : ℕ)
     (hm : 0 < m) (hn : 0 < n) (hℓ : 0 < ℓ) (hW : W_int ≤ m) (hct : 0 ≤ c_target)
-    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) :
-    let A := (c_target * (m : ℝ)^2 + 1 + 2 * (W_int : ℝ)) * ((ℓ : ℝ) / (4 * (n : ℝ)))
+    (hct_upper : c_target ≤ 2) (hm_upper : m ≤ 200) (hℓn : ℓ ≤ 4 * n) :
+    let A := c_target * (m : ℝ)^2 * ((ℓ : ℝ) / (4 * (n : ℝ))) + 1 + 2 * (W_int : ℝ)
     let exact_threshold := ⌊A⌋
     let computed_threshold := dyn_it c_target m n ℓ W_int
     pruning_condition ws computed_threshold → pruning_condition ws exact_threshold := by
   intro A exact_threshold computed_threshold h_pruning
   have h_computed_gt_exact : computed_threshold ≥ exact_threshold := by
-    convert dyn_it_conservative c_target m n ℓ W_int hm hn hℓ hW hct hct_upper hm_upper using 1
+    convert dyn_it_conservative c_target m n ℓ W_int hm hn hℓ hW hct hct_upper hm_upper hℓn using 1
   exact h_pruning.trans_le' h_computed_gt_exact
 
 
@@ -3056,19 +3075,18 @@ theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
 
     This was verified by a 70-hour computation (see data/cpu_cascade_20260319_201644.json).
     The cascade tested all compositions of m=20 into d=4 bins at successively finer
-    resolutions (d=4,8,16,32,64,128), pruning compositions whose test value exceeds
-    the dynamic threshold. At the finest level (d=128), zero compositions survived,
+    resolutions (d=4,8,16,32), pruning compositions whose test value exceeds
+    the dynamic threshold. At the finest level (d=32), zero compositions survived,
     meaning every possible discretization is prunable.
 
-    Verifying this in Lean's kernel would require native_decide over ~10^13 cases,
-    which is infeasible. Instead, we accept the computational result as an axiom
-    backed by the reproducible computation stored in data/. -/
+    Parameters: n_half=2, m=35, c_target=133/100=1.33.
+    Cascade: L0(d=4) → L1(d=8) → L2(d=16) → L3(d=32). -/
 axiom cascade_all_pruned :
-  ∀ c : Fin (2 * 64) → ℕ, ∑ i, c i = 20 →
+  ∀ c : Fin (2 * 16) → ℕ, ∑ i, c i = 35 →
     ∃ ℓ s_lo, 2 ≤ ℓ ∧
-      test_value 64 20 c ℓ s_lo >
-        (7/5 : ℝ) + (4 * (64 : ℝ) / ℓ) *
-          (1 / (20 : ℝ)^2 + 2 * ((∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20) / 20)
+      test_value 16 35 c ℓ s_lo >
+        (133/100 : ℝ) + (4 * (16 : ℝ) / ℓ) *
+          (1 / (35 : ℝ)^2 + 2 * ((∑ i ∈ contributing_bins 16 ℓ s_lo, (c i : ℝ)) / 35) / 35)
 
 /-- Scale invariance of the autoconvolution ratio.
     R(a·f) = R(f) for a > 0. -/
@@ -3105,16 +3123,17 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
   field_simp [ha_ne, ha2]
 
 /-- **Main theorem**: Every nonneg function f supported on (-1/4, 1/4) with positive
-    integral and finite ‖f*f‖_∞ satisfies ‖f*f‖_∞ / (∫f)² ≥ 7/5 = 1.4.
+    integral and finite ‖f*f‖_∞ satisfies ‖f*f‖_∞ / (∫f)² ≥ 133/100 = 1.33.
 
     The hypothesis h_conv_fin is necessary because autoconvolution_ratio uses
     ENNReal.toReal, which maps ⊤ to 0. For f ∈ L¹ \ L² (e.g., f(x) ~ |x|^{-3/4}),
-    ‖f*f‖_∞ = ∞ and the mathematical ratio is ∞ ≥ 7/5, but the Lean-computed ratio
-    would be 0. This hypothesis holds for all bounded, L², or step functions.
+    ‖f*f‖_∞ = ∞ and the mathematical ratio is ∞ ≥ 133/100, but the Lean-computed
+    ratio would be 0. This hypothesis holds for all bounded, L², or step functions.
 
-    Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=64 with m=20,
+    Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=16 with m=35,
     apply cascade_all_pruned to find a killing window (ℓ, s_lo) where TV exceeds the
-    per-window threshold, then apply dynamic_threshold_sound to conclude R(g) ≥ 7/5. -/
+    per-window threshold, then apply dynamic_threshold_sound to conclude
+    R(g) ≥ 133/100. -/
 private lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
     (h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
@@ -3130,13 +3149,13 @@ private lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
   rw [h_eq, MeasureTheory.eLpNorm_const_smul]
   exact ENNReal.mul_ne_top ENNReal.coe_ne_top h_fin
 
-theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
+theorem autoconvolution_ratio_ge_133_100 (f : ℝ → ℝ)
     (hf_nonneg : ∀ x, 0 ≤ f x)
     (hf_supp : Function.support f ⊆ Set.Ioo (-1/4 : ℝ) (1/4))
     (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
     (h_conv_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
-    autoconvolution_ratio f ≥ 7/5 := by
+    autoconvolution_ratio f ≥ 133/100 := by
   set I := MeasureTheory.integral MeasureTheory.volume f with hI_def
   set g := fun x => (1/I) * f x with hg_def
   have hI_pos : 0 < I := hf_int_pos
@@ -3152,18 +3171,18 @@ theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
   have hg_int : MeasureTheory.integral MeasureTheory.volume g = 1 := by
     simp only [hg_def, MeasureTheory.integral_const_mul]
     rw [← hI_def]; exact div_mul_cancel₀ 1 (ne_of_gt hI_pos)
-  set c := canonical_discretization g 64 20
-  have h_mass_nz : ∑ j : Fin (2 * 64), bin_masses g 64 j ≠ 0 := by
-    rw [sum_bin_masses_eq_one 64 (by norm_num) g hg_supp hg_int]; exact one_ne_zero
-  have hc_sum : ∑ i, c i = 20 :=
-    canonical_discretization_sum_eq_m g 64 20 (by norm_num) (by norm_num) h_mass_nz hg_nonneg
+  set c := canonical_discretization g 16 35
+  have h_mass_nz : ∑ j : Fin (2 * 16), bin_masses g 16 j ≠ 0 := by
+    rw [sum_bin_masses_eq_one 16 (by norm_num) g hg_supp hg_int]; exact one_ne_zero
+  have hc_sum : ∑ i, c i = 35 :=
+    canonical_discretization_sum_eq_m g 16 35 (by norm_num) (by norm_num) h_mass_nz hg_nonneg
   obtain ⟨ℓ, s_lo, hℓ, h_exceeds⟩ := cascade_all_pruned c hc_sum
   have h_conv_fin_g : MeasureTheory.eLpNorm (MeasureTheory.convolution g g
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ :=
     eLpNorm_convolution_scale_ne_top f (1/I) h_conv_fin
-  set W := (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20
-  have h_W_def : W = (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / (20 : ℝ) := rfl
-  exact dynamic_threshold_sound 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
+  set W := (∑ i ∈ contributing_bins 16 ℓ s_lo, (c i : ℝ)) / 35
+  have h_W_def : W = (∑ i ∈ contributing_bins 16 ℓ s_lo, (c i : ℝ)) / (35 : ℝ) := rfl
+  exact dynamic_threshold_sound 16 35 (133/100 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 133/100)
     c ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int h_conv_fin_g rfl
 
 

@@ -77,5 +77,26 @@ import Sidon.TestValueBounds
 -- Discretization error and correction terms (Claims 1.2, 1.3, 1.4)
 import Sidon.DiscretizationError
 
--- Final result: c ≥ 7/5 = 1.4
+-- Sparse cross-term optimization (Claims 4.26–4.35)
+import Sidon.SparseCrossTerm
+
+-- Lazy QC sensitivity (Claims 6.1–6.12) — GPU Idea 1+4
+import Sidon.LazyQCSensitivity
+
+-- Batch quick-check (Claims 6.13–6.19) — GPU Idea 2
+import Sidon.BatchQC
+
+-- Conflict-free convolution update (Claims 6.20–6.24) — GPU single-phase
+import Sidon.ConflictFreeConv
+
+-- Thread-private window scan (Claims 6.25–6.29) — GPU barrier-free scan
+import Sidon.ThreadPrivateWindowScan
+
+-- Arc consistency / range tightening (Claims 6.30–6.36)
+import Sidon.ArcConsistency
+
+-- Minimum contribution bounds (Claims 6.37–6.44) — GPU multi-level subtree
+import Sidon.MinContribution
+
+-- Final result: c ≥ 133/100 = 1.33
 import Sidon.FinalResult

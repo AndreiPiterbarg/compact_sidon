@@ -16,9 +16,9 @@ bins k1, k2 change values, at most 2 add/remove operations on nz_list
 keep it in sync. After a subtree prune (which resets child bins and does
 a full raw_conv recompute), nz_list is rebuilt from scratch.
 
-STATUS: PROOF OBLIGATIONS ONLY — no proofs are attempted here.
-Each `sorry` marks an open obligation. Dependencies on existing modules
-(Defs, IncrementalAutoconv, GrayCode) are noted.
+STATUS: ALL PROOFS COMPLETE — 9 theorems, 0 sorry.
+Dependencies on existing modules (Defs, IncrementalAutoconv, GrayCode)
+are noted. All dependencies are passed as hypotheses (self-contained).
 
 AUDIT FIXES (2026-03-28):
 - Claim 4.26: Changed conclusion from Finset equality to biconditional form
@@ -93,23 +93,29 @@ theorem nz_list_invariant
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1) :
     ∀ i : Fin d, child i ≠ 0 ↔
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1 := by
-  sorry
-  -- (→) from h_complete
-  -- (←) given ⟨k, hk⟩, substitute hk into h_nonzero k
+  intro i
+  constructor
+  · exact h_complete i
+  · rintro ⟨k, hk⟩
+    have heq : (⟨nz_list ⟨k.1, by omega⟩, h_valid k⟩ : Fin d) = i := Fin.ext hk
+    rw [← heq]
+    exact h_nonzero k
 
--- ═══════════════════════════════════════════════════════════════════════════════
--- PART B: Incremental Update Correctness (Claims 4.28–4.30)
---
--- When the Gray code advances and exactly one cursor position changes,
--- bins k1 = 2*pos and k2 = 2*pos+1 get new values. The nz_list must be
--- updated to reflect these changes. There are four cases per bin:
---   nonzero → zero:   swap-remove from list
---   zero → nonzero:   append to list
---   nonzero → nonzero: no change needed
---   zero → zero:       no change needed
--- ═══════════════════════════════════════════════════════════════════════════════
+/-
+PROBLEM
+═══════════════════════════════════════════════════════════════════════════════
+PART B: Incremental Update Correctness (Claims 4.28–4.30)
 
-/-- Claim 4.28: Swap-remove preserves the nz_list invariant (minus one element).
+When the Gray code advances and exactly one cursor position changes,
+bins k1 = 2*pos and k2 = 2*pos+1 get new values. The nz_list must be
+updated to reflect these changes. There are four cases per bin:
+nonzero → zero:   swap-remove from list
+zero → nonzero:   append to list
+nonzero → nonzero: no change needed
+zero → zero:       no change needed
+═══════════════════════════════════════════════════════════════════════════════
+
+Claim 4.28: Swap-remove preserves the nz_list invariant (minus one element).
 
     When removing index i from nz_list, we swap it with the last element
     and decrement nz_count. The resulting nz_list represents exactly the
@@ -118,7 +124,29 @@ theorem nz_list_invariant
     Code reference: run_cascade.py:1304-1309
       p = nz_pos[k]; nz_count -= 1
       last = nz_list[nz_count]; nz_list[p] = last
-      nz_pos[last] = p; nz_pos[k] = -1 -/
+      nz_pos[last] = p; nz_pos[k] = -1
+
+PROVIDED SOLUTION
+For each j : Fin d, prove both directions of the iff.
+
+(→) Suppose ⟨k', hk'⟩ witnesses nz_list'[k'] = j for some k' : Fin nz_count'. We need to find a witness in the original nz_list and show j ≠ i.
+
+Consider whether k'.val = p or k'.val ≠ p.
+
+Case k'.val = p: nz_list'[p] = nz_list[nz_count-1] = j by h_swap (use Fin.val equality). So ⟨nz_count-1, by omega⟩ is a Fin nz_count witness. j ≠ i because if j = i then nz_list[nz_count-1] = i = nz_list[p], so by h_distinct (applied to ⟨nz_count-1, by omega⟩ and ⟨p, hp⟩) we get nz_count-1 = p. But then nz_count' = nz_count - 1 = p, and k'.val = p = nz_count', contradicting k' : Fin nz_count' (i.e., k'.val < nz_count').
+
+Case k'.val ≠ p: k'.val < nz_count' and k'.val ≠ p, so by h_rest, nz_list'[k'] = nz_list[k']. Since nz_list'[k'] = j, we have nz_list[k'] = j. Use ⟨k'.val, by omega⟩ as witness (k'.val < nz_count' ≤ nz_count). j ≠ i because if j = i then nz_list[k'.val] = i.val = nz_list[p] (by h_at_p), so by h_distinct k'.val = p, contradicting k'.val ≠ p.
+
+(←) Suppose ⟨k0, hk0⟩ witnesses nz_list[k0] = j, and j ≠ i. Since nz_list[k0] = j ≠ i = nz_list[p] (by h_at_p), h_distinct gives k0 ≠ p (as Fin nz_count values).
+
+Use Nat.lt_or_eq_of_lt (k0.isLt) to split on whether k0.val < nz_count - 1 or k0.val = nz_count - 1.
+
+Case k0.val < nz_count - 1 (= nz_count'): k0.val ≠ p (since k0 ≠ p as Fin elements), so h_rest gives nz_list'[k0.val] = nz_list[k0.val] = j. Use ⟨k0.val, by omega⟩ as Fin nz_count' witness.
+
+Case k0.val = nz_count - 1: nz_list'[p] = nz_list[nz_count-1] = nz_list[k0] = j by h_swap. p < nz_count' because: p < nz_count (hp), and p ≠ nz_count - 1 (since k0.val = nz_count - 1 and k0 ≠ p implies p ≠ nz_count - 1), so p < nz_count - 1 = nz_count'. Use ⟨p, by omega⟩ as Fin nz_count' witness.
+
+Key technical details: Use Fin.ext for equality of Fin values. Use omega for arithmetic. The h_distinct hypothesis takes Fin nz_count arguments, so construct them with appropriate bounds proofs.
+-/
 theorem swap_remove_preserves_invariant
     {d : ℕ} (nz_list nz_list' : Fin d → ℕ)
     (nz_count : ℕ) (hnz : 0 < nz_count) (hnz_d : nz_count ≤ d)
@@ -131,29 +159,68 @@ theorem swap_remove_preserves_invariant
     -- Result of swap-remove
     (nz_count' : ℕ) (h_count' : nz_count' = nz_count - 1)
     (h_swap : nz_list' ⟨p, by omega⟩ = nz_list ⟨nz_count - 1, by omega⟩)
-    (h_rest : ∀ k : ℕ, k < nz_count' → k ≠ p →
+    (h_rest : ∀ (k : ℕ) (_hk : k < nz_count') (_hkp : k ≠ p),
       nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩) :
     -- The set in nz_list' = the set in nz_list minus {i}
     ∀ j : Fin d,
       (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = j.1) ↔
       ((∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = j.1) ∧ j ≠ i) := by
-  sorry
-  -- (→) If nz_list'[k'] = j, trace k' through swap/rest to find j in nz_list.
-  --     j ≠ i by h_distinct: if j = i then nz_list[k''] = nz_list[p],
-  --     forcing k'' = p, but position p now holds nz_list[nz_count-1].
-  -- (←) If nz_list[k0] = j and j ≠ i:
-  --     case k0 < nz_count': if k0 ≠ p then nz_list'[k0] = nz_list[k0] = j;
-  --       if k0 = p then nz_list[p] = j = i, contradiction.
-  --     case k0 = nz_count-1: nz_list'[p] = nz_list[nz_count-1] = j,
-  --       and p < nz_count' (since p = nz_count-1 would give j = i).
+  all_goals generalize_proofs at *;
+  intro j
+  constructor;
+  · rintro ⟨ k, hk ⟩ ; by_cases hk' : k.val = p <;> simp_all +decide [ Fin.ext_iff ] ;
+    · refine' ⟨ ⟨ ⟨ nz_count - 1, by omega ⟩, hk ⟩, _ ⟩;
+      intro H; specialize h_distinct ⟨ p, hp ⟩ ⟨ nz_count - 1, by omega ⟩ ; simp_all +decide ;
+      linarith [ Fin.is_lt k, Nat.sub_add_cancel hnz ];
+    · refine' ⟨ ⟨ ⟨ k, by omega ⟩, _ ⟩, _ ⟩
+      all_goals generalize_proofs at *;
+      · grind +ring;
+      · contrapose! h_distinct;
+        use ⟨ k, by omega ⟩, ⟨ p, by omega ⟩ ; aesop;
+  · intro hj
+    obtain ⟨k, hk⟩ := hj.left
+    generalize_proofs at *;
+    by_cases hk_eq_p : k.val = p;
+    · simp_all +decide [ Fin.ext_iff ];
+    · by_cases hk_lt_nz_count' : k.val < nz_count';
+      · exact ⟨ ⟨ k, by linarith ⟩, h_rest k hk_lt_nz_count' hk_eq_p ▸ hk ⟩;
+      · use ⟨p, by omega⟩
+        generalize_proofs at *;
+        grind
 
-/-- Claim 4.29: Append preserves the nz_list invariant (plus one element).
+/-
+PROBLEM
+(→) If nz_list'[k'] = j, trace k' through swap/rest to find j in nz_list.
+j ≠ i by h_distinct: if j = i then nz_list[k''] = nz_list[p],
+forcing k'' = p, but position p now holds nz_list[nz_count-1].
+(←) If nz_list[k0] = j and j ≠ i:
+case k0 < nz_count': if k0 ≠ p then nz_list'[k0] = nz_list[k0] = j;
+if k0 = p then nz_list[p] = j = i, contradiction.
+case k0 = nz_count-1: nz_list'[p] = nz_list[nz_count-1] = j,
+and p < nz_count' (since p = nz_count-1 would give j = i).
+
+Claim 4.29: Append preserves the nz_list invariant (plus one element).
 
     When adding index i to nz_list, we place it at position nz_count
     and increment nz_count.
 
     Code reference: run_cascade.py:1308-1309
-      nz_list[nz_count] = k; nz_pos[k] = nz_count; nz_count += 1 -/
+      nz_list[nz_count] = k; nz_pos[k] = nz_count; nz_count += 1
+
+PROVIDED SOLUTION
+For each j : Fin d, prove both directions of the iff.
+
+(→) Suppose ⟨k', hk'⟩ witnesses nz_list'[k'] = j for some k' : Fin nz_count'. Since nz_count' = nz_count + 1, either k'.val < nz_count or k'.val = nz_count.
+
+Case k'.val < nz_count: By h_rest k'.val (by omega), nz_list'[k'.val] = nz_list[k'.val]. Since nz_list'[k'.val] = j (after Fin.val manipulation), nz_list[k'.val] = j. So ⟨k'.val, by omega⟩ : Fin nz_count witnesses j in original list → left disjunct.
+
+Case k'.val = nz_count: nz_list'[nz_count] = i.val by h_append. Since nz_list'[k'] = j and k' has the same index as nz_count (after Fin coercion), j.val = i.val, so j = i by Fin.ext → right disjunct.
+
+(←)
+Left disjunct: ⟨k0, hk0⟩ witnesses nz_list[k0] = j with k0 : Fin nz_count. By h_rest k0.val k0.isLt, nz_list'[k0.val] = nz_list[k0.val] = j. And k0.val < nz_count < nz_count' (since nz_count' = nz_count + 1), so ⟨k0.val, by omega⟩ : Fin nz_count' is a valid witness.
+
+Right disjunct: j = i. By h_append, nz_list'[nz_count] = i.val = j.val. nz_count < nz_count' (since nz_count' = nz_count + 1), so ⟨nz_count, by omega⟩ : Fin nz_count' is a valid witness.
+-/
 theorem append_preserves_invariant
     {d : ℕ} (nz_list nz_list' : Fin d → ℕ)
     (nz_count : ℕ) (hnz_d : nz_count < d)
@@ -164,19 +231,34 @@ theorem append_preserves_invariant
     -- Result of append
     (nz_count' : ℕ) (h_count' : nz_count' = nz_count + 1)
     (h_append : nz_list' ⟨nz_count, by omega⟩ = i.1)
-    (h_rest : ∀ k : ℕ, k < nz_count →
+    (h_rest : ∀ (k : ℕ) (_hk : k < nz_count),
       nz_list' ⟨k, by omega⟩ = nz_list ⟨k, by omega⟩) :
     -- The set in nz_list' = the set in nz_list plus {i}
     ∀ j : Fin d,
       (∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = j.1) ↔
       ((∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = j.1) ∨ j = i) := by
-  sorry
-  -- (→) If k' < nz_count: nz_list'[k'] = nz_list[k'], giving left disjunct.
-  --     If k' = nz_count: nz_list'[nz_count] = i, giving right disjunct.
-  -- (←) Left: nz_list[k0] = j, so nz_list'[k0] = nz_list[k0] = j with k0 < nz_count'.
-  --     Right: j = i, use h_append with k' = nz_count < nz_count'.
+  intro j; constructor
+  · rintro ⟨k', hk'⟩
+    by_cases hlt : k'.1 < nz_count
+    · left; exact ⟨⟨k'.1, hlt⟩, by rw [← h_rest k'.1 hlt]; exact hk'⟩
+    · right
+      have hkeq : k'.1 = nz_count := by omega
+      apply Fin.ext
+      calc j.1 = nz_list' ⟨k'.1, by omega⟩ := hk'.symm
+        _ = nz_list' ⟨nz_count, by omega⟩ := by congr 1; exact Fin.ext hkeq
+        _ = i.1 := h_append
+  · rintro (⟨k, hk⟩ | rfl)
+    · exact ⟨⟨k.1, by omega⟩, by rw [h_rest k.1 k.isLt]; exact hk⟩
+    · exact ⟨⟨nz_count, by omega⟩, h_append⟩
 
-/-- Claim 4.30: After the four-case update (old→new for bins k1, k2),
+/-
+PROBLEM
+(→) If k' < nz_count: nz_list'[k'] = nz_list[k'], giving left disjunct.
+If k' = nz_count: nz_list'[nz_count] = i, giving right disjunct.
+(←) Left: nz_list[k0] = j, so nz_list'[k0] = nz_list[k0] = j with k0 < nz_count'.
+Right: j = i, use h_append with k' = nz_count < nz_count'.
+
+Claim 4.30: After the four-case update (old→new for bins k1, k2),
     the nz_list invariant is restored for the updated child array.
 
     This composes Claims 4.28–4.29 for the two bins that change in
@@ -188,7 +270,25 @@ theorem append_preserves_invariant
     four-case update procedure (established by composing Claims 4.28–4.29
     for each of k1 and k2 as needed).
 
-    Code reference: run_cascade.py:1303-1315 (the four-case block) -/
+    Code reference: run_cascade.py:1303-1315 (the four-case block)
+
+PROVIDED SOLUTION
+Intro i. Case split on whether i = k1 using by_cases.
+
+Case i = k1: subst i. exact h_k1.symm.
+
+Case i ≠ k1: Case split on whether i = k2 using by_cases.
+
+  Case i = k2: subst i. exact h_k2.symm.
+
+  Case i ≠ k2:
+    Have h_eq : child' i = child i := h_unchanged i ‹i ≠ k1› ‹i ≠ k2›
+    Rewrite child' i ≠ 0 as child i ≠ 0 using h_eq.
+    Then use (h_inv_before i).trans (h_rest i ‹i ≠ k1› ‹i ≠ k2›).symm
+    Or equivalently: constructor
+      · intro h; rw [h_eq] at h; exact (h_rest i ‹i ≠ k1› ‹i ≠ k2›).mpr ((h_inv_before i).mp h)
+      · intro h; rw [h_eq]; exact (h_inv_before i).mpr ((h_rest i ‹i ≠ k1› ‹i ≠ k2›).mp h)
+-/
 theorem incremental_nz_update_correct
     {d : ℕ} (child child' : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k1 ≠ k2)
@@ -211,29 +311,32 @@ theorem incremental_nz_update_correct
     -- nz_list' is correct for child'
     ∀ i : Fin d, child' i ≠ 0 ↔
       ∃ k : Fin nz_count', nz_list' ⟨k.1, by omega⟩ = i.1 := by
-  sorry
-  -- Case i = k1: exact h_k1.symm
-  -- Case i = k2: exact h_k2.symm
-  -- Case i ≠ k1, k2: chain h_unchanged + h_inv_before + h_rest
+  intro i; by_cases hi : i = k1 <;> by_cases hi' : i = k2 <;> simp_all +decide ;
 
--- ═══════════════════════════════════════════════════════════════════════════════
--- PART C: Cross-Term Equivalence (Claims 4.31–4.32)
---
--- The sparse cross-term loop computes the same raw_conv updates as the
--- original dense loop. This is the central correctness theorem.
---
--- Key insight: The dense loop iterates all j ≠ k1, k2 (via range boundaries).
--- When child[j] = 0, the contribution is 2·δ·0 = 0, so zero bins are
--- harmless. The sparse loop iterates only nz_list entries ≠ k1, k2, which
--- by the invariant (Claim 4.26) are exactly the nonzero bins. Since zero
--- bins contribute 0, both loops produce the same sum.
---
--- The self-terms (at indices 2·k1, 2·k2) and mutual term (at index k1+k2)
--- are computed identically by both paths (run_cascade.py:1296-1300, before
--- the if/else branch), so they cancel. Only the cross-terms differ.
--- ═══════════════════════════════════════════════════════════════════════════════
+/-
+PROBLEM
+Case i = k1: exact h_k1.symm
+Case i = k2: exact h_k2.symm
+Case i ≠ k1, k2: chain h_unchanged + h_inv_before + h_rest
 
-/-- Claim 4.31: The sparse cross-term sum equals the dense cross-term sum,
+═══════════════════════════════════════════════════════════════════════════════
+PART C: Cross-Term Equivalence (Claims 4.31–4.32)
+
+The sparse cross-term loop computes the same raw_conv updates as the
+original dense loop. This is the central correctness theorem.
+
+Key insight: The dense loop iterates all j ≠ k1, k2 (via range boundaries).
+When child[j] = 0, the contribution is 2·δ·0 = 0, so zero bins are
+harmless. The sparse loop iterates only nz_list entries ≠ k1, k2, which
+by the invariant (Claim 4.26) are exactly the nonzero bins. Since zero
+bins contribute 0, both loops produce the same sum.
+
+The self-terms (at indices 2·k1, 2·k2) and mutual term (at index k1+k2)
+are computed identically by both paths (run_cascade.py:1296-1300, before
+the if/else branch), so they cancel. Only the cross-terms differ.
+═══════════════════════════════════════════════════════════════════════════════
+
+Claim 4.31: The sparse cross-term sum equals the dense cross-term sum,
     for BOTH the delta1 (at k1+j) and delta2 (at k2+j) contributions.
 
     Dense path (run_cascade.py:1323-1333):
@@ -261,7 +364,46 @@ theorem incremental_nz_update_correct
     (matching the actual code which iterates all j in range). The equality
     holds because zero-valued terms contribute 0 to the sum.
 
-    Depends on: Claim 4.26 (nz_list invariant). -/
+    Depends on: Claim 4.26 (nz_list invariant).
+
+PROVIDED SOLUTION
+Intro t. Constructor (for the ∧).
+
+For each component (k1-part and k2-part), the proof is the same structure. Let me describe the k1-part; the k2-part is identical with delta2 replacing delta1 and k2.1 + j.1 replacing k1.1 + j.1.
+
+The key idea: both sums compute the same thing because:
+1. When child j = 0, the summand is `if ... then 2 * delta1 * 0 else 0 = 0` regardless of the condition.
+2. The nz_list bijects onto exactly the nonzero entries.
+
+More precisely, define f(j) = if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t then 2 * delta1 * child j else 0.
+
+Step 1: Show ∑ j : Fin d, f(j) = ∑ j ∈ Finset.univ.filter (fun j => child j ≠ 0), f(j).
+This is because for j with child j = 0, f(j) = 0 (if the condition is false, it's 0; if the condition is true, 2 * delta1 * child j = 2 * delta1 * 0 = 0). Use Finset.sum_filter_of_ne or show that f(j) = 0 when child j = 0 and use Finset.sum_subset.
+
+Step 2: Show ∑ j ∈ {j | child j ≠ 0}, f(j) = ∑ idx : Fin nz_count, f(nz_list[idx]).
+This is a reindexing via the bijection given by h_inv, h_distinct, h_valid.
+
+Actually, a cleaner approach: Show both sums are equal by showing:
+∑ j : Fin d, f(j) = ∑ idx : Fin nz_count, f(⟨nz_list[idx], h_valid idx⟩)
+
+Use Finset.sum_nbij with:
+- The injection i : Fin nz_count → Fin d given by i(idx) = ⟨nz_list[idx], h_valid idx⟩
+- Injectivity from h_distinct
+- The range is {j | child j ≠ 0} (from h_inv)
+- f is 0 outside the range (when child j = 0)
+
+Actually, the simplest approach might be:
+
+For each j : Fin d with child j = 0, f(j) = 0 (whether the if-condition is true or false: if true, 2*delta1*child j = 2*delta1*0 = 0; if false, 0).
+
+So ∑ j, f(j) = ∑ j with child j ≠ 0, f(j).
+
+The map idx ↦ ⟨nz_list[idx], h_valid idx⟩ is an injection from Fin nz_count to {j : Fin d | child j ≠ 0} (by h_distinct), and it's surjective onto {j | child j ≠ 0} (by h_inv: if child j ≠ 0 then ∃ k, nz_list[k] = j).
+
+So ∑ j with child j ≠ 0, f(j) = ∑ idx : Fin nz_count, f(nz_list[idx]).
+
+Use Finset.sum_nbij or Fintype.sum_bijective or similar. The function is the injection idx ↦ ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩.
+-/
 theorem sparse_cross_term_eq_dense
     {d : ℕ} (child : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k2.1 = k1.1 + 1)
@@ -291,15 +433,26 @@ theorem sparse_cross_term_eq_dense
       let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩
       if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t
       then 2 * delta2 * child j else 0) := by
-  sorry
-  -- For each component, the proof has two steps:
-  -- Step 1 (zero-filtering): ∑_{j : Fin d} f(j) = ∑_{j : Fin d, child j ≠ 0} f(j)
-  --   because child j = 0 ⟹ f(j) = 2·δ·child j = 2·δ·0 = 0.
-  -- Step 2 (bijection): ∑_{j ∈ nonzero set} f(j) = ∑_{idx : Fin nz_count} f(nz_list[idx])
-  --   because h_inv + h_distinct + h_valid give a bijection between
-  --   Fin nz_count and {j : Fin d | child j ≠ 0}.
+  intro t
+  generalize_proofs at *; (
+  constructor <;> rw [ ← Finset.sum_subset ( Finset.subset_univ ( Finset.image ( fun k : Fin nz_count => ⟨ nz_list ⟨ k, by linarith [ Fin.is_lt k ] ⟩, h_valid k ⟩ : Fin nz_count → Fin d ) Finset.univ ) ) ];
+  · rw [ Finset.sum_image ];
+    exact fun a _ b _ hab => h_distinct a b <| by simpa [ Fin.ext_iff ] using hab;
+  · intro x hx hx'; specialize h_inv x; contrapose! hx'; aesop;
+  · rw [ Finset.sum_image ];
+    exact fun a _ b _ hab => h_distinct a b <| by simpa [ Fin.ext_iff ] using hab;
+  · intro x hx hx'; specialize h_inv x; contrapose! hx'; aesop)
 
-/-- Claim 4.32: The raw_conv array after the sparse cross-term update
+/-
+PROBLEM
+For each component, the proof has two steps:
+Step 1 (zero-filtering): ∑_{j : Fin d} f(j) = ∑_{j : Fin d, child j ≠ 0} f(j)
+because child j = 0 ⟹ f(j) = 2·δ·child j = 2·δ·0 = 0.
+Step 2 (bijection): ∑_{j ∈ nonzero set} f(j) = ∑_{idx : Fin nz_count} f(nz_list[idx])
+because h_inv + h_distinct + h_valid give a bijection between
+Fin nz_count and {j : Fin d | child j ≠ 0}.
+
+Claim 4.32: The raw_conv array after the sparse cross-term update
     is identical to the raw_conv array after the dense cross-term update.
 
     Both paths start from the same intermediate state raw_conv_after_self
@@ -313,7 +466,18 @@ theorem sparse_cross_term_eq_dense
     of whether sparse or dense cross-terms were used.
 
     Depends on: Claim 4.31 (sparse_cross_term_eq_dense),
-                IncrementalAutoconv.delta_three_way_split (S = {k1,k2}). -/
+                IncrementalAutoconv.delta_three_way_split (S = {k1,k2}).
+
+PROVIDED SOLUTION
+Apply funext to introduce t : Fin (2 * d - 1). Rewrite using h_dense t and h_sparse t. Then use sparse_cross_term_eq_dense to show the cross-term sums are equal.
+
+Specifically:
+1. funext t
+2. rw [h_dense t, h_sparse t]  -- Now the goal is:
+   raw_conv_after_self t + (dense k1 sum) + (dense k2 sum) = raw_conv_after_self t + (sparse k1 sum) + (sparse k2 sum)
+3. obtain ⟨h₁, h₂⟩ := sparse_cross_term_eq_dense child k1 k2 hk delta1 delta2 nz_list nz_count hnz_count h_valid h_distinct h_inv t.1
+4. rw [h₁, h₂]  -- or congr and use h₁ and h₂
+-/
 theorem raw_conv_sparse_eq_dense
     {d : ℕ} (child : Fin d → ℤ)
     (k1 k2 : Fin d) (hk : k2.1 = k1.1 + 1)
@@ -346,8 +510,14 @@ theorem raw_conv_sparse_eq_dense
           if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t.1
           then 2 * delta2 * child j else 0)) :
     raw_conv_dense = raw_conv_sparse := by
-  sorry
-  -- funext t; rw [h_dense, h_sparse];
+  -- Apply the equality from Claim 4.31 to each term in the sums.
+  have h_sum_eq : ∀ t : Fin (2 * d - 1), (∑ j : Fin d, if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t.1 then 2 * delta1 * child j else 0) = (∑ idx : Fin nz_count, let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩; if j ≠ k1 ∧ j ≠ k2 ∧ k1.1 + j.1 = t.1 then 2 * delta1 * child j else 0) ∧ (∑ j : Fin d, if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t.1 then 2 * delta2 * child j else 0) = (∑ idx : Fin nz_count, let j : Fin d := ⟨nz_list ⟨idx.1, by omega⟩, h_valid idx⟩; if j ≠ k1 ∧ j ≠ k2 ∧ k2.1 + j.1 = t.1 then 2 * delta2 * child j else 0) := by
+    intro t
+    exact sparse_cross_term_eq_dense child k1 k2 hk delta1 delta2
+      nz_list nz_count hnz_count h_valid h_distinct h_inv t.1
+  exact funext fun t => by rw [ h_dense, h_sparse, h_sum_eq t |>.1, h_sum_eq t |>.2 ] ;
+
+-- funext t; rw [h_dense, h_sparse];
   -- obtain ⟨h₁, h₂⟩ := sparse_cross_term_eq_dense ... t
   -- rw [h₁, h₂]
 
@@ -391,7 +561,13 @@ theorem rebuild_nz_list_correct
     -- The biconditional invariant holds
     ∀ i : Fin d, child i ≠ 0 ↔
       ∃ k : Fin nz_count, nz_list ⟨k.1, by omega⟩ = i.1 := by
-  sorry  -- Identical to nz_list_invariant; factor into shared lemma if desired
+  intro i
+  constructor
+  · exact h_complete i
+  · rintro ⟨k, hk⟩
+    have heq : (⟨nz_list ⟨k.1, by omega⟩, h_valid k⟩ : Fin d) = i := Fin.ext hk
+    rw [← heq]
+    exact h_nonzero k
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART E: Gating Correctness (Claim 4.34)
@@ -420,7 +596,7 @@ theorem sparse_gate_correctness
     (h_deterministic : ∀ r₁ r₂ : Fin (2 * d - 1) → ℤ,
       r₁ = r₂ → pruned r₁ = pruned r₂) :
     pruned raw_conv_dense = pruned raw_conv_sparse := by
-  sorry  -- Immediate: exact h_deterministic _ _ h_eq
+  exact h_deterministic _ _ h_eq
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- PART F: End-to-End Soundness (Claim 4.35)
@@ -470,11 +646,9 @@ theorem sparse_cross_term_sound
     (h_S_dense : ∀ c, c ∈ S_dense ↔ c ∈ children ∧ survives_dense c)
     (h_S_sparse : ∀ c, c ∈ S_sparse ↔ c ∈ children ∧ survives_sparse c) :
     S_sparse = S_dense := by
-  sorry
-  -- Finset.ext; intro c
-  -- rw [h_S_sparse, h_S_dense]
-  -- constructor
-  -- · rintro ⟨hc, hp⟩; exact ⟨hc, (h_same c hc).mp hp⟩
-  -- · rintro ⟨hc, hp⟩; exact ⟨hc, (h_same c hc).mpr hp⟩
+  ext c
+  simp only [h_S_sparse, h_S_dense]
+  exact ⟨fun ⟨hc, hp⟩ => ⟨hc, (h_same c hc).mp hp⟩,
+         fun ⟨hc, hp⟩ => ⟨hc, (h_same c hc).mpr hp⟩⟩
 
-end -- noncomputable section
+end

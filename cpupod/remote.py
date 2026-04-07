@@ -5,9 +5,9 @@ import sys
 
 from .config import SSH_OPTIONS, REMOTE_WORKDIR
 
-# RunPod Ubuntu base image has python→3.8 (no pip) and pip→3.13.
-# Use python3.12 explicitly everywhere for consistency + numba support.
-PYTHON = "python3.12"
+# RunPod Ubuntu base image has python→3.8 (no pip).
+# Use python3.13 — it ships with the current base image and has pip.
+PYTHON = "python3.13"
 
 
 def ssh_run(ssh_host, ssh_port, command, timeout=None, stream=False,
@@ -89,7 +89,7 @@ def install_deps(ssh_host, ssh_port):
     except subprocess.TimeoutExpired:
         print("Warning: tmux install timed out (non-fatal)")
 
-    # Install with python3.12 -m pip (guarantees correct interpreter)
+    # Install with python3.13 -m pip (guarantees correct interpreter)
     cmd = (
         f"cd {REMOTE_WORKDIR} && "
         f"{PYTHON} -m pip install -q numpy numba joblib 2>&1 | tail -5"

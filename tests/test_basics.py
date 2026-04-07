@@ -19,10 +19,10 @@ class TestCorrection(unittest.TestCase):
         self.assertAlmostEqual(correction(100), 0.0201, places=4)
 
     def test_m50_with_n_half(self):
-        """With n_half, correction = max(1, 4*n_half/ell_min) * base."""
+        """With n_half, correction still returns base = 2/m + 1/m^2.
+        (n_half parameter accepted for API compat but not used.)"""
         base = 2/50 + 1/2500
-        # n_half=2, ell_min=2 (default): factor = max(1, 4) = 4
-        self.assertAlmostEqual(correction(50, n_half=2), 4.0 * base, places=10)
+        self.assertAlmostEqual(correction(50, n_half=2), base, places=10)
 
     def test_decreasing(self):
         self.assertGreater(correction(10), correction(50))

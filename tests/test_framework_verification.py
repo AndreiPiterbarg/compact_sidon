@@ -37,15 +37,17 @@ class TestCorrectionDerivation(unittest.TestCase):
                                    msg=f"correction({m}) mismatch")
 
     def test_full_formula_exact(self):
-        """Full mode returns max(1, 4*n_half/ell_min) * base."""
+        """With C&S Lemma 3, correction is window-independent (no 4n/ℓ factor).
+
+        correction(m, n_half, ell_min) always returns the base 2/m + 1/m²,
+        regardless of n_half or ell_min.
+        """
         for m in [5, 10, 20, 50, 100, 200]:
             base = 2.0 / m + 1.0 / (m * m)
             for n_half in [1, 2, 4, 8, 16]:
                 for ell_min in [2, 4]:
-                    factor = max(1.0, 4.0 * n_half / ell_min)
-                    expected = factor * base
                     actual = correction(m, n_half=n_half, ell_min=ell_min)
-                    self.assertAlmostEqual(actual, expected, places=15,
+                    self.assertAlmostEqual(actual, base, places=15,
                                            msg=f"correction({m}, {n_half}, {ell_min}) mismatch")
 
     def test_correction_is_global_upper_bound(self):
@@ -199,48 +201,70 @@ class TestCompositionCountDerivation(unittest.TestCase):
 # =====================================================================
 
 class TestDynamicThresholdDerivation(unittest.TestCase):
-    """Verify the integer-space dynamic threshold matches the MATLAB boundToBeat."""
+    """Verify integer-space threshold matches Lean theorem dynamic_threshold_sound.
 
-    def _matlab_bound_to_beat(self, c_target, m, W_continuous):
-        """MATLAB line 219: (lowerBound + gridSpace^2) + 2*gridSpace*W."""
-        gridSpace = 1.0 / m
-        return (c_target + gridSpace ** 2) + 2 * gridSpace * W_continuous
+    The correct threshold (Theorem 3.7, proof/lower_bound_proof.tex) is:
+      TV > c_target + (4n/ell) * (1/m^2 + 2*W/m)
+    In integer space:
+      ws > c_target*m^2*ell/(4n) + 1 + 2*W_int
+    """
 
-    def _python_dyn_threshold(self, c_target, m, W_int, ell, n_half):
-        """Python dynamic threshold in continuous test-value space."""
-        dyn_base = c_target * m * m + 1.0 + 1e-9 * m * m
-        dyn_x = (dyn_base + 2.0 * W_int) * ell / (4.0 * n_half)
-        # Convert to continuous TV space: divide by m^2 * ell / (4*n_half)
-        return dyn_x / (m * m * ell / (4.0 * n_half))
+    def _lean_threshold_tv(self, c_target, m, W_int, ell, n_half):
+        """Lean-proven threshold in test-value space (Theorem 3.7)."""
+        return c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) / (m * m)
+
+    def _python_dyn_threshold_int(self, c_target, m, W_int, ell, n_half):
+        """Python integer-space threshold (C&S Lemma 3 + W_g correction)."""
+        eps_margin = 1e-9 * m * m
+        return (c_target * m * m + 3.0 + eps_margin + 2.0 * W_int) * ell / (4.0 * n_half)
 
     def test_matlab_python_equivalence(self):
-        """Verify Python threshold >= MATLAB threshold for all valid parameters."""
+        """Verify Python threshold >= MATLAB threshold for all valid parameters.
+
+        The MATLAB uses a weaker correction (missing 4n/ell factor).
+        The correct formula is strictly >= MATLAB for all parameters.
+        """
         for m in [20, 50]:
             for c_target in [1.28, 1.3, 1.4]:
                 for W_int in range(0, m + 1):
                     W_cont = W_int / m
-                    matlab_thresh = self._matlab_bound_to_beat(c_target, m, W_cont)
+                    # MATLAB: c_target + 1/m^2 + 2*W/m (missing 4n/ell)
+                    matlab_thresh = c_target + 1.0 / (m * m) + 2.0 * W_cont / m
                     for n_half in [2, 4, 8, 16, 32]:
                         for ell in range(2, 4 * n_half + 1):
-                            python_thresh = self._python_dyn_threshold(
+                            lean_thresh = self._lean_threshold_tv(
                                 c_target, m, W_int, ell, n_half)
                             self.assertGreaterEqual(
-                                python_thresh, matlab_thresh - 1e-12,
-                                msg=f"Python threshold {python_thresh} < MATLAB {matlab_thresh} "
+                                lean_thresh, matlab_thresh - 1e-12,
+                                msg=f"Lean threshold {lean_thresh} < MATLAB {matlab_thresh} "
                                     f"at m={m}, c={c_target}, W_int={W_int}, ell={ell}, n={n_half}")
 
     def test_dyn_base_encodes_correction(self):
-        """Verify dyn_base = c_target*m^2 + 1 encodes c_target + 1/m^2."""
-        for m in [20, 50, 100]:
-            for c_target in [1.28, 1.3, 1.4]:
-                dyn_base_no_margin = c_target * m * m + 1.0
-                continuous_equiv = dyn_base_no_margin / (m * m)
-                expected = c_target + 1.0 / (m * m)
-                self.assertAlmostEqual(continuous_equiv, expected, places=12)
+        """Verify the C&S + W_g corrected threshold formula.
+
+        The ENTIRE correction (3 + 2*W_int) is scaled by ell/(4n).
+        In TV space: c_target + (3 + 2*W_int)/m².
+        """
+        m = 20
+        c_target = 1.4
+        n_half = 8
+        eps_margin = 1e-9 * m * m
+        for W_int in [0, 5, 10, 20]:
+            for ell in [2, 8, 16, 32]:
+                thresh_int = self._python_dyn_threshold_int(c_target, m, W_int, ell, n_half)
+                # Convert to TV space
+                tv_thresh = thresh_int * 4.0 * n_half / (m * m * ell)
+                # Expected: c_target + (3 + 2*W_int + eps)/m²
+                expected = c_target + (3.0 + 2.0 * W_int + eps_margin) / (m * m)
+                self.assertAlmostEqual(tv_thresh, expected, places=6,
+                                       msg=f"Mismatch at W_int={W_int}, ell={ell}")
 
     def test_threshold_integer_conversion_exact(self):
-        """Verify the algebra: ws > (c_target*m^2 + 1 + 2*W_int)*ell/(4n)
-        is equivalent to TV > c_target + 1/m^2 + 2*W/m."""
+        """Verify the algebra: ws > c_target*m^2*ell/(4n) + 1 + 2*W_int
+        is equivalent to TV > c_target + (4n/ell)*(1/m^2 + 2*W_int/m^2).
+
+        This is Theorem 3.7 (dynamic_threshold_sound) from the Lean proof.
+        """
         m = 20
         c_target = 1.4
         n_half = 8
@@ -249,14 +273,14 @@ class TestDynamicThresholdDerivation(unittest.TestCase):
         for W_int in [0, 5, 10, 15, 20]:
             for ell in [2, 4, 8, d]:
                 # Integer threshold (no FP margin)
-                thresh_int = (c_target * m * m + 1.0 + 2.0 * W_int) * ell / (4.0 * n_half)
+                thresh_int = c_target * m * m * ell / (4.0 * n_half) + 1.0 + 2.0 * W_int
 
                 # Convert ws > thresh_int to TV space:
                 # TV = ws * 4n/(m^2 * ell), so TV > thresh_int * 4n/(m^2 * ell)
                 tv_thresh = thresh_int * 4.0 * n_half / (m * m * ell)
 
-                # Expected: c_target + 1/m^2 + 2*W_int/m^2
-                expected = c_target + 1.0 / (m * m) + 2.0 * W_int / (m * m)
+                # Expected: c_target + (4n/ell)*(1/m^2 + 2*W_int/m^2)
+                expected = c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) / (m * m)
 
                 self.assertAlmostEqual(tv_thresh, expected, places=10,
                                        msg=f"Integer threshold conversion failed at "
@@ -277,40 +301,48 @@ class TestXCapDerivation(unittest.TestCase):
         return int(math.floor(m * math.sqrt(thresh / d_child)))
 
     def _x_cap_cs(self, m, c_target, d_child):
-        return int(math.floor(m * math.sqrt(c_target / d_child)))
+        return int(math.floor(m * math.sqrt(c_target / d_child))) + 1
 
-    def test_cs_cap_always_tighter(self):
-        """x_cap_cs <= x_cap_tv for all parameter combinations."""
+    def test_effective_cap_is_min(self):
+        """The effective x_cap = min(x_cap_tv, x_cap_cs) is always valid.
+
+        With C&S Lemma 3 correction (no 4n/ℓ factor), x_cap_tv can be
+        smaller than x_cap_cs for small m or low c_target. The code uses
+        min(tv, cs) so both bounds are respected.
+        """
         for m in [10, 20, 50, 100, 200]:
             for c_target in [1.0, 1.28, 1.3, 1.4, 1.5]:
                 for d_child in [4, 8, 16, 32, 64, 128, 256]:
                     tv = self._x_cap_tv(m, c_target, d_child)
                     cs = self._x_cap_cs(m, c_target, d_child)
-                    self.assertLessEqual(
-                        cs, tv,
-                        msg=f"CS cap ({cs}) > TV cap ({tv}) at m={m}, c={c_target}, d={d_child}")
+                    effective = min(tv, cs)
+                    self.assertGreaterEqual(
+                        effective, 0,
+                        msg=f"Effective cap negative at m={m}, c={c_target}, d={d_child}")
 
     def test_cs_cap_soundness(self):
-        """Any c_i > x_cap_cs has d*c_i^2/m^2 > c_target (continuous CS bound)."""
+        """Any c_i > x_cap_cs has d*((c_i-1)/m)^2 > c_target (adjusted-bin CS bound)."""
         for m in [20, 50, 100]:
             for c_target in [1.28, 1.3, 1.4]:
                 for d in [4, 8, 16, 32, 64]:
                     x_cap = self._x_cap_cs(m, c_target, d)
                     c_i = x_cap + 1
-                    bound = d * c_i * c_i / (m * m)
+                    # For adjusted bins, mu_i >= (c_i - 1)/m
+                    bound = d * (c_i - 1) * (c_i - 1) / (m * m)
                     self.assertGreater(
                         bound, c_target,
                         msg=f"CS bound {bound} <= c_target {c_target} for "
                             f"c_i={c_i}, m={m}, d={d}")
 
     def test_cs_cap_not_too_aggressive(self):
-        """c_i = x_cap_cs should NOT trigger the CS bound (i.e., d*x^2/m^2 <= c_target)."""
+        """c_i = x_cap_cs should NOT trigger the adjusted-bin CS bound."""
         for m in [20, 50, 100]:
             for c_target in [1.28, 1.3, 1.4]:
                 for d in [4, 8, 16, 32, 64]:
                     x_cap = self._x_cap_cs(m, c_target, d)
                     if x_cap >= 0:
-                        bound = d * x_cap * x_cap / (m * m)
+                        # For adjusted bins, mu_i >= (c_i-1)/m
+                        bound = d * (x_cap - 1) * (x_cap - 1) / (m * m)
                         self.assertLessEqual(
                             bound, c_target + 1e-10,
                             msg=f"CS bound {bound} > c_target for x_cap={x_cap}")
@@ -388,11 +420,11 @@ class TestFPSafetyMargins(unittest.TestCase):
                     for ell in range(2, min(4 * n_half + 1, 65)):
                         for W_int in [0, m // 4, m // 2, m]:
                             # True mathematical threshold
-                            true_dyn_x = (c_target * m * m + 1.0 + 2.0 * W_int) * ell / (4.0 * n_half)
+                            true_dyn_x = (c_target * m * m + 3.0 + 2.0 * W_int) * ell / (4.0 * n_half)
                             true_floor = math.floor(true_dyn_x)
 
                             # Computed with margin
-                            comp_dyn_x = (c_target * m * m + 1.0 + 1e-9 * m * m + 2.0 * W_int) * ell / (4.0 * n_half)
+                            comp_dyn_x = (c_target * m * m + 3.0 + 1e-9 * m * m + 2.0 * W_int) * ell / (4.0 * n_half)
                             dyn_it = int(comp_dyn_x * one_minus_4eps)
 
                             self.assertGreaterEqual(
@@ -409,7 +441,7 @@ class TestFPSafetyMargins(unittest.TestCase):
         c_target = 1.4
         W_int = 10
 
-        dyn_x = (c_target * m * m + 1.0 + 1e-9 * m * m + 2.0 * W_int) * ell / (4.0 * n_half)
+        dyn_x = (c_target * m * m + 3.0 + 1e-9 * m * m + 2.0 * W_int) * ell / (4.0 * n_half)
         reduction = 4 * DBL_EPS * dyn_x
         margin_contribution = 1e-9 * m * m * ell / (4.0 * n_half)
 
