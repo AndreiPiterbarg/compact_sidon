@@ -77,5 +77,5 @@ import Sidon.TestValueBounds
 -- Discretization error and correction terms (Claims 1.2, 1.3, 1.4)
 import Sidon.DiscretizationError
 
--- Final result: c ≥ 7/5 = 1.4
+-- Final result: c ≥ 133/100 = 1.33
 import Sidon.FinalResult

@@ -16,8 +16,10 @@ The table is indexed by (ell_idx, W_int) where:
   - ell_idx = ell - 2, ranging over [0, 2*d_child - 2]
   - W_int ∈ [0, m], the sum of child masses in a window's bin range
 
-Only c_target*m² is scaled by ℓ/(4n).  The threshold formula is:
-    dyn_x = c_target * m² * ℓ / (4n) + 1 + eps_margin + 2 * W_int
+The ENTIRE expression (c_target*m² + 3 + 2*W_int + eps) is scaled by ℓ/(4n).
+The threshold formula is:
+    cs_corr_base = c_target * m² + 3 + eps_margin
+    dyn_x = (cs_corr_base + 2 * W_int) * ℓ / (4n)
     dyn_it = floor(dyn_x * (1 - 4ε))
 
 Claims covered:
@@ -87,37 +89,41 @@ noncomputable section
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- The runtime threshold formula.
-    Only c_target*m² is scaled by ℓ/(4n); correction terms are NOT scaled.
+    The ENTIRE expression (c_target*m² + 3 + eps + 2*W_int) is scaled by ℓ/(4n).
 
-    Code reference: run_cascade.py lines 1130-1133
-      c_target_m2_ell_val = c_target_m2 * float(ell) * inv_4n
-      dyn_x = c_target_m2_ell_val + 1.0 + eps_margin + 2.0 * float(w)
+    Code reference: run_cascade.py lines 1121-1128
+      cs_corr_base = c_target * m * m + 3.0 + eps_margin
+      ct_base_ell = cs_corr_base * ell * inv_4n
+      w_scale = 2.0 * ell * inv_4n
+      dyn_x = ct_base_ell + w_scale * W_int
       threshold = int64(dyn_x * one_minus_4eps) -/
 noncomputable def runtime_threshold (c_target : ℝ) (m n_half_child ℓ : ℕ) (W_int : ℕ) : ℤ :=
   let m_r := (m : ℝ)
   let one_minus_4eps := 1 - 4 * (2.220446049250313e-16 : ℝ)
-  let c_target_m2_ell := c_target * m_r ^ 2 * ((ℓ : ℝ) / (4 * (n_half_child : ℝ)))
-  let dyn_x := c_target_m2_ell + 1 + 1e-9 * m_r ^ 2 + 2 * (W_int : ℝ)
+  let dyn_x := (c_target * m_r ^ 2 + 3 + 1e-9 * m_r ^ 2 + 2 * (W_int : ℝ)) *
+    ((ℓ : ℝ) / (4 * (n_half_child : ℝ)))
   ⌊dyn_x * one_minus_4eps⌋
 
 /-- The table construction formula: identical arithmetic to runtime_threshold.
 
-    Code reference: run_cascade.py lines 1128-1133
+    Code reference: run_cascade.py lines 1121-1137
+      cs_corr_base = c_target * m * m + 3.0 + eps_margin
       for ell in range(2, 2 * d_child + 1):
           idx = ell - 2
-          c_target_m2_ell_val = c_target_m2 * float(ell) * inv_4n
+          ct_base_ell = cs_corr_base * ell * inv_4n
+          w_scale = 2.0 * ell * inv_4n
           for w in range(m + 1):
-              dyn_x = c_target_m2_ell_val + 1.0 + eps_margin + 2.0 * float(w)
+              dyn_x = ct_base_ell + w_scale * float(w)
               threshold_table[idx * m_plus_1 + w] = int64(dyn_x * one_minus_4eps) -/
 noncomputable def table_entry (c_target : ℝ) (m n_half_child ℓ : ℕ) (w : ℕ) : ℤ :=
   let m_r := (m : ℝ)
   let one_minus_4eps := 1 - 4 * (2.220446049250313e-16 : ℝ)
-  let c_target_m2_ell := c_target * m_r ^ 2 * ((ℓ : ℝ) / (4 * (n_half_child : ℝ)))
-  let dyn_x := c_target_m2_ell + 1 + 1e-9 * m_r ^ 2 + 2 * (w : ℝ)
+  let dyn_x := (c_target * m_r ^ 2 + 3 + 1e-9 * m_r ^ 2 + 2 * (w : ℝ)) *
+    ((ℓ : ℝ) / (4 * (n_half_child : ℝ)))
   ⌊dyn_x * one_minus_4eps⌋
 
 /-- Claim 5.3: The table entry and runtime threshold are definitionally equal.
-    Both compute ⌊(c_target·m²·ℓ/(4n) + 1 + 10⁻⁹·m² + 2·W_int) · (1-4ε)⌋
+    Both compute ⌊(c_target·m² + 3 + 10⁻⁹·m² + 2·W_int) · ℓ/(4n) · (1-4ε)⌋
     with identical Lean terms (differing only in let-binding names, which are
     erased to de Bruijn indices). -/
 theorem table_entry_eq_runtime
@@ -128,14 +134,14 @@ theorem table_entry_eq_runtime
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Bridging Lemma: runtime_threshold = dyn_it
 --
--- Both now compute (c_target*m²*ℓ/(4n) + 1 + eps*m² + 2*W) * (1-4ε)
+-- Both now compute (c_target*m² + 3 + eps*m² + 2*W) * ℓ/(4n) * (1-4ε)
 -- with identical structure.
 -- This lemma connects the file's formulas to DynamicThreshold.pruning_soundness.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- runtime_threshold and dyn_it (from DynamicThreshold.lean) compute the same
     value. Both compute:
-      ⌊(c_target*m²*ℓ/(4n) + 1 + 1e-9*m² + 2*W_int) * (1-4ε)⌋
+      ⌊(c_target*m² + 3 + 1e-9*m² + 2*W_int) * ℓ/(4n) * (1-4ε)⌋
 
     This lemma closes the soundness chain:
       table_entry = runtime_threshold  (Claim 5.3, rfl)
@@ -257,9 +263,8 @@ theorem table_index_in_bounds
        internally to show ⌊exact_threshold⌋ ≤ dyn_it)
     6. → ws > ⌊exact_threshold⌋
 
-    The exact threshold is A = c_target·m²·ℓ/(4n) + 1 + 2·W_int,
-    from the mathematical pruning condition (test-value domain:
-    TV > c_target + (4n/ℓ)·(1/m² + 2W/m), multiplied by m²·ℓ/(4n)).
+    The exact threshold (matching CPU) is
+      A = (c_target·m² + 3 + 2·W_int) · ℓ/(4n).
 
     The hypothesis hℓn : ℓ ≤ 4 * n_half_child matches the algorithm's
     window range ℓ ∈ {2, ..., 2·d_child} = {2, ..., 4·n_half_child}. -/
@@ -271,14 +276,10 @@ theorem pruning_soundness_with_lut
     (h_exceeds_table : pruning_condition ws
       (table_entry c_target m n_half_child ℓ W_int)) :
     let exact_threshold :=
-      ⌊c_target * (m : ℝ) ^ 2 * ((ℓ : ℝ) / (4 * (n_half_child : ℝ))) +
-       1 + 2 * (W_int : ℝ)⌋
+      ⌊(c_target * (m : ℝ) ^ 2 + 3 + 2 * (W_int : ℝ)) *
+       ((ℓ : ℝ) / (4 * (n_half_child : ℝ)))⌋
     pruning_condition ws exact_threshold := by
-  -- Chain: table_entry = runtime_threshold = dyn_it, then apply pruning_soundness
-  have h1 := table_entry_eq_runtime c_target m n_half_child ℓ W_int
-  have h2 := runtime_threshold_eq_dyn_it c_target m n_half_child ℓ W_int
-  rw [h1, h2] at h_exceeds_table
-  exact pruning_soundness c_target m n_half_child ℓ W_int ws hm hn hW hct hct_upper hm_upper hℓn h_exceeds_table
+  sorry -- TODO: re-prove after formula alignment with CPU code
 
 /-- Claim 5.12: The pruning predicate is identical whether the threshold
     comes from the table or the runtime formula. Since table_entry and
