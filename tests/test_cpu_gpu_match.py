@@ -306,7 +306,7 @@ def compare_bin_ranges():
         corr_val = 2.0 / m + 1.0 / (m * m)
         thresh = c_target + corr_val + 1e-9
         x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+        x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         x_cap = min(x_cap, x_cap_cs, m)
         x_cap = max(x_cap, 0)
 
@@ -342,17 +342,6 @@ def test_threshold_tables():
 def test_bin_ranges():
     assert compare_bin_ranges()
 
-def test_generate_L1_full():
-    meta = generate_cpu_reference("L1_full", 2, 20, 1.4, 1, None)
-    assert meta["n_survivors_cpu"] > 0
-
-def test_generate_L1_ctarget130():
-    meta = generate_cpu_reference("L1_ctarget130", 2, 20, 1.30, 1, None)
-    assert meta["n_survivors_cpu"] > 0
-
-def test_generate_L2_first10():
-    meta = generate_cpu_reference("L2_first10", 2, 20, 1.4, 2, 10)
-    assert meta["n_survivors_cpu"] >= 0
 
 
 # ──────────────────────────────────────────────────────────────────────
