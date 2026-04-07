@@ -71,23 +71,19 @@ extern __global__ void cascade_kernel(
 /* ═══════════════════════════════════════════════════════════════════
  *  build_threshold_table
  *
- *  Precomputes int32 thresholds on the CPU.  The ENTIRE expression
- *  (c_target*m^2 + 3 + eps_margin + 2*W_int) is scaled by ell/(4n):
+ *  Precomputes int32 thresholds on the CPU.  C&S Lemma 3 formula:
  *
- *    dyn_x = (c_target * m^2 + 3.0 + eps_margin + 2.0 * W_int) * ell/(4n)
- *    dyn_it = (int32_t)(dyn_x * one_minus_4eps)
+ *    threshold = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
  *
- *  Derivation (C&S Lemma 3 + eq(1) W-refinement):
- *    Pointwise: (g*g)(x) <= (f*f)(x) + 2*W_f(x)/m + 1/m^2
- *    Since W_f <= W_g + 1/m (cumulative rounding): correction <= 2*W_g/m + 3/m^2
- *    Multiply by m^2*ell/(4n): threshold = (c*m^2 + 3 + 2*W_int) * ell/(4n)
- *  See Theorem 3.7 (dynamic_threshold_sound) in proof/lower_bound_proof.tex.
+ *  The ENTIRE expression (including correction) is scaled by ell/(4n)
+ *  because Lemma 3 is a pointwise bound on (g*g)(x) and test values
+ *  are window averages.  min(2m+1, ...) caps at the simple Lemma 3
+ *  bound (2/m + 1/m^2) for soundness.  eps_margin is flat (not scaled).
  *  Matches the CPU fused kernel (_fused_generate_and_prune_gray).
  *
  *  where:
  *    n = n_half_child = d_child / 2
  *    eps_margin   = 1e-9 * m^2
- *    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
  *    ell ranges from 2 to 2*d_child (ell_idx = ell - 2)
  *    W_int ranges from 0 to m
  * ═══════════════════════════════════════════════════════════════════ */
@@ -97,23 +93,17 @@ void build_threshold_table(int32_t* table,
     int n_half_child = d_child / 2;
     double m_d = (double)m;
     double inv_4n = 1.0 / (4.0 * (double)n_half_child);
-    double DBL_EPS = 2.220446049250313e-16;
-    double one_minus_4eps = 1.0 - 4.0 * DBL_EPS;
     double eps_margin = 1e-9 * m_d * m_d;
-    double cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin;
+    double cs_base_m2 = c_target * m_d * m_d;
 
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int ell_idx = ell - 2;
-        double ell_scale = (double)ell * inv_4n;
-        double ct_base_ell = cs_corr_base * ell_scale;
-        double w_scale = 2.0 * ell_scale;
+        double scale_ell = (double)ell * inv_4n;
         for (int w = 0; w <= m; w++) {
-            double dyn_x = ct_base_ell + w_scale * (double)w;
-            /* int32 is safe: max threshold = (c_target*m^2+3+eps+2*m)*ell/(4n)
-             * At ell=2*d_child, ell/(4n) = 1, so max ~ c_target*m^2+3+eps+2*m
-             * ~ 603 for m=20, ~56403 for m=200.
-             * All values << INT32_MAX (2,147,483,647). */
-            table[ell_idx * (m + 1) + w] = (int32_t)(dyn_x * one_minus_4eps);
+            double dyn_x = (cs_base_m2 + 3.0 + 2.0 * (double)w + eps_margin) * scale_ell;
+            /* int32 is safe: max threshold = (c_target*m^2 + 3 + 2m + eps) at ell=4n
+             * ~ 603 for m=20.  All values << INT32_MAX (2,147,483,647). */
+            table[ell_idx * (m + 1) + w] = (int32_t)(dyn_x);
         }
     }
 }
@@ -546,9 +536,10 @@ static bool compute_bin_ranges(
     double corr = 2.0 / (double)m + 1.0 / ((double)m * (double)m);
     double thresh = c_target + corr + 1e-9;
     int x_cap = (int)floor((double)m * sqrt(thresh / (double)d_child));
-    /* Cauchy-Schwarz bound: no correction needed (doesn't go through
-     * test-value).  No +1: matches CPU _compute_bin_ranges exactly. */
-    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child));
+    /* Cauchy-Schwarz bound: ||f*f||_∞ ≥ d_child·μ_i².  For adjusted bins
+     * (canonical rounding +1), μ_i can be as low as (c_i-1)/m, so add +1.
+     * Matches CPU _compute_bin_ranges exactly. */
+    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child)) + 1;
     x_cap = std::min(x_cap, x_cap_cs);
     x_cap = std::min(x_cap, m);
     x_cap = std::max(x_cap, 0);
@@ -589,24 +580,19 @@ static bool tighten_ranges(
     int n_half_child = d_child / 2;
     double m_d = (double)m;
     double inv_4n = 1.0 / (4.0 * (double)n_half_child);
-    double DBL_EPS = 2.220446049250313e-16;
-    double one_minus_4eps = 1.0 - 4.0 * DBL_EPS;
     double eps_margin = 1e-9 * m_d * m_d;
     double c_target_m2 = c_target * m_d * m_d;
     int m_plus_1 = m + 1;
     int ell_count = conv_len;
 
-    /* Build threshold table (corrected: entire expression scaled by ell/(4n)) */
-    double cs_corr_base = c_target_m2 + 3.0 + eps_margin;
+    /* C&S Lemma 3 threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)) */
     std::vector<int32_t> threshold_table(ell_count * m_plus_1);
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int idx = ell - 2;
-        double ell_scale = (double)ell * inv_4n;
-        double ct_base_ell = cs_corr_base * ell_scale;
-        double w_scale = 2.0 * ell_scale;
+        double scale_ell = (double)ell * inv_4n;
         for (int w = 0; w <= m; w++) {
-            double dyn_x = ct_base_ell + w_scale * (double)w;
-            threshold_table[idx * m_plus_1 + w] = (int32_t)(dyn_x * one_minus_4eps);
+            double dyn_x = (c_target_m2 + 3.0 + 2.0 * (double)w + eps_margin) * scale_ell;
+            threshold_table[idx * m_plus_1 + w] = (int32_t)(dyn_x);
         }
     }
 
