@@ -62,22 +62,18 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
 
     m_d = np.float64(m)
     inv_4n = 1.0 / (4.0 * np.float64(n_half))
-    DBL_EPS = 2.220446049250313e-16
-    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # Pre-compute per-ell constants ONCE (shared read-only across threads)
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
-    # The +3 accounts for: +1 from |eps*eps|<=1/m^2, +2 from W_f<=W_g+1/m.
+    # Pre-compute per-ell scale factors (C&S Lemma 3 + W-refinement).
+    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
+    # The ENTIRE expression (including correction and eps) is scaled by ell/(4n)
+    # because Lemma 3 is a pointwise bound and TV is a window average.
     max_ell = 2 * d
-    cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin
-    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
-    w_scale_arr = np.empty(max_ell + 1, dtype=np.float64)
+    cs_base_m2 = c_target * m_d * m_d
+    scale_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
-        ell_f = np.float64(ell)
-        ct_base_ell_arr[ell] = cs_corr_base * ell_f * inv_4n
-        w_scale_arr[ell] = 2.0 * ell_f * inv_4n
+        scale_arr[ell] = np.float64(ell) * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
@@ -99,8 +95,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            ct_base_ell = ct_base_ell_arr[ell]
-            w_scale = w_scale_arr[ell]
+            scale_ell = scale_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -116,8 +111,9 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
-                dyn_x = ct_base_ell + w_scale * np.float64(W_int)
-                dyn_it = np.int64(dyn_x * one_minus_4eps)
+                corr_w = 3.0 + 2.0 * np.float64(W_int)
+                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                dyn_it = np.int64(dyn_x)
                 if ws > dyn_it:
                     pruned = True
                     break
@@ -142,21 +138,16 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
 
     m_d = np.float64(m)
     inv_4n = 1.0 / (4.0 * np.float64(n_half))
-    DBL_EPS = 2.220446049250313e-16
-    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
-    # The +3 accounts for: +1 from |eps*eps|<=1/m^2, +2 from W_f<=W_g+1/m.
+    # C&S Lemma 3 + W-refinement (see _prune_dynamic_int32 for derivation).
+    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
     max_ell = 2 * d
-    cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin
-    ct_base_ell_arr = np.empty(max_ell + 1, dtype=np.float64)
-    w_scale_arr = np.empty(max_ell + 1, dtype=np.float64)
+    cs_base_m2 = c_target * m_d * m_d
+    scale_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
-        ell_f = np.float64(ell)
-        ct_base_ell_arr[ell] = cs_corr_base * ell_f * inv_4n
-        w_scale_arr[ell] = 2.0 * ell_f * inv_4n
+        scale_arr[ell] = np.float64(ell) * inv_4n
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
@@ -178,8 +169,7 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
             if pruned:
                 break
             n_cv = ell - 1
-            ct_base_ell = ct_base_ell_arr[ell]
-            w_scale = w_scale_arr[ell]
+            scale_ell = scale_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
@@ -195,8 +185,9 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
                 if hi_bin > d_minus_1:
                     hi_bin = d_minus_1
                 W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                dyn_x = ct_base_ell + w_scale * np.float64(W_int)
-                dyn_it = np.int64(dyn_x * one_minus_4eps)
+                corr_w = 3.0 + 2.0 * np.float64(W_int)
+                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                dyn_it = np.int64(dyn_x)
                 if ws > dyn_it:
                     pruned = True
                     break
@@ -211,12 +202,11 @@ def _prune_dynamic(batch_int, n_half, m, c_target):
     """Per-window dynamic threshold — dispatches int32/int64 based on m.
 
     Works in integer convolution space.  For each window (ell, s_lo),
-    computes W_int and the dynamic integer threshold:
-        dyn_it = floor((c_target*m^2 + 3 + eps + 2*W_int) * ell/(4n) * (1 - 4*DBL_EPS))
-    where eps = 1e-9*m^2.  The ENTIRE expression (c_target*m^2 + 3 + 2*W_int + eps)
-    is scaled by ell/(4n).  The +3 accounts for +1 from |eps*eps|<=1/m^2 and
-    +2 from W_f<=W_g+1/m (cumulative rounding correction).
-    Derivation: C&S Lemma 3 + eq(1) W-refinement.
+    computes W_int and the dynamic integer threshold (C&S Lemma 3):
+        dyn_it = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
+    where eps_margin = 1e-9*m^2.  The ENTIRE expression (including eps) is
+    scaled by ell/(4n) because Lemma 3 is a pointwise bound on (g*g)(x)
+    and test values are window averages.
 
     Returns boolean mask: True = survived (not pruned).
     """
@@ -564,12 +554,11 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
         return 0, 0
 
-    # --- Dynamic pruning constants ---
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
+    # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
+    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
     inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
-    DBL_EPS = 2.220446049250313e-16
-    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m_d * m_d
+    cs_base_m2 = c_target * m_d * m_d
 
     max_survivors = out_buf.shape[0]
     n_surv = 0
@@ -606,18 +595,13 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         child[2 * i] = cursor[i]
         child[2 * i + 1] = parent_int[i] - cursor[i]
 
-    # --- Precompute per-ell constants (constant across all children) ---
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
-    # The +3 accounts for: +1 from |eps*eps|<=1/m^2, +2 from W_f<=W_g+1/m.
+    # --- Precompute per-ell scale factors (C&S Lemma 3) ---
+    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
     ell_count = 2 * d_child - 1  # ell ranges 2..2*d_child, count = 2*d_child - 1
-    cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin
-    ct_base_ell_arr = np.empty(ell_count, dtype=np.float64)
-    w_scale_arr = np.empty(ell_count, dtype=np.float64)
+    scale_arr = np.empty(ell_count, dtype=np.float64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        ell_f = np.float64(ell)
-        ct_base_ell_arr[idx] = cs_corr_base * ell_f * inv_4n
-        w_scale_arr[idx] = 2.0 * ell_f * inv_4n
+        scale_arr[idx] = np.float64(ell) * inv_4n
 
     # --- Optimized ell scan order ---
     # Most children are pruned by narrow windows (ell=2..16) or wide windows
@@ -669,8 +653,9 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             for k in range(qc_s, qc_s + n_cv_qc):
                 ws_qc += np.int64(raw_conv[k])
             ell_idx_qc = qc_ell - 2
-            dyn_x_qc = ct_base_ell_arr[ell_idx_qc] + w_scale_arr[ell_idx_qc] * np.float64(qc_W_int)
-            dyn_it_qc = np.int64(dyn_x_qc * one_minus_4eps)
+            corr_qc = 3.0 + 2.0 * np.float64(qc_W_int)
+            dyn_x_qc = (cs_base_m2 + corr_qc + eps_margin) * scale_arr[ell_idx_qc]
+            dyn_it_qc = np.int64(dyn_x_qc)
             if ws_qc > dyn_it_qc:
                 quick_killed = True
 
@@ -688,8 +673,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 ell = ell_order[ell_oi]
                 n_cv = ell - 1
                 ell_idx = ell - 2
-                ct_base_ell = ct_base_ell_arr[ell_idx]
-                w_scale = w_scale_arr[ell_idx]
+                scale_ell = scale_arr[ell_idx]
                 n_windows = conv_len - n_cv + 1
                 # Sliding window: initialize sum for s_lo=0
                 ws = np.int64(0)
@@ -705,8 +689,9 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     if hi_bin > d_child - 1:
                         hi_bin = d_child - 1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    dyn_x = ct_base_ell + w_scale * np.float64(W_int)
-                    dyn_it = np.int64(dyn_x * one_minus_4eps)
+                    corr_w = 3.0 + 2.0 * np.float64(W_int)
+                    dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                    dyn_it = np.int64(dyn_x)
                     if ws > dyn_it:
                         pruned = True
                         qc_ell = np.int32(ell)
@@ -893,8 +878,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     ell = ell_order[ell_oi]
                     n_cv = ell - 1
                     ell_idx = ell - 2
-                    ct_base_ell = ct_base_ell_arr[ell_idx]
-                    w_scale = w_scale_arr[ell_idx]
+                    scale_ell = scale_arr[ell_idx]
 
                     # Only check windows fully contained in partial conv
                     n_windows_partial = partial_conv_len - n_cv + 1
@@ -946,8 +930,9 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
-                        dyn_x = ct_base_ell + w_scale * np.float64(W_int_max)
-                        dyn_it = np.int64(dyn_x * one_minus_4eps)
+                        corr_w = 3.0 + 2.0 * np.float64(W_int_max)
+                        dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                        dyn_it = np.int64(dyn_x)
                         if ws > dyn_it:
                             subtree_pruned = True
                             break
@@ -1048,12 +1033,11 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
         return 0, 0
 
-    # --- Dynamic pruning constants (identical to original) ---
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
+    # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
+    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
     inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
-    DBL_EPS = 2.220446049250313e-16
-    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m_d * m_d
+    cs_base_m2 = c_target * m_d * m_d
 
     max_survivors = out_buf.shape[0]
     n_surv = 0
@@ -1114,27 +1098,19 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                 nz_pos[i] = nz_count
                 nz_count += 1
 
-    # --- Precompute per-ell constants ---
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
-    # The +3 accounts for: +1 from |eps*eps|<=1/m^2, +2 from W_f<=W_g+1/m.
+    # --- Precompute 2D threshold table (C&S Lemma 3 + W-refinement) ---
+    # threshold_table[ell_idx * (m+1) + W_int] =
+    #   floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
     ell_count = 2 * d_child - 1
-    cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin
-    ct_base_ell_arr = np.empty(ell_count, dtype=np.float64)
-    w_scale_arr = np.empty(ell_count, dtype=np.float64)
-    for ell in range(2, 2 * d_child + 1):
-        idx = ell - 2
-        ell_f = np.float64(ell)
-        ct_base_ell_arr[idx] = cs_corr_base * ell_f * inv_4n
-        w_scale_arr[idx] = 2.0 * ell_f * inv_4n
-
-    # --- Precompute 2D threshold table: threshold_table[ell_idx * (m+1) + W_int] ---
     m_plus_1 = m + 1
     threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
+        scale_ell = np.float64(ell) * inv_4n
         for w in range(m_plus_1):
-            dyn_x = ct_base_ell_arr[idx] + w_scale_arr[idx] * np.float64(w)
-            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x * one_minus_4eps)
+            corr_w = 3.0 + 2.0 * np.float64(w)
+            dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x)
 
     # --- Optimized ell scan order ---
     # Empirically tuned: at d_child=32, ell=7-13 account for 92% of prunes.
@@ -1671,9 +1647,9 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
-    # doesn't go through test-value, so no correction needed
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    # Cauchy-Schwarz bound: ||f*f||_∞ ≥ d_child·μ_i².  For adjusted bins
+    # (canonical rounding +1), μ_i can be as low as (c_i-1)/m, so add +1.
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
     x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
@@ -1721,24 +1697,21 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
     # --- Threshold constants (must match _fused_generate_and_prune_gray) ---
     m_d = np.float64(m)
     inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
-    DBL_EPS = 2.220446049250313e-16
-    one_minus_4eps = 1.0 - 4.0 * DBL_EPS
     eps_margin = 1e-9 * m_d * m_d
+    cs_base_m2 = c_target * m_d * m_d
     m_plus_1 = m + 1
     ell_count = conv_len
 
-    # Precompute threshold table (identical to CPU kernel)
-    # C&S Lemma 3: ENTIRE threshold (c_target*m^2 + 3 + 2*W_int + eps) scaled by ell/(4n).
-    cs_corr_base = c_target * m_d * m_d + 3.0 + eps_margin
+    # Precompute threshold table (C&S Lemma 3 + W-refinement, matches CPU kernel)
+    # threshold = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
     threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        ell_f = np.float64(ell)
-        ct_base_ell_val = cs_corr_base * ell_f * inv_4n
-        w_scale_val = 2.0 * ell_f * inv_4n
+        scale_ell = np.float64(ell) * inv_4n
         for w in range(m_plus_1):
-            dyn_x = ct_base_ell_val + w_scale_val * np.float64(w)
-            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x * one_minus_4eps)
+            corr_w = 3.0 + 2.0 * np.float64(w)
+            dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x)
 
     # Working array (reused across all (p, v) checks)
     test_conv = np.empty(conv_len, dtype=np.int64)
@@ -2263,8 +2236,8 @@ def generate_children_uniform(parent_int, m, c_target, n_half_child=None):
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
     x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Cauchy-Schwarz bound on continuous ||f*f||_∞ ≥ d_child·c_i²/m²
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child)))
+    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment (μ_i ≥ (c_i-1)/m)
+    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
     x_cap = min(x_cap, x_cap_cs)
     x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
@@ -2746,8 +2719,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         corr_pf = correction(m, n_half_child)
         thresh_pf = c_target + corr_pf + 1e-9
         x_cap_pf = int(math.floor(m * math.sqrt(thresh_pf / d_child)))
-        # Cauchy-Schwarz bound: no correction needed
-        x_cap_cs_pf = int(math.floor(m * math.sqrt(c_target / d_child)))
+        # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
+        x_cap_cs_pf = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
         x_cap_pf = min(x_cap_pf, x_cap_cs_pf, m)
         max_bin_val = 2 * x_cap_pf
         feasible_mask = np.all(current_configs <= max_bin_val, axis=1)
