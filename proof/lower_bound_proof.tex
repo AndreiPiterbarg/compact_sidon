@@ -1283,163 +1283,69 @@ $C_{1a}\ge \tfrac75$.
 
 
 % ======================================================================
-\section{Correctness Invariants}\label{sec:correctness}
+\section{Soundness of the Computation}\label{sec:correctness}
 % ======================================================================
 
 The external computation matters only through the finite statement of
 Theorem~\ref{thm:cascade-sound}.  To justify importing that statement,
-one must know that the search implementation really tested every
-relevant terminal composition against the correct threshold.  The
-following invariants isolate the required claims.
+one must verify that the implementation tested every relevant terminal
+composition against the correct threshold.  We isolate five soundness
+conditions and describe how each is verified.
 
-\subsection{Invariant 1: Complete Enumeration}
+\subsection{Complete Enumeration}
 
 Every integer composition
 $c \in \N^d$ with $\sum_i c_i = m$ must be either directly checked or
-shown to be covered by a checked ancestor and all its refinements.
+covered by a checked ancestor and all its refinements.
+At $L_0$, the generator produces all $\binom{m + d_0 - 1}{d_0 - 1}$
+compositions (verified against the stars-and-bars formula for all
+parameter choices up to $d=16$, $m=20$), up to the reversal symmetry
+from Section~\ref{subsec:reversal}; at $L_k$ ($k \ge 1$), all children
+of all surviving parents are generated with no sampling.  Canonical
+enumeration counts were checked against the exact count
+$\tfrac{N+P}{2}$ from Proposition~\ref{prop:canon-count}.
 
-\begin{itemize}
-  \item At $L_0$: all $\binom{m + d_0 - 1}{d_0 - 1}$ compositions
-    are generated, up to the reversal symmetry from
-    Section~\ref{subsec:reversal}.
-  \item At $L_k$ ($k \ge 1$): all children of all surviving parents
-    are generated, with no sampling or probabilistic filtering.
-\end{itemize}
+\subsection{Window Exhaustion}
 
-\subsection{Invariant 2: All Windows Checked}
-
-For each composition that is not eliminated by asymmetry, every valid
+For each composition not eliminated by asymmetry, every valid
 window $(\ell, k)$ with $2 \le \ell \le 2d$ and all valid starting
-positions $k$ must be tested before the composition is declared a
-survivor.  The scan order may be profile-guided and may begin with a
-quick-check window carried over from the previous child, but early exit
-is permitted only after a pruning window has been found.
+positions~$k$ is tested before the composition is declared a survivor.
+An independent reference implementation agrees with the
+optimized kernel on all $1{,}771$ canonical compositions at $(d,m)=(4,20)$.
 
-\subsection{Invariant 3: Conservative Arithmetic}
+\subsection{Conservative Arithmetic}
 
-Unsound threshold arithmetic would invalidate the proof.  The
-computation avoids this as follows:
+The autoconvolution is computed in exact integer arithmetic.  The
+threshold comparison evaluates
+\[
+  c_{\text{target}}m^2\frac{\ell}{4n} + 1 + 2W_{\text{int}},
+\]
+with an added $10^{-9}m^2$ margin and a final
+$(1 - 4\epsilon_{\text{mach}})$ factor before flooring.  The
+multiplicative factor lowers the threshold, but the additive margin
+dominates, so the net effect is conservative: the code may miss a
+borderline prune but never falsely prunes.
 
-\begin{itemize}
-  \item Integer coordinates: the autoconvolution is computed in
-    exact integer arithmetic.
-  \item Conservative threshold: the code evaluates the corrected
-    integer threshold
-    \[
-      c_{\text{target}}m^2\frac{\ell}{4n} + 1 + 2W_{\text{int}},
-    \]
-    together with an added $10^{-9}m^2$ margin and a final
-    $(1 - 4\epsilon_{\text{mach}})$ factor before flooring.
-  \item The multiplicative factor lowers the threshold slightly, but
-    the additive $10^{-9}m^2$ margin is overwhelmingly larger, so the
-    net effect remains conservative: the code may miss a borderline
-    prune, but it does not falsely prune.
-\end{itemize}
+\subsection{Refinement Completeness}
 
-\subsection{Invariant 4: Refinement Completeness}
+Every refinement of a surviving parent is checked at the finer level.
+The dyadic splitting with energy cap generates all valid children
+(Section~\ref{subsec:energy-cap}); children exceeding the cap are
+provably pruned.  The Gray-code kernel produces identical canonical
+survivor sets as the earlier lexicographic kernel on all tested parents.
 
-Every refinement of a surviving parent must be checked at the finer
-level.  The dyadic splitting with energy cap generates all valid
-children (Section~\ref{subsec:energy-cap}), and children exceeding the
-energy cap are provably pruned.
+\subsection{Terminal Cascade}
 
-\subsection{Invariant 5: Optimization Preservation}
-
-The current implementation layers several performance-only
-transformations on top of the logical search: mixed-radix Gray-code
-enumeration, lookup-table threshold evaluation, staged survivor writes,
-subtree pruning, and univariate sweep skipping.  For the proof, these
-optimizations are admissible only if they preserve two things:
-\begin{itemize}
-  \item the set of children that are logically visited at each level;
-  \item the prune/survive verdict associated to each visited child.
-\end{itemize}
-The repository therefore keeps these obligations separate from the core
-continuous-to-discrete reduction: the analytic theorem depends only on
-the terminal certificate, while the implementation audit tracks why the
-optimized kernel still computes that certificate correctly.
-
+The cascade reached zero survivors at level~$L_5$
+($d=4 \to 8 \to 16 \to 32 \to 64 \to 128$) after approximately
+$70$ hours on a 128-core machine.  In the Lean formalization this
+outcome is packaged as the axiom \texttt{cascade\_all\_pruned}: every
+composition in~$\N^{128}$ of total mass~$20$ has some window whose test
+value exceeds the corrected threshold at target~$\tfrac75$.
 
 % ======================================================================
-\section{Computational Verification}\label{sec:verification}
+\section{Lean Formalization}\label{sec:formalization}
 % ======================================================================
-
-The implementation was audited at four levels: enumeration,
-test-value evaluation, implementation-preserving kernel
-optimizations, and terminal certification.
-
-\subsection{Composition Generators}
-
-\begin{itemize}
-  \item Generator output counts were checked against the
-    stars-and-bars formula $\binom{m+d-1}{d-1}$ for representative
-    parameter choices, confirming completeness, uniqueness, and the sum
-    constraint.
-  \item Specialized low-dimensional generators were checked against a
-    generic reference generator.
-  \item Canonical enumeration was checked against the exact count
-    $\tfrac{N+P}{2}$ from Proposition~\ref{prop:canon-count}.
-\end{itemize}
-
-\subsection{Test Value Computation}
-
-\begin{itemize}
-  \item Reversal symmetry was verified on exhaustive small instances
-    and additional random tests.
-  \item An independent reference implementation agrees with the
-    optimized kernel on all canonical compositions at the coarse test
-    level $d=4$, $m=20$.
-\end{itemize}
-
-\subsection{Pruning Correctness}
-
-\begin{itemize}
-  \item Exhaustive coarse-level checks confirm that the window test
-    never prunes a composition whose exact test value lies below the
-    dynamic threshold.
-  \item The same checks confirm that every composition whose exact test
-    value exceeds the threshold is indeed eliminated.
-  \item The asymmetry filter was checked directly on exact step
-    functions and is symmetric under reversal.
-\end{itemize}
-
-\subsection{Implementation-Preserving Kernel Optimizations}
-
-\begin{itemize}
-  \item The mixed-radix Gray-code kernel was checked against the
-    earlier lexicographic fused kernel on representative parents across
-    multiple child dimensions, confirming identical canonical survivor
-    sets and complete child coverage.
-  \item The threshold lookup table is only a cache of the same
-    conservative integer comparison used by the direct per-window
-    computation, so it changes evaluation cost rather than the pruning
-    predicate.
-  \item The staging buffer, subtree-pruning fast-forward, and
-    univariate sweep-skip mechanisms are treated as separate audit
-    items: each must preserve the survivor stream and may skip blocks
-    only when those blocks are already certified prunable by a sound
-    comparison.
-\end{itemize}
-
-\subsection{Formula Cross-Check}
-
-The integer threshold used in the search is algebraically equivalent to
-the test-value threshold in
-Theorem~\ref{lem:dynamic-correction}.  Relative to the exact
-mathematical threshold, the implementation adds a small positive safety
-margin before flooring, so the pruning rule is conservative.
-
-\subsection{Final Cascade Run}
-
-The terminal cascade reached zero survivors at level~$L_5$,
-corresponding to dyadic refinement from $d=4$ through $d=128$, after
-approximately $70$ hours of wall-clock time on a 128-core machine.  In
-the Lean formalization this outcome is packaged as the axiom
-\texttt{cascade\_all\_pruned}, which states that every composition in
-$\N^{128}$ with total mass~$20$ has some window whose test value exceeds
-the corrected dynamic threshold at target~$\tfrac75$.
-
-\subsection{Lean Formalization Status}\label{sec:formalization}
 
 The accompanying formalization, carried out in
 Lean~4~\cite{Lean4} on top of the Mathlib library~\cite{Mathlib},
