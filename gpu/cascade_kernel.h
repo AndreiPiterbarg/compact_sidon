@@ -30,6 +30,9 @@
 /* Survivor staging-buffer capacity per block (shared memory). */
 #define SURV_CAP      64
 
+/* Quick-check cache: number of top killing windows to track. */
+#define QC_CACHE_K    5
+
 /* Subtree pruning: check at multiple J boundaries for more pruning.
  * At d_child=64, the partial conv signal is weaker (thresholds scale with
  * 1/n_half_child), so we need larger fixed prefixes (smaller J) to trigger.
