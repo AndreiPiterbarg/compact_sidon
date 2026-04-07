@@ -16,14 +16,14 @@ RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "")
 # Docker image with CUDA 12.x + development tools (nvcc, headers)
 DOCKER_IMAGE = "runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04"
 GPU_TYPE = "NVIDIA H100 80GB HBM3"
-GPU_COUNT = 1
-CLOUD_TYPE = "SECURE"  # SECURE = on-demand (not spot)
+GPU_COUNT = int(os.environ.get("GPU_COUNT", "8"))
+CLOUD_TYPE = os.environ.get("CLOUD_TYPE", "SPOT")  # SPOT for spot, SECURE for on-demand
 CONTAINER_DISK_GB = 100
 VOLUME_IN_GB = 200
 
-# Cost tracking
-COST_PER_HOUR = 3.89   # USD/hr for 1x H100 80GB on-demand (RunPod)
-BUDGET_LIMIT = 50.0    # USD per session (~13h)
+# Cost tracking (8x H100 SXM spot ~$2/GPU/hr = $16/hr)
+COST_PER_HOUR = float(os.environ.get("COST_PER_HOUR", "16.0"))
+BUDGET_LIMIT = float(os.environ.get("BUDGET_LIMIT", "100.0"))
 BUDGET_WARN_PCT = 0.80
 
 # Paths

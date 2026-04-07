@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-DATA_DIR="${PROJECT_ROOT}/data"
+DATA_DIR="${DATA_DIR:-${PROJECT_ROOT}/data}"
 
 # Default parameters
 M=35
@@ -22,9 +22,11 @@ N_HALF=2
 MAX_LEVEL=3
 NGPUS=4
 # Chunk sizes per level (smaller = more checkpoints = safer)
+# On 8x H100 SXM at ~25 parents/s, 500 parents ≈ 20s per chunk.
+# Spot preemption loses at most 1 chunk per GPU = ~20s of work.
 CHUNK_SIZE_L1=5000    # L1 is fast, bigger chunks fine
-CHUNK_SIZE_L2=2000    # L2 is moderate
-CHUNK_SIZE_L3=2000    # L3 is slow, small chunks = frequent saves
+CHUNK_SIZE_L2=1000    # L2 is moderate
+CHUNK_SIZE_L3=500     # L3 is slow, tiny chunks = minimal loss on preemption
 MAX_SURV=5000000
 
 # Parse arguments
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
         --max_level)  MAX_LEVEL="$2"; shift 2;;
         --ngpus)      NGPUS="$2"; shift 2;;
         --chunk_size) CHUNK_SIZE_L1="$2"; CHUNK_SIZE_L2="$2"; CHUNK_SIZE_L3="$2"; shift 2;;
+        --data_dir)   DATA_DIR="$2"; shift 2;;
         *)            echo "Unknown arg: $1"; exit 1;;
     esac
 done
