@@ -154,6 +154,10 @@ process_gpu() {
     done
 }
 
+echo "=== Cleaning stale locks (from prior preemption) ==="
+find "$OUTPUT_DIR" -name ".lock_*" -type d -exec rmdir {} \; 2>/dev/null || true
+echo "  Stale locks cleared."
+
 echo "=== Launching $NGPUS GPU workers ==="
 PIDS=()
 for ((i=0; i<NGPUS; i++)); do
