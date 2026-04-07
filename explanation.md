@@ -118,6 +118,8 @@ $$\text{ws\_int} > \left(c_{\text{target}} \cdot m^2 + 3 + 2W_{\text{int}} + \va
 
 Same structure: everything scaled by $\ell/(4n)$, but using per-window $W_{\text{int}}$ (from the discrete vector) instead of the global maximum $m$. The $+3$ (instead of $+1$) accounts for the cumulative rounding correction.
 
+**Note (2026-04-07):** The actual code caps the W-refined correction at the simple Lemma 3 bound: `min(2m+1, 3+2*W_int)`. This ensures the W-refinement never exceeds the basic bound $(2m+1)/m^2 = 2/m + 1/m^2$, which would be unsound. The cap only activates when $W_{\text{int}} > m - 1$ (nearly all mass in the contributing bins). The `eps_margin` is added as a flat term outside the scaling, not inside.
+
 ### Comparison at $\ell = 2$, $d = 32$ ($n = 16$), $m = 20$, $W_{\text{int}} = 10$:
 
 | Formula | Integer threshold |

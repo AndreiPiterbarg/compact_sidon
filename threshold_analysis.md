@@ -1,5 +1,23 @@
 # Analysis: Pruning Threshold Discrepancy Between Our Code and Cloninger–Steinerberger
 
+> **RESOLVED (2026-04-07).** The discrepancy identified in this document has been
+> fixed.  Our code now uses the C&S Lemma 3 formula where the ENTIRE threshold
+> (including correction) is scaled by `ell/(4n)`:
+>
+>     threshold = floor((c_target*m^2 + min(2m+1, 3+2*W_int)) * ell/(4n) + eps)
+>
+> The old formula (Theorem 3.7, with the correction NOT scaled) was a valid but
+> overly conservative bound.  The C&S formula is tighter and correct because
+> Lemma 3 is a pointwise bound on `(g*g)(x)` and test values are window averages
+> (`TV <= ||g*g||_inf`).  See `explanation.md` for the full derivation.
+>
+> Section 10's "counterexample" is misleading — it shows per-window TV error
+> exceeding the correction, but pruning soundness uses the chain
+> `TV <= ||g*g||_inf <= ||f*f||_inf + 2/m + 1/m^2`, not per-window error bounds.
+>
+> Section 11's `x_cap_cs` bug has been addressed by adding `+1` to the formula
+> (accounting for discretization adjustment in canonical rounding).
+
 ## 1. Problem Statement
 
 Two contradictory observations:
