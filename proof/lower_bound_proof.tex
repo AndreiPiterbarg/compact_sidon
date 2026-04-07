@@ -254,10 +254,10 @@ In particular, $C_{1a} \ge \tfrac75 = 1.4$.
 \end{theorem}
 
 The Lean formalization proves this as
-\texttt{autoconvolution\_ratio\_ge\_7\_5} in
-\texttt{Sidon/FinalResult.lean}, with an explicit finiteness hypothesis
-on the essential supremum of $f*f$ (see
-Section~\ref{sec:formalization}).
+\texttt{autoconvolution\_ratio\_ge\_7\_5}
+in \texttt{FinalResult.lean}, with an explicit finiteness
+hypothesis on the essential supremum of $f*f$
+(see Section~\ref{sec:formalization}).
 The proof is assembled in Section~\ref{sec:algorithm} from the continuous
 reduction (Sections~\ref{sec:bin}--\ref{sec:testvalue}), the pruning
 machinery (Sections~\ref{sec:pruning}--\ref{sec:cascade}), and the
@@ -626,7 +626,7 @@ proof and the certificate computation use the sharper per-window
 threshold.
 
 \begin{theorem}[Dynamic threshold soundness]
-\label{lem:dynamic-correction}
+\label{thm:dynamic-threshold}
 Let $c$ be the canonical discretization of a normalized function
 $f\in\mathcal{F}$ at parameters $(n,m)$, and let
 \[
@@ -663,7 +663,7 @@ The Lean counterpart is \texttt{dynamic\_threshold\_sound}.
 If
 $W_{\mathrm{int}}=\sum_{i\in\mathcal{B}_{n,\ell,s_{\mathrm{lo}}}} c_i$,
 then the threshold from
-Theorem~\ref{lem:dynamic-correction} can be written equivalently as
+Theorem~\ref{thm:dynamic-threshold} can be written equivalently as
 \[
   c_{\mathrm{target}}
   +
@@ -1207,7 +1207,7 @@ can be updated locally instead of recomputed from scratch:
   $\sqrt{c_{\text{target}}/2}$)
 \State For every remaining composition, scan all windows and prune if
   some window exceeds the dynamic threshold from
-  Theorem~\ref{lem:dynamic-correction}
+  Theorem~\ref{thm:dynamic-threshold}
 \State $\text{survivors}_0 \gets$ unpruned compositions
 \For{$k = 1, 2, \ldots, L_{\max}$}
   \State $d_k \gets 2 d_{k-1}$; \quad
@@ -1269,13 +1269,14 @@ $(\ell,s_{\mathrm{lo}})$ such that
     \sum_{i\in\mathcal{B}_{64,\ell,s_{\mathrm{lo}}}} c_i
   \right).
 \]
-This is exactly the hypothesis needed for
-Theorem~\ref{lem:dynamic-correction}, which in Lean is the theorem
-\texttt{dynamic\_threshold\_sound}.  Its proof combines the
-continuous lower bound \texttt{continuous\_test\_value\_le\_ratio} with
-the per-window discretization estimate from
-Lemma~\ref{lem:disc-error}.  Therefore $R(g)\ge \tfrac75$, and scale
-invariance gives $R(f)\ge \tfrac75$.
+This is exactly the hypothesis of
+Theorem~\ref{thm:dynamic-threshold}
+(\texttt{dynamic\_threshold\_sound} in Lean), whose proof combines
+the continuous lower bound
+\texttt{continuous\_test\_value\_le\_ratio}
+with the per-window discretization estimate from
+Lemma~\ref{lem:disc-error}.  Therefore $R(g)\ge \tfrac75$, and
+scale invariance gives $R(f)\ge \tfrac75$.
 
 Taking the infimum over $f\in\mathcal{F}$ yields
 $C_{1a}\ge \tfrac75$.
@@ -1369,7 +1370,7 @@ statement at $d=128$.
   \midrule
   Theorem~\ref{thm:main} & \texttt{autoconvolution\_ratio\_ge\_7\_5}
     & \texttt{FinalResult.lean} \\
-  Theorem~\ref{lem:dynamic-correction} & \texttt{dynamic\_threshold\_sound}
+  Theorem~\ref{thm:dynamic-threshold} & \texttt{dynamic\_threshold\_sound}
     & \texttt{DiscretizationError.lean} \\
   Lemma~\ref{lem:bin-reduction} & \texttt{continuous\_test\_value\_le\_ratio}
     & \texttt{TestValueBounds.lean} \\
