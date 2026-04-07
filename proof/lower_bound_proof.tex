@@ -26,7 +26,7 @@
   linkcolor=MidnightBlue,
   citecolor=MidnightBlue,
   urlcolor=MidnightBlue,
-  pdftitle={A Computer-Assisted Proof That the Autoconvolution Constant C1a Satisfies C1a >= 7/5},
+  pdftitle={A Computer-Assisted Proof That C1a >= 7/5},
   pdfauthor={Jai Bajaj},
   pdfsubject={A computer-assisted lower bound for the autoconvolution constant}
 }
@@ -80,9 +80,8 @@
 
 % ══════════════════════════════════════════════════════════════════════
 \title{\texorpdfstring{%
-  \bfseries A Computer-Assisted Proof That the\\
-  \bfseries Autoconvolution Constant $C_{1a}$ Satisfies $C_{1a}\ge \tfrac75$
-}{A Computer-Assisted Proof That the Autoconvolution Constant C1a Satisfies C1a >= 7/5}}
+  \bfseries A Computer-Assisted Proof That $C_{1a}\ge \tfrac75$
+}{A Computer-Assisted Proof That C1a >= 7/5}}
 \author{Jai Bajaj}
 \date{}
 
@@ -97,21 +96,24 @@ We prove that the autoconvolution constant
   \inf_f \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2},
 \]
 taken over nonnegative functions supported on
-$(-\tfrac14,\tfrac14)$, satisfies $C_{1a}\ge \tfrac75$.  The argument
-starts from the Cloninger--Steinerberger reduction~\cite{CS17} from
-continuous functions to windowed sums of bin masses, but is organized
-around the exact objects used in the accompanying Lean development: a
-half-open bin partition, a cumulative-floor canonical discretization,
-and a window-dependent correction term.  The finite verification is a
-dyadic branch-and-prune cascade with terminal parameters
-$n=64$, $m=20$, and $d=128$, ending with zero survivors.  All analytic
-steps from the continuous problem to the terminal-grid statement are
-formalized in Lean; the only imported assumption is the finite terminal
-certificate asserting that every composition in $\mathbb{N}^{128}$ of
-total mass $20$ is eliminated by some admissible window.
+$(-\tfrac14,\tfrac14)$, satisfies $C_{1a}\ge \tfrac75$.
+The proof reduces the infinite-dimensional optimization to a finite
+computation via a discretization of the mass simplex, building on the
+framework of Cloninger and Steinerberger~\cite{CS17}, combined with a
+multiscale branch-and-prune cascade that eliminates all candidate
+configurations.  The entire analytic reduction is formalized in Lean~4;
+the only imported assumption is a finite computational certificate
+asserting that every composition at the terminal resolution is
+eliminated by some admissible window.
 \end{abstract}
-\noindent\textbf{Keywords.} Autoconvolution, Sidon sets, branch-and-prune,
-computer-assisted proof, Lean formalization.
+\noindent\textit{2020 Mathematics Subject Classification.}
+11B83, 42A85, 68V20.
+
+\smallskip
+
+\noindent\textit{Keywords.}
+Autoconvolution, Sidon sets, branch-and-prune, computer-assisted proof,
+Lean formalization.
 
 \medskip
 
@@ -197,7 +199,7 @@ good $f$ and compute its peak.
 The \emph{lower bound} is fundamentally harder: one must show that
 \emph{no} function can achieve a peak below the threshold.  This
 requires exhaustive elimination of all possibilities, which is the
-subject of this document.
+subject of this paper.
 
 The published lower bounds of Martin--O'Bryant~\cite{MO2004,MO2009},
 Matolcsi--Vinuesa~\cite{MV10}, and
@@ -234,10 +236,28 @@ At a high level, the reduction proceeds in three steps:
 
 The terminal statement is verified by a dyadic cascade from $d=4$ to
 $d=128$, using reversal symmetry, asymmetry pruning, and the
-window-dependent correction term.  The Lean theorem
-\path{autoconvolution_ratio_ge_7_5} combines the analytic
-reduction with the imported terminal certificate
-\path{cascade_all_pruned}.
+window-dependent correction term.
+
+\begin{theorem}[Main result]
+\label{thm:main}
+Let $f : \R \to \R$ be nonnegative with
+$\supp(f) \subseteq (-\tfrac14,\tfrac14)$ and $\int f > 0$.  If
+$\|f*f\|_{L^\infty} < \infty$, then
+\[
+  \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2} \;\ge\; \frac75.
+\]
+In particular, $C_{1a} \ge \tfrac75 = 1.4$.
+\end{theorem}
+
+The Lean formalization proves this as
+\texttt{autoconvolution\_ratio\_ge\_7\_5} in
+\texttt{Sidon/FinalResult.lean}, with an explicit finiteness hypothesis
+on the essential supremum of $f*f$ (see
+Section~\ref{sec:formalization}).
+The proof is assembled in Section~\ref{sec:algorithm} from the continuous
+reduction (Sections~\ref{sec:bin}--\ref{sec:testvalue}), the pruning
+machinery (Sections~\ref{sec:pruning}--\ref{sec:cascade}), and the
+terminal computational certificate.
 
 
 % ======================================================================
@@ -1253,29 +1273,9 @@ can be updated locally instead of recomputed from scratch:
 \end{algorithmic}
 \end{algorithm}
 
-\subsection{Main Theorem}
+\subsection{Proof of the Main Theorem}
 
-\begin{theorem}[Main theorem]
-\label{thm:main}
-Let $f : \R \to \R$ be nonnegative, satisfy
-$\supp(f) \subseteq (-\tfrac14,\tfrac14)$, and obey $\int f > 0$.  If
-$\|f*f\|_{L^\infty} < \infty$, then
-\[
-  \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2} \;\ge\; \frac75.
-\]
-Consequently $C_{1a} \ge \tfrac75 = 1.4$.
-\end{theorem}
-
-\begin{remark}[Exact Lean statement]
-The Lean theorem \path{autoconvolution_ratio_ge_7_5} is phrased
-for the function \path{autoconvolution_ratio} and carries an
-explicit finiteness hypothesis
-\path{h_conv_fin} asserting that the essential supremum of $f*f$ is
-not $\top$.  This is the formal counterpart of the hypothesis
-$\|f*f\|_{L^\infty}<\infty$ in Theorem~\ref{thm:main}.
-\end{remark}
-
-\begin{proof}
+\begin{proof}[Proof of Theorem~\ref{thm:main}]
 Normalize
 \[
   g \;=\; \frac{f}{\int f},
@@ -1480,7 +1480,7 @@ newer files \path{data/cpu_cascade_20260325_162306.json} and
 run and resume artefacts, but they are not the terminal certificate
 imported by Lean.
 
-\subsection{Lean Formalization Status}
+\subsection{Lean Formalization Status}\label{sec:formalization}
 
 The accompanying formalization consists of a modular Lean 4 development
 under \path{lean/Sidon/} and a consolidated export in
