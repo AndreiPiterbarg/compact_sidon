@@ -48,12 +48,18 @@ from test_values import compute_test_values_batch
 # =====================================================================
 
 @njit(parallel=True, cache=True)
-def _prune_dynamic_int32(batch_int, n_half, m, c_target):
+def _prune_dynamic_int32(batch_int, n_half, m, c_target,
+                          use_flat_threshold=False):
     """int32 path: halves memory bandwidth in autoconvolution inner loop.
 
     Safe when m <= 200 because max prefix sum of conv = m^2 = 40000,
     which fits comfortably in int32 (max 2,147,483,647).
     Values are widened to int64 only at the threshold comparison point.
+
+    When use_flat_threshold=True, uses the flat C&S Lemma 3 correction
+    (2/m + 1/m^2 → integer correction 2m+1) instead of the W-refined
+    correction (3 + W_int/(2n)).  The flat threshold is what the Lean
+    axiom cascade_all_pruned requires for soundness.
     """
     B = batch_int.shape[0]
     d = batch_int.shape[1]
@@ -61,19 +67,29 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
     survived = np.ones(B, dtype=numba.boolean)
 
     m_d = np.float64(m)
-    inv_4n = 1.0 / (4.0 * np.float64(n_half))
+    four_n = 4.0 * np.float64(n_half)
+    n_half_d = np.float64(n_half)
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # Pre-compute per-ell scale factors (C&S Lemma 3 + W-refinement).
-    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
-    # The ENTIRE expression (including correction and eps) is scaled by ell/(4n)
-    # because Lemma 3 is a pointwise bound and TV is a window average.
+    # Pre-compute per-ell scale factors.
+    # Fine grid: heights = c_i/m, TV = window_sum/(4n*ell*m^2).
     max_ell = 2 * d
     cs_base_m2 = c_target * m_d * m_d
     scale_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
-        scale_arr[ell] = np.float64(ell) * inv_4n
+        scale_arr[ell] = np.float64(ell) * four_n
+
+    # Flat C&S Lemma 3 correction: (2/m + 1/m^2)*m^2 = 2m + 1.
+    # Independent of W_int — no need for prefix_c when flat.
+    flat_corr = 2.0 * m_d + 1.0
+
+    # Pre-compute flat threshold per ell (when use_flat_threshold=True)
+    flat_threshold_arr = np.empty(max_ell + 1, dtype=np.int64)
+    if use_flat_threshold:
+        for ell in range(2, max_ell + 1):
+            dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_arr[ell]
+            flat_threshold_arr[ell] = np.int64(dyn_x)
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
@@ -86,37 +102,48 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
                     if cj != 0:
                         conv[i + j] += np.int32(2) * ci * cj
 
-        prefix_c = np.zeros(d + 1, dtype=np.int32)
-        for i in range(d):
-            prefix_c[i + 1] = prefix_c[i] + np.int32(batch_int[b, i])
+        if not use_flat_threshold:
+            prefix_c = np.zeros(d + 1, dtype=np.int64)
+            for i in range(d):
+                prefix_c[i + 1] = prefix_c[i] + np.int64(batch_int[b, i])
 
         pruned = False
         for ell in range(2, max_ell + 1):
             if pruned:
                 break
             n_cv = ell - 1
-            scale_ell = scale_arr[ell]
             n_windows = conv_len - n_cv + 1
             # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
             for k in range(n_cv):
                 ws += np.int64(conv[k])
-            for s_lo in range(n_windows):
-                if s_lo > 0:
-                    ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(conv[s_lo - 1])
-                lo_bin = s_lo - d_minus_1
-                if lo_bin < 0:
-                    lo_bin = 0
-                hi_bin = s_lo + ell - 2
-                if hi_bin > d_minus_1:
-                    hi_bin = d_minus_1
-                W_int = np.int64(prefix_c[hi_bin + 1]) - np.int64(prefix_c[lo_bin])
-                corr_w = 3.0 + 2.0 * np.float64(W_int)
-                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-                dyn_it = np.int64(dyn_x)
-                if ws > dyn_it:
-                    pruned = True
-                    break
+
+            if use_flat_threshold:
+                dyn_it = flat_threshold_arr[ell]
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(conv[s_lo - 1])
+                    if ws > dyn_it:
+                        pruned = True
+                        break
+            else:
+                scale_ell = scale_arr[ell]
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(conv[s_lo - 1])
+                    lo_bin = s_lo - d_minus_1
+                    if lo_bin < 0:
+                        lo_bin = 0
+                    hi_bin = s_lo + ell - 2
+                    if hi_bin > d_minus_1:
+                        hi_bin = d_minus_1
+                    W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                    corr_w = 3.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                    dyn_it = np.int64(dyn_x)
+                    if ws > dyn_it:
+                        pruned = True
+                        break
 
         if pruned:
             survived[b] = False
@@ -129,25 +156,36 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target):
 # =====================================================================
 
 @njit(parallel=True, cache=True)
-def _prune_dynamic_int64(batch_int, n_half, m, c_target):
-    """int64 path for large m values where int32 conv may overflow."""
+def _prune_dynamic_int64(batch_int, n_half, m, c_target,
+                          use_flat_threshold=False):
+    """int64 path for large m values where int32 conv may overflow.
+
+    See _prune_dynamic_int32 for use_flat_threshold documentation.
+    """
     B = batch_int.shape[0]
     d = batch_int.shape[1]
     conv_len = 2 * d - 1
     survived = np.ones(B, dtype=numba.boolean)
 
     m_d = np.float64(m)
-    inv_4n = 1.0 / (4.0 * np.float64(n_half))
+    four_n = 4.0 * np.float64(n_half)
+    n_half_d = np.float64(n_half)
     d_minus_1 = d - 1
     eps_margin = 1e-9 * m_d * m_d
 
-    # C&S Lemma 3 + W-refinement (see _prune_dynamic_int32 for derivation).
-    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
     max_ell = 2 * d
     cs_base_m2 = c_target * m_d * m_d
     scale_arr = np.empty(max_ell + 1, dtype=np.float64)
     for ell in range(2, max_ell + 1):
-        scale_arr[ell] = np.float64(ell) * inv_4n
+        scale_arr[ell] = np.float64(ell) * four_n
+
+    # Flat C&S Lemma 3 correction: (2/m + 1/m^2)*m^2 = 2m + 1.
+    flat_corr = 2.0 * m_d + 1.0
+    flat_threshold_arr = np.empty(max_ell + 1, dtype=np.int64)
+    if use_flat_threshold:
+        for ell in range(2, max_ell + 1):
+            dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_arr[ell]
+            flat_threshold_arr[ell] = np.int64(dyn_x)
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
@@ -160,37 +198,47 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
                     if cj != 0:
                         conv[i + j] += np.int64(2) * ci * cj
 
-        prefix_c = np.zeros(d + 1, dtype=np.int64)
-        for i in range(d):
-            prefix_c[i + 1] = prefix_c[i] + np.int64(batch_int[b, i])
+        if not use_flat_threshold:
+            prefix_c = np.zeros(d + 1, dtype=np.int64)
+            for i in range(d):
+                prefix_c[i + 1] = prefix_c[i] + np.int64(batch_int[b, i])
 
         pruned = False
         for ell in range(2, max_ell + 1):
             if pruned:
                 break
             n_cv = ell - 1
-            scale_ell = scale_arr[ell]
             n_windows = conv_len - n_cv + 1
-            # Sliding window: initialize sum for s_lo=0
             ws = np.int64(0)
             for k in range(n_cv):
                 ws += np.int64(conv[k])
-            for s_lo in range(n_windows):
-                if s_lo > 0:
-                    ws += conv[s_lo + n_cv - 1] - conv[s_lo - 1]
-                lo_bin = s_lo - d_minus_1
-                if lo_bin < 0:
-                    lo_bin = 0
-                hi_bin = s_lo + ell - 2
-                if hi_bin > d_minus_1:
-                    hi_bin = d_minus_1
-                W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                corr_w = 3.0 + 2.0 * np.float64(W_int)
-                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-                dyn_it = np.int64(dyn_x)
-                if ws > dyn_it:
-                    pruned = True
-                    break
+
+            if use_flat_threshold:
+                dyn_it = flat_threshold_arr[ell]
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += conv[s_lo + n_cv - 1] - conv[s_lo - 1]
+                    if ws > dyn_it:
+                        pruned = True
+                        break
+            else:
+                scale_ell = scale_arr[ell]
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += conv[s_lo + n_cv - 1] - conv[s_lo - 1]
+                    lo_bin = s_lo - d_minus_1
+                    if lo_bin < 0:
+                        lo_bin = 0
+                    hi_bin = s_lo + ell - 2
+                    if hi_bin > d_minus_1:
+                        hi_bin = d_minus_1
+                    W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                    corr_w = 3.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                    dyn_it = np.int64(dyn_x)
+                    if ws > dyn_it:
+                        pruned = True
+                        break
 
         if pruned:
             survived[b] = False
@@ -198,22 +246,28 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target):
     return survived
 
 
-def _prune_dynamic(batch_int, n_half, m, c_target):
+def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False):
     """Per-window dynamic threshold — dispatches int32/int64 based on m.
 
-    Works in integer convolution space.  For each window (ell, s_lo),
-    computes W_int and the dynamic integer threshold (C&S Lemma 3):
-        dyn_it = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
-    where eps_margin = 1e-9*m^2.  The ENTIRE expression (including eps) is
-    scaled by ell/(4n) because Lemma 3 is a pointwise bound on (g*g)(x)
-    and test values are window averages.
+    Works in integer convolution space (fine grid: c_i sum to S = 4nm).
+
+    When use_flat_threshold=False (default): uses the W-refined correction
+        dyn_it = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    which is tighter (prunes more) but does NOT verify the Lean axiom.
+
+    When use_flat_threshold=True: uses the flat C&S Lemma 3 correction
+        dyn_it = floor((c_target*m^2 + 2m + 1 + eps) * 4n*ell)
+    which matches the Lean axiom cascade_all_pruned threshold
+    (c_target + 2/m + 1/m^2).  Required for formal verification.
 
     Returns boolean mask: True = survived (not pruned).
     """
     if m <= 200:
-        return _prune_dynamic_int32(batch_int, n_half, m, c_target)
+        return _prune_dynamic_int32(batch_int, n_half, m, c_target,
+                                     use_flat_threshold)
     else:
-        return _prune_dynamic_int64(batch_int, n_half, m, c_target)
+        return _prune_dynamic_int64(batch_int, n_half, m, c_target,
+                                     use_flat_threshold)
 
 
 # =====================================================================
@@ -546,17 +600,23 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
 
     # --- Hoisted asymmetry check (constant across all children) ---
     # sum(child[0:n_half_child]) = sum(parent_int[0:d_parent//2])
-    # because child[2k]+child[2k+1] = parent_int[k] and n_half_child = d_parent
+    # because child[2k]+child[2k+1] = 2*parent_int[k] and n_half_child = d_parent
+    S_parent = np.int64(0)
+    for i in range(d_parent):
+        S_parent += np.int64(parent_int[i])
     left_sum_parent = np.int64(0)
     for i in range(d_parent // 2):
         left_sum_parent += np.int64(parent_int[i])
-    left_frac = np.float64(left_sum_parent) / m_d
+    left_frac = np.float64(left_sum_parent) / np.float64(S_parent)
     if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
         return 0, 0
 
     # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
-    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
-    inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
+    # Fine grid (S = 4nm): compositions sum to S, conv values are int32.
+    # threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # where W_int ranges 0..S (fine-grid mass in overlapping bins).
+    four_n = 4.0 * np.float64(n_half_child)
+    n_half_d = np.float64(n_half_child)
     eps_margin = 1e-9 * m_d * m_d
     cs_base_m2 = c_target * m_d * m_d
 
@@ -593,15 +653,16 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
     # --- Build initial child ---
     for i in range(d_parent):
         child[2 * i] = cursor[i]
-        child[2 * i + 1] = parent_int[i] - cursor[i]
+        child[2 * i + 1] = 2 * parent_int[i] - cursor[i]
 
-    # --- Precompute per-ell scale factors (C&S Lemma 3) ---
-    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
+    # --- Precompute per-ell scale factors (C&S Lemma 3 + W-refinement) ---
+    # Fine grid (S = 4nm): threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # where W_int ranges 0..S (fine-grid mass in overlapping bins).
     ell_count = 2 * d_child - 1  # ell ranges 2..2*d_child, count = 2*d_child - 1
     scale_arr = np.empty(ell_count, dtype=np.float64)
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        scale_arr[idx] = np.float64(ell) * inv_4n
+        scale_arr[idx] = np.float64(ell) * four_n
 
     # --- Optimized ell scan order ---
     # Most children are pruned by narrow windows (ell=2..16) or wide windows
@@ -653,9 +714,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             for k in range(qc_s, qc_s + n_cv_qc):
                 ws_qc += np.int64(raw_conv[k])
             ell_idx_qc = qc_ell - 2
-            corr_qc = 3.0 + 2.0 * np.float64(qc_W_int)
-            dyn_x_qc = (cs_base_m2 + corr_qc + eps_margin) * scale_arr[ell_idx_qc]
-            dyn_it_qc = np.int64(dyn_x_qc)
+            dyn_it_qc = threshold_table[ell_idx_qc * S_child_plus_1 + qc_W_int]
             if ws_qc > dyn_it_qc:
                 quick_killed = True
 
@@ -673,7 +732,6 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                 ell = ell_order[ell_oi]
                 n_cv = ell - 1
                 ell_idx = ell - 2
-                scale_ell = scale_arr[ell_idx]
                 n_windows = conv_len - n_cv + 1
                 # Sliding window: initialize sum for s_lo=0
                 ws = np.int64(0)
@@ -689,9 +747,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     if hi_bin > d_child - 1:
                         hi_bin = d_child - 1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    corr_w = 3.0 + 2.0 * np.float64(W_int)
-                    dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-                    dyn_it = np.int64(dyn_x)
+                    dyn_it = threshold_table[ell_idx * S_child_plus_1 + W_int]
                     if ws > dyn_it:
                         pruned = True
                         qc_ell = np.int32(ell)
@@ -742,7 +798,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             old1 = np.int32(child[k1])
             old2 = np.int32(child[k2])
             child[k1] = cursor[pos]
-            child[k2] = parent_int[pos] - cursor[pos]
+            child[k2] = 2 * parent_int[pos] - cursor[pos]
             new1 = np.int32(child[k1])
             new2 = np.int32(child[k2])
             delta1 = new1 - old1
@@ -784,7 +840,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             # Rebuild changed child bins
             for pos in range(carry, d_parent):
                 child[2 * pos] = cursor[pos]
-                child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+                child[2 * pos + 1] = 2 * parent_int[pos] - cursor[pos]
 
             # Self + mutual terms for each changed position pair
             for pos in range(carry, d_parent):
@@ -911,7 +967,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                         else:
                             W_int_fixed = np.int64(0)
 
-                        # Unfixed part
+                        # Unfixed part (child bins sum to 2*parent)
                         unfixed_lo_bin = lo_bin
                         if unfixed_lo_bin < fixed_len:
                             unfixed_lo_bin = fixed_len
@@ -923,14 +979,14 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                             if p_hi >= d_parent:
                                 p_hi = d_parent - 1
                             if p_lo <= p_hi:
-                                W_int_unfixed = parent_prefix[p_hi + 1] - parent_prefix[p_lo]
+                                W_int_unfixed = np.int64(2) * (parent_prefix[p_hi + 1] - parent_prefix[p_lo])
                             else:
                                 W_int_unfixed = np.int64(0)
                         else:
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
-                        corr_w = 3.0 + 2.0 * np.float64(W_int_max)
+                        corr_w = 3.0 + np.float64(W_int_max) / (2.0 * n_half_d)
                         dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                         dyn_it = np.int64(dyn_x)
                         if ws > dyn_it:
@@ -945,7 +1001,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                     # Rebuild child for current cursor
                     for pos in range(carry, d_parent):
                         child[2 * pos] = cursor[pos]
-                        child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+                        child[2 * pos + 1] = 2 * parent_int[pos] - cursor[pos]
                     # Full recompute of raw_conv
                     for k in range(conv_len):
                         raw_conv[k] = np.int32(0)
@@ -973,7 +1029,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
             # === Not subtree-pruned: original full recompute path ===
             for pos in range(carry, d_parent):
                 child[2 * pos] = cursor[pos]
-                child[2 * pos + 1] = parent_int[pos] - cursor[pos]
+                child[2 * pos + 1] = 2 * parent_int[pos] - cursor[pos]
 
             for k in range(conv_len):
                 raw_conv[k] = np.int32(0)
@@ -1008,13 +1064,17 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
 
 @njit(cache=True)
 def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
-                                    lo_arr, hi_arr, out_buf):
+                                    lo_arr, hi_arr, out_buf,
+                                    use_flat_threshold=False):
     """Gray code variant: visits same Cartesian product, O(d) per step.
 
     Replaces the lexicographic odometer with a mixed-radix Gray code
     (Knuth TAOCP 7.2.1.1).  Every step changes exactly one cursor position
     by ±1, so the incremental autoconvolution update is always O(d_child).
     Includes subtree pruning at J_MIN level for inner-sweep skip.
+
+    When use_flat_threshold=True, uses the flat C&S Lemma 3 correction
+    (2m+1)/m^2 instead of the W-refined (3+W_int/(2n))/m^2.
 
     Same signature and return type as _fused_generate_and_prune.
     """
@@ -1026,16 +1086,22 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     m_d = np.float64(m)
     threshold_asym = math.sqrt(c_target / 2.0)
 
+    S_parent = np.int64(0)
+    for i in range(d_parent):
+        S_parent += np.int64(parent_int[i])
     left_sum_parent = np.int64(0)
     for i in range(d_parent // 2):
         left_sum_parent += np.int64(parent_int[i])
-    left_frac = np.float64(left_sum_parent) / m_d
+    left_frac = np.float64(left_sum_parent) / np.float64(S_parent)
     if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
         return 0, 0
 
     # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
-    # Threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)).
-    inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
+    # Fine grid (S = 4nm): compositions sum to S, conv values are int32.
+    # threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # where W_int ranges 0..S (fine-grid mass in overlapping bins).
+    four_n = 4.0 * np.float64(n_half_child)
+    n_half_d = np.float64(n_half_child)
     eps_margin = 1e-9 * m_d * m_d
     cs_base_m2 = c_target * m_d * m_d
 
@@ -1089,7 +1155,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     # --- Build initial child ---
     for i in range(d_parent):
         child[2 * i] = cursor[i]
-        child[2 * i + 1] = parent_int[i] - cursor[i]
+        child[2 * i + 1] = 2 * parent_int[i] - cursor[i]
 
     if use_sparse:
         for i in range(d_child):
@@ -1098,19 +1164,28 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                 nz_pos[i] = nz_count
                 nz_count += 1
 
-    # --- Precompute 2D threshold table (C&S Lemma 3 + W-refinement) ---
-    # threshold_table[ell_idx * (m+1) + W_int] =
-    #   floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
+    # --- Precompute 2D threshold table ---
+    # Fine grid (S = 4nm): W_int ranges 0..S (fine-grid mass in window bins).
+    # threshold_table[ell_idx * S_child_plus_1 + W_int] =
+    #   floor((c_target*m^2 + corr + eps) * 4n*ell)
+    # where corr = 2m+1 (flat C&S) or 3+W_int/(2n) (W-refined).
     ell_count = 2 * d_child - 1
-    m_plus_1 = m + 1
-    threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
+    S_child_plus_1 = 4 * n_half_child * m + 1
+    threshold_table = np.empty(ell_count * S_child_plus_1, dtype=np.int64)
+    flat_corr = 2.0 * m_d + 1.0
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        scale_ell = np.float64(ell) * inv_4n
-        for w in range(m_plus_1):
-            corr_w = 3.0 + 2.0 * np.float64(w)
-            dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x)
+        scale_ell = np.float64(ell) * four_n
+        if use_flat_threshold:
+            dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_ell
+            flat_val = np.int64(dyn_x)
+            for w in range(S_child_plus_1):
+                threshold_table[idx * S_child_plus_1 + w] = flat_val
+        else:
+            for w in range(S_child_plus_1):
+                corr_w = 3.0 + np.float64(w) / (2.0 * n_half_d)
+                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
 
     # --- Optimized ell scan order ---
     # Empirically tuned: at d_child=32, ell=7-13 account for 92% of prunes.
@@ -1197,7 +1272,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
             for k in range(qc_s, qc_s + n_cv_qc):
                 ws_qc += np.int64(raw_conv[k])
             ell_idx_qc = qc_ell - 2
-            dyn_it_qc = threshold_table[ell_idx_qc * m_plus_1 + qc_W_int]
+            dyn_it_qc = threshold_table[ell_idx_qc * S_child_plus_1 + qc_W_int]
             if ws_qc > dyn_it_qc:
                 quick_killed = True
 
@@ -1228,7 +1303,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                     if hi_bin > d_child - 1:
                         hi_bin = d_child - 1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    dyn_it = threshold_table[ell_idx * m_plus_1 + W_int]
+                    dyn_it = threshold_table[ell_idx * S_child_plus_1 + W_int]
                     if ws > dyn_it:
                         pruned = True
                         qc_ell = np.int32(ell)
@@ -1285,7 +1360,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
         old1 = np.int32(child[k1])
         old2 = np.int32(child[k2])
         child[k1] = cursor[pos]
-        child[k2] = parent_int[pos] - cursor[pos]
+        child[k2] = 2 * parent_int[pos] - cursor[pos]
         new1 = np.int32(child[k1])
         new2 = np.int32(child[k2])
         delta1 = new1 - old1
@@ -1386,7 +1461,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                     k1u = 2 * p_unf
                     k2u = 2 * p_unf + 1
                     ml = np.int64(lo_arr[p_unf])
-                    mh = np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
+                    mh = np.int64(2) * np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
                     # Self-terms
                     min_contrib[2 * k1u] += ml * ml
                     min_contrib[2 * k2u] += mh * mh
@@ -1405,7 +1480,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                         k1u2 = 2 * p2
                         k2u2 = 2 * p2 + 1
                         ml2 = np.int64(lo_arr[p2])
-                        mh2 = np.int64(parent_int[p2]) - np.int64(hi_arr[p2])
+                        mh2 = np.int64(2) * np.int64(parent_int[p2]) - np.int64(hi_arr[p2])
                         if ml > 0 and ml2 > 0:
                             min_contrib[k1u + k1u2] += np.int64(2) * ml * ml2
                         if ml > 0 and mh2 > 0:
@@ -1427,7 +1502,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                     k1na = 2 * pp
                     k2na = 2 * pp + 1
                     cv1 = np.int64(lo_arr[pp])
-                    cv2 = np.int64(parent_int[pp]) - cv1
+                    cv2 = np.int64(2) * np.int64(parent_int[pp]) - cv1
                     # Self-terms
                     min_contrib[2 * k1na] += cv1 * cv1
                     min_contrib[2 * k2na] += cv2 * cv2
@@ -1446,7 +1521,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                         k1u = 2 * p_unf
                         k2u = 2 * p_unf + 1
                         ml = np.int64(lo_arr[p_unf])
-                        mh = np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
+                        mh = np.int64(2) * np.int64(parent_int[p_unf]) - np.int64(hi_arr[p_unf])
                         if cv1 > 0 and ml > 0:
                             min_contrib[k1na + k1u] += np.int64(2) * cv1 * ml
                         if cv1 > 0 and mh > 0:
@@ -1467,7 +1542,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                         k1na2 = 2 * pp2
                         k2na2 = 2 * pp2 + 1
                         cv12 = np.int64(lo_arr[pp2])
-                        cv22 = np.int64(parent_int[pp2]) - cv12
+                        cv22 = np.int64(2) * np.int64(parent_int[pp2]) - cv12
                         if cv1 > 0 and cv12 > 0:
                             min_contrib[k1na + k1na2] += np.int64(2) * cv1 * cv12
                         if cv1 > 0 and cv22 > 0:
@@ -1534,7 +1609,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                             W_int_fixed = np.int64(0)
 
                         # W_int_unfixed: parent upper bound for bins
-                        # right of fixed prefix
+                        # right of fixed prefix (child bins sum to 2*parent)
                         unfixed_lo_bin = lo_bin
                         if unfixed_lo_bin < fixed_len:
                             unfixed_lo_bin = fixed_len
@@ -1546,16 +1621,16 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                             if p_hi >= d_parent:
                                 p_hi = d_parent - 1
                             if p_lo <= p_hi:
-                                W_int_unfixed = parent_prefix[p_hi + 1] - parent_prefix[p_lo]
+                                W_int_unfixed = np.int64(2) * (parent_prefix[p_hi + 1] - parent_prefix[p_lo])
                             else:
                                 W_int_unfixed = np.int64(0)
                         else:
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
-                        if W_int_max > np.int64(m):
-                            W_int_max = np.int64(m)
-                        dyn_it = threshold_table[ell_idx * m_plus_1 + W_int_max]
+                        if W_int_max >= np.int64(S_child_plus_1):
+                            W_int_max = np.int64(S_child_plus_1 - 1)
+                        dyn_it = threshold_table[ell_idx * S_child_plus_1 + W_int_max]
                         if ws > dyn_it:
                             subtree_pruned = True
                             break
@@ -1581,7 +1656,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                         p = active_pos[kk]
                         cursor[p] = lo_arr[p]
                         child[2 * p] = lo_arr[p]
-                        child[2 * p + 1] = parent_int[p] - lo_arr[p]
+                        child[2 * p + 1] = 2 * parent_int[p] - lo_arr[p]
 
                     # Full recompute raw_conv (O(d²))
                     for kk in range(conv_len):
@@ -1646,12 +1721,11 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     d_parent = len(parent_int)
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
-    x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Cauchy-Schwarz bound: ||f*f||_∞ ≥ d_child·μ_i².  For adjusted bins
-    # (canonical rounding +1), μ_i can be as low as (c_i-1)/m, so add +1.
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
+    # Fine grid: bin height = c_i / (4*n*m), energy = sum c_i^2 / (4*n*m^2)
+    x_cap = int(math.floor(m * math.sqrt(4 * d_child * thresh)))
+    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
+    x_cap_cs = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
     x_cap = min(x_cap, x_cap_cs)
-    x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
 
     lo_arr = np.empty(d_parent, dtype=np.int32)
@@ -1659,8 +1733,8 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     total_children = 1
     for i in range(d_parent):
         b_i = int(parent_int[i])
-        lo = max(0, b_i - x_cap)
-        hi = min(b_i, x_cap)
+        lo = max(0, 2 * b_i - x_cap)
+        hi = min(2 * b_i, x_cap)
         if lo > hi:
             return None
         lo_arr[i] = lo
@@ -1671,7 +1745,8 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
 
 
 @njit(cache=True)
-def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
+def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
+                     use_flat_threshold=False):
     """Arc consistency: tighten cursor ranges by removing provably-infeasible
     edge values.
 
@@ -1696,22 +1771,30 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
 
     # --- Threshold constants (must match _fused_generate_and_prune_gray) ---
     m_d = np.float64(m)
-    inv_4n = 1.0 / (4.0 * np.float64(n_half_child))
+    four_n = 4.0 * np.float64(n_half_child)
+    n_half_d = np.float64(n_half_child)
     eps_margin = 1e-9 * m_d * m_d
     cs_base_m2 = c_target * m_d * m_d
-    m_plus_1 = m + 1
+    S_child_plus_1 = 4 * n_half_child * m + 1
     ell_count = conv_len
 
-    # Precompute threshold table (C&S Lemma 3 + W-refinement, matches CPU kernel)
-    # threshold = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
-    threshold_table = np.empty(ell_count * m_plus_1, dtype=np.int64)
+    # Precompute threshold table (matches _fused_generate_and_prune_gray)
+    # corr = 2m+1 (flat C&S) or 3+W_int/(2n) (W-refined).
+    threshold_table = np.empty(ell_count * S_child_plus_1, dtype=np.int64)
+    flat_corr = 2.0 * m_d + 1.0
     for ell in range(2, 2 * d_child + 1):
         idx = ell - 2
-        scale_ell = np.float64(ell) * inv_4n
-        for w in range(m_plus_1):
-            corr_w = 3.0 + 2.0 * np.float64(w)
-            dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-            threshold_table[idx * m_plus_1 + w] = np.int64(dyn_x)
+        scale_ell = np.float64(ell) * four_n
+        if use_flat_threshold:
+            dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_ell
+            flat_val = np.int64(dyn_x)
+            for w in range(S_child_plus_1):
+                threshold_table[idx * S_child_plus_1 + w] = flat_val
+        else:
+            for w in range(S_child_plus_1):
+                corr_w = 3.0 + np.float64(w) / (2.0 * n_half_d)
+                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
+                threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
 
     # Working array (reused across all (p, v) checks)
     test_conv = np.empty(conv_len, dtype=np.int64)
@@ -1724,7 +1807,7 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
         child_min = np.empty(d_child, dtype=np.int32)
         for q in range(d_parent):
             child_min[2 * q] = lo_arr[q]
-            child_min[2 * q + 1] = parent_int[q] - hi_arr[q]
+            child_min[2 * q + 1] = 2 * parent_int[q] - hi_arr[q]
 
         # Full autoconvolution of child_min → lower bound on each conv index
         conv_min = np.zeros(conv_len, dtype=np.int64)
@@ -1745,7 +1828,7 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
             max_child_prefix[2 * q + 1] = (max_child_prefix[2 * q]
                                             + np.int64(hi_arr[q]))
             max_child_prefix[2 * q + 2] = (max_child_prefix[2 * q + 1]
-                                            + np.int64(parent_int[q] - lo_arr[q]))
+                                            + np.int64(2 * parent_int[q] - lo_arr[q]))
 
         for p in range(d_parent):
             if lo_arr[p] == hi_arr[p]:
@@ -1763,7 +1846,7 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
             # --- Tighten from low end ---
             for v in range(lo_arr[p], hi_arr[p] + 1):
                 new1 = np.int64(v)
-                new2 = np.int64(B_p - v)
+                new2 = np.int64(2 * B_p - v)
                 delta1 = new1 - old1
                 delta2 = new2 - old2
 
@@ -1800,9 +1883,9 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
                     if hb > d_child - 1:
                         hb = d_child - 1
                     W_max = max_child_prefix[hb + 1]
-                    if W_max > np.int64(m):
-                        W_max = np.int64(m)
-                    if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                    if W_max >= np.int64(S_child_plus_1):
+                        W_max = np.int64(S_child_plus_1 - 1)
+                    if ws > threshold_table[ell_idx * S_child_plus_1 + int(W_max)]:
                         infeasible = True
                         break
 
@@ -1815,9 +1898,9 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
                         if hb > d_child - 1:
                             hb = d_child - 1
                         W_max = max_child_prefix[hb + 1] - max_child_prefix[lb]
-                        if W_max > np.int64(m):
-                            W_max = np.int64(m)
-                        if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                        if W_max >= np.int64(S_child_plus_1):
+                            W_max = np.int64(S_child_plus_1 - 1)
+                        if ws > threshold_table[ell_idx * S_child_plus_1 + int(W_max)]:
                             infeasible = True
                             break
 
@@ -1832,7 +1915,7 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
             # --- Tighten from high end ---
             for v in range(hi_arr[p], new_lo - 1, -1):
                 new1 = np.int64(v)
-                new2 = np.int64(B_p - v)
+                new2 = np.int64(2 * B_p - v)
                 delta1 = new1 - old1
                 delta2 = new2 - old2
 
@@ -1867,9 +1950,9 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
                     if hb > d_child - 1:
                         hb = d_child - 1
                     W_max = max_child_prefix[hb + 1]
-                    if W_max > np.int64(m):
-                        W_max = np.int64(m)
-                    if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                    if W_max >= np.int64(S_child_plus_1):
+                        W_max = np.int64(S_child_plus_1 - 1)
+                    if ws > threshold_table[ell_idx * S_child_plus_1 + int(W_max)]:
                         infeasible = True
                         break
 
@@ -1882,9 +1965,9 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child):
                         if hb > d_child - 1:
                             hb = d_child - 1
                         W_max = max_child_prefix[hb + 1] - max_child_prefix[lb]
-                        if W_max > np.int64(m):
-                            W_max = np.int64(m)
-                        if ws > threshold_table[ell_idx * m_plus_1 + int(W_max)]:
+                        if W_max >= np.int64(S_child_plus_1):
+                            W_max = np.int64(S_child_plus_1 - 1)
+                        if ws > threshold_table[ell_idx * S_child_plus_1 + int(W_max)]:
                             infeasible = True
                             break
 
@@ -1930,7 +2013,8 @@ def _default_buf_cap(d_child):
         return 100_000      # 100K rows; ~25 MB at d=64
 
 
-def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
+def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
+                          use_flat_threshold=False):
     """Wrapper: compute x_cap, allocate buffer, call fused kernel.
 
     Parameters
@@ -1939,6 +2023,8 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
         Max rows for the output buffer.  *None* → ``_default_buf_cap(d_child)``.
         If the kernel reports more survivors than fit, the buffer is
         re-allocated at the exact size and the kernel re-run.
+    use_flat_threshold : bool
+        When True, uses flat C&S Lemma 3 correction for Lean axiom soundness.
 
     Returns
     -------
@@ -1958,7 +2044,8 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
 
     # Arc consistency: tighten cursor ranges before enumeration
     total_children = _tighten_ranges(parent_int, lo_arr, hi_arr,
-                                     m, c_target, n_half_child)
+                                     m, c_target, n_half_child,
+                                     use_flat_threshold)
     if total_children == 0:
         return np.empty((0, d_child), dtype=np.int32), 0
 
@@ -1970,14 +2057,16 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
     _kernel = _fused_generate_and_prune_gray
 
     n_survivors, _ = _kernel(
-        parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+        parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf,
+        use_flat_threshold)
 
     if n_survivors > max_buf:
         # Overflow: re-allocate exact-size buffer and re-run.
         max_buf = n_survivors
         out_buf = np.empty((max_buf, d_child), dtype=np.int32)
         n2, _ = _kernel(
-            parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf)
+            parent_int, n_half_child, m, c_target, lo_arr, hi_arr, out_buf,
+            use_flat_threshold)
         assert n2 == n_survivors, (
             f"Non-deterministic kernel: first run {n_survivors}, "
             f"retry {n2}")
@@ -1987,7 +2076,8 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None):
 
 
 def process_parent_verbose(parent_int, m, c_target, n_half_child,
-                            parent_idx, n_parents):
+                            parent_idx, n_parents,
+                            use_flat_threshold=False):
     """Like process_parent_fused but logs intra-parent progress.
 
     Splits the Cartesian product along cursor[0]'s range so we can
@@ -2017,7 +2107,8 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
     # Small parent or only 1 slice → single-shot
     if total_children < 500_000 or n_slices <= 1:
         _log(f"       {label}: {total_children:,} children (single pass)...")
-        surv, tc = process_parent_fused(parent_int, m, c_target, n_half_child)
+        surv, tc = process_parent_fused(parent_int, m, c_target, n_half_child,
+                                         use_flat_threshold=use_flat_threshold)
         _log(f"       {label}: done, {len(surv):,} survivors")
         return surv, tc
 
@@ -2045,7 +2136,7 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
 
         n_surv, _ = _kernel(
             parent_int, n_half_child, m, c_target,
-            slice_lo, slice_hi, out_buf)
+            slice_lo, slice_hi, out_buf, use_flat_threshold)
 
         if n_surv > max_buf:
             # Overflow: re-allocate and re-run
@@ -2053,7 +2144,7 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
             out_buf = np.empty((max_buf, d_child), dtype=np.int32)
             n2, _ = _kernel(
                 parent_int, n_half_child, m, c_target,
-                slice_lo, slice_hi, out_buf)
+                slice_lo, slice_hi, out_buf, use_flat_threshold)
             assert n2 == n_surv, (
                 f"Non-deterministic kernel: first run {n_surv}, retry {n2}")
             n_surv = n2
@@ -2106,12 +2197,12 @@ _warmup_jit()
 # Level 0: generate all compositions, prune, collect survivors
 # =====================================================================
 
-def run_level0(n_half, m, c_target, verbose=True):
+def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False):
     """Run Level 0: enumerate compositions, prune, collect survivors.
 
     Matches GPU semantics exactly:
       - Canonical palindrome filter (only c <= rev(c))
-      - Dynamic per-window threshold (integer-space, W_int-dependent)
+      - Dynamic per-window threshold (integer-space)
 
     Returns
     -------
@@ -2119,7 +2210,7 @@ def run_level0(n_half, m, c_target, verbose=True):
                n_pruned_test, elapsed, proven
     """
     d = 2 * n_half
-    S = m
+    S = 4 * n_half * m  # Fine grid: integer coords sum to 4nm (C&S B_{n,m})
     n_total = count_compositions(d, S)
     corr = correction(m, n_half)
 
@@ -2156,8 +2247,9 @@ def run_level0(n_half, m, c_target, verbose=True):
         if len(candidates) == 0:
             continue
 
-        # Dynamic per-window threshold (matches GPU exactly)
-        survived_mask = _prune_dynamic(candidates, n_half, m, c_target)
+        # Dynamic per-window threshold
+        survived_mask = _prune_dynamic(candidates, n_half, m, c_target,
+                                        use_flat_threshold)
         n_pruned_test += int(np.sum(~survived_mask))
 
         survivors = candidates[survived_mask]
@@ -2232,22 +2324,21 @@ def generate_children_uniform(parent_int, m, c_target, n_half_child=None):
     d_parent = len(parent_int)
     d_child = 2 * d_parent
 
-    # x_cap: single-bin energy cap
+    # x_cap: single-bin energy cap (fine grid)
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
-    x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment (μ_i ≥ (c_i-1)/m)
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
+    x_cap = int(math.floor(m * math.sqrt(4 * d_child * thresh)))
+    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
+    x_cap_cs = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
     x_cap = min(x_cap, x_cap_cs)
-    x_cap = min(x_cap, m)
     x_cap = max(x_cap, 0)
 
     # Build per-bin split options
     per_bin_choices = []
     for i in range(d_parent):
         b_i = int(parent_int[i])
-        lo = max(0, b_i - x_cap)
-        hi = min(b_i, x_cap)
+        lo = max(0, 2 * b_i - x_cap)
+        hi = min(2 * b_i, x_cap)
         if lo > hi:
             # This parent can't produce valid children
             return np.empty((0, d_child), dtype=np.int32)
@@ -2271,7 +2362,7 @@ def generate_children_uniform(parent_int, m, c_target, n_half_child=None):
     for combo in itertools.product(*per_bin_choices):
         for i in range(d_parent):
             children[idx, 2 * i] = combo[i]
-            children[idx, 2 * i + 1] = int(parent_int[i]) - combo[i]
+            children[idx, 2 * i + 1] = 2 * int(parent_int[i]) - combo[i]
         idx += 1
 
     return children
@@ -2288,7 +2379,7 @@ def _generate_children_chunked(parent_int, per_bin_choices, d_parent,
     for combo in itertools.product(*per_bin_choices):
         for i in range(d_parent):
             buf[idx, 2 * i] = combo[i]
-            buf[idx, 2 * i + 1] = int(parent_int[i]) - combo[i]
+            buf[idx, 2 * i + 1] = 2 * int(parent_int[i]) - combo[i]
         idx += 1
         if idx == chunk_size:
             chunks.append(buf[:idx].copy())
@@ -2363,17 +2454,21 @@ def _process_single_parent_fused(args):
     Avoids materializing the full children array — generates each child
     on-the-fly and prunes inline.
 
-    Accepts 5-element tuple (parent, m, c_target, n_half_child, batch_size)
-    or 6-element tuple with optional buf_cap as last element.
+    Accepts 5-element tuple (parent, m, c_target, n_half_child, batch_size),
+    6-element tuple with buf_cap, or 7-element tuple with use_flat_threshold.
     """
-    if len(args) >= 6:
+    use_flat = False
+    buf_cap = None
+    if len(args) >= 7:
+        parent, m, c_target, n_half_child, batch_size, buf_cap, use_flat = args[:7]
+    elif len(args) >= 6:
         parent, m, c_target, n_half_child, batch_size, buf_cap = args[:6]
     else:
         parent, m, c_target, n_half_child, batch_size = args
-        buf_cap = None
 
     survivors, total_children = process_parent_fused(
-        parent, m, c_target, n_half_child, buf_cap=buf_cap)
+        parent, m, c_target, n_half_child, buf_cap=buf_cap,
+        use_flat_threshold=use_flat)
 
     n_survived = len(survivors)
 
@@ -2446,22 +2541,25 @@ def _process_single_parent(args):
 # =====================================================================
 
 def _init_worker_shm(mmap_path, shape, dtype_str, m, c_target, n_half_child,
-                     numba_threads):
+                     numba_threads, use_flat_threshold=False):
     """Pool initializer: open mmap of parent array and store params in globals."""
     numba.set_num_threads(numba_threads)
     global _shared_parents, _shm_m, _shm_c_target, _shm_n_half_child
+    global _shm_use_flat_threshold
     _shared_parents = np.memmap(mmap_path, dtype=np.dtype(dtype_str),
                                 mode='r', shape=shape)
     _shm_m = m
     _shm_c_target = c_target
     _shm_n_half_child = n_half_child
+    _shm_use_flat_threshold = use_flat_threshold
 
 
 def _process_parent_shm(idx):
     """Worker: process parent at index idx from shared memory array."""
     parent = _shared_parents[idx].copy()  # local copy from shared mem
     survivors, total_children = process_parent_fused(
-        parent, _shm_m, _shm_c_target, _shm_n_half_child)
+        parent, _shm_m, _shm_c_target, _shm_n_half_child,
+        use_flat_threshold=_shm_use_flat_threshold)
     n_survived = len(survivors)
     result = survivors if n_survived > 0 else None
     return result, {
@@ -2578,7 +2676,8 @@ def _effective_cpu_count():
 # =====================================================================
 
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
-                verbose=True, output_dir='data', resume_dir=None):
+                verbose=True, output_dir='data', resume_dir=None,
+                use_flat_threshold=False):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
@@ -2600,6 +2699,12 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         Directory for checkpoints and results.
     resume_dir : str or None
         Directory to look for checkpoint files.  If None, uses output_dir.
+    use_flat_threshold : bool
+        When True, uses the flat C&S Lemma 3 correction (2/m + 1/m^2)
+        instead of the W-refined correction (3 + W_int/(2n))/m^2.
+        Required for verifying the Lean axiom cascade_all_pruned.
+        The flat threshold is higher (harder to prune), so the cascade
+        may produce more survivors and take longer.
 
     Returns
     -------
@@ -2674,7 +2779,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
 
     if start_level == 0:
         # --- Level 0 (fresh run) ---
-        l0 = run_level0(n_half, m, c_target, verbose=verbose)
+        l0 = run_level0(n_half, m, c_target, verbose=verbose,
+                         use_flat_threshold=use_flat_threshold)
 
         info = {
             'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
@@ -2713,16 +2819,18 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         if n_parents == 0:
             break
 
-        # --- Pre-filter: skip parents where any bin > 2*x_cap ---
-        # Such parents produce zero children (empty cursor range in every
-        # bin exceeding x_cap), but still incur IPC + dispatch overhead.
+        # --- Pre-filter: skip parents where any bin produces empty range ---
+        # A parent bin b_i has cursor range [max(0, 2*b_i - x_cap), min(2*b_i, x_cap)].
+        # Empty when 2*b_i - x_cap > min(2*b_i, x_cap), i.e. b_i > x_cap.
+        # (Since lo = max(0, 2*b_i - x_cap) and hi = min(2*b_i, x_cap),
+        # lo > hi iff 2*b_i > 2*x_cap, i.e. b_i > x_cap.)
         corr_pf = correction(m, n_half_child)
         thresh_pf = c_target + corr_pf + 1e-9
-        x_cap_pf = int(math.floor(m * math.sqrt(thresh_pf / d_child)))
+        x_cap_pf = int(math.floor(m * math.sqrt(4 * d_child * thresh_pf)))
         # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
-        x_cap_cs_pf = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
-        x_cap_pf = min(x_cap_pf, x_cap_cs_pf, m)
-        max_bin_val = 2 * x_cap_pf
+        x_cap_cs_pf = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
+        x_cap_pf = min(x_cap_pf, x_cap_cs_pf)
+        max_bin_val = x_cap_pf
         feasible_mask = np.all(current_configs <= max_bin_val, axis=1)
         n_infeasible = n_parents - int(np.sum(feasible_mask))
         if n_infeasible > 0:
@@ -2856,7 +2964,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                         initargs=(mmap_path, parents_shape,
                                   parents_dtype_str,
                                   m, c_target, n_half_child,
-                                  numba_threads)) as pool:
+                                  numba_threads,
+                                  use_flat_threshold)) as pool:
                     for surv, stats in pool.imap_unordered(
                             _process_parent_shm, range(n_parents),
                             chunksize=chunksize):
@@ -2924,10 +3033,12 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                 if verbose:
                     survivors, n_children = process_parent_verbose(
                         parent, m, c_target, n_half_child,
-                        p_idx, n_parents)
+                        p_idx, n_parents,
+                        use_flat_threshold=use_flat_threshold)
                 else:
                     survivors, n_children = process_parent_fused(
-                        parent, m, c_target, n_half_child)
+                        parent, m, c_target, n_half_child,
+                        use_flat_threshold=use_flat_threshold)
                 total_children += n_children
                 n_survived_this = len(survivors)
                 total_survived += n_survived_this
@@ -3149,6 +3260,11 @@ def main():
                              'default: data)')
     parser.add_argument('--quiet', action='store_true',
                         help='Minimal output')
+    parser.add_argument('--use_flat_threshold', action='store_true',
+                        help='Use flat C&S Lemma 3 correction (2/m + 1/m^2) '
+                             'instead of W-refined.  Required for verifying '
+                             'the Lean axiom cascade_all_pruned.  Higher '
+                             'threshold = fewer prunes = more survivors.')
     args = parser.parse_args()
 
     info = run_cascade(
@@ -3160,6 +3276,7 @@ def main():
         verbose=not args.quiet,
         output_dir=args.output_dir,
         resume_dir=args.resume,
+        use_flat_threshold=args.use_flat_threshold,
     )
 
     print_summary(info)
