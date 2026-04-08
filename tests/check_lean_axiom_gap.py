@@ -1,14 +1,20 @@
 """Check how many CPU-pruned compositions fail the Lean axiom threshold.
 
+NOTE: This script was written under the old coarse-grid (S=m) parameterization.
+The project has since switched to the C&S fine grid (S = 4nm), where the
+threshold formula is:
+  threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+The Lean axiom gap analysis below may need updating to match fine-grid thresholds.
+
 The Lean axiom (FinalResult.lean line 79-84) requires:
-  exists ell s_lo, test_value(n, m, c, ell, s_lo) > c_target + (4n/ell) * (1 + 2*W_int) / m²
+  exists ell s_lo, test_value(n, m, c, ell, s_lo) > c_target + (4n/ell) * (1 + 2*W_int) / m^2
 
 The CPU prunes with a different threshold:
-  test_value > c_target + (3 + 2*W_int) / m²
+  test_value > c_target + (3 + 2*W_int) / m^2
 
 The CPU threshold is window-independent; the Lean threshold depends on ell.
-At small ell, Lean is MUCH more demanding (factor 4n/ell ≫ 3).
-At ell = 4n, Lean correction = (1+2W)/m² < CPU correction = (3+2W)/m².
+At small ell, Lean is MUCH more demanding (factor 4n/ell >> 3).
+At ell = 4n, Lean correction = (1+2W)/m^2 < CPU correction = (3+2W)/m^2.
 
 Key question: for each CPU-pruned composition, does ANY window (ell, s_lo)
 satisfy the Lean threshold? The CPU's killing window might not, but a
@@ -140,7 +146,8 @@ def _check_lean_axiom(batch_int, n_half, m, c_target):
                     hi_bin = d_minus_1
                 W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
 
-                # Lean threshold in integer space: c_target*m²*ell/(4n) + 1 + 2*W_int
+                # Lean threshold in integer space (old coarse-grid formula):
+                # c_target*m^2*ell/(4n) + 1 + 2*W_int
                 lean_int_thresh = c_target * m_sq * ell_f * inv_4n + 1.0 + 2.0 * np.float64(W_int)
                 margin = np.float64(ws) - lean_int_thresh
                 if margin > best_margin:

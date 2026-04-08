@@ -1,5 +1,13 @@
 """Mathematically precise vacuity analysis for c_target = 1.40.
 
+NOTE: This analysis was written under the old coarse-grid (S=m) parameterization
+and references "Formula A" (with 4n/ell factor) and "Formula B" (MATLAB/flat).
+The project has since switched to the C&S fine grid (S = 4nm), where the
+threshold formula is:
+  threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+The vacuity conclusions and correction-function comparisons below may need
+re-evaluation under the fine-grid parameterization.
+
 Goes back to first principles. Verifies the ACTUAL formulas in the code
 against what the proofs claim. Trusts nothing.
 

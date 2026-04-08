@@ -37,8 +37,8 @@ from run_cascade import run_level0, process_parent_fused
 
 
 # Known upper bound on c (Yu 2021). If c_target + correction exceeds this,
-# the proof is vacuously true (coarse grid can't represent near-optimal
-# functions) and the benchmark result is meaningless.
+# the proof is vacuously true (the discretization error is too large
+# to distinguish near-optimal functions) and the benchmark is meaningless.
 C_UPPER_BOUND = 1.5029
 
 
@@ -47,13 +47,17 @@ C_UPPER_BOUND = 1.5029
 # ---------------------------------------------------------------------------
 
 def compute_x_cap(m, d_child, c_target, n_half_child):
-    """Compute the single-bin energy cap matching run_cascade logic."""
+    """Compute the single-bin energy cap matching run_cascade logic.
+
+    Fine grid: bin height = c_i / (4*n*m), energy = sum c_i^2 / (4*n*m^2).
+    Single-bin Cauchy-Schwarz: c_i <= m * sqrt(4 * d_child * thresh).
+    """
     corr = correction(m, n_half_child)
     thresh = c_target + corr + 1e-9
-    x_cap = int(math.floor(m * math.sqrt(thresh / d_child)))
-    # Cauchy-Schwarz bound (+1 for discretization adjustment)
-    x_cap_cs = int(math.floor(m * math.sqrt(c_target / d_child))) + 1
-    x_cap = min(x_cap, x_cap_cs, m)
+    x_cap = int(math.floor(m * math.sqrt(4 * d_child * thresh)))
+    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
+    x_cap_cs = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
+    x_cap = min(x_cap, x_cap_cs)
     x_cap = max(x_cap, 0)
     return x_cap
 
@@ -78,12 +82,12 @@ def compute_refs_per_parent(survivors, m, c_target, d_child, n_half_child):
 
     x_cap = compute_x_cap(m, d_child, c_target, n_half_child)
 
-    # For each parent bin b_i, child bins range from max(0, b_i - x_cap) to
-    # min(b_i, x_cap), giving (min(b_i, x_cap) - max(0, b_i - x_cap) + 1)
-    # children per position.
+    # For each parent bin b_i, child bins range from max(0, 2*b_i - x_cap)
+    # to min(2*b_i, x_cap).  Factor of 2 because bin width halves while
+    # mass is conserved: parent bin b_i splits into (c, 2*b_i - c).
     B = survivors.astype(np.int64)
-    lo = np.maximum(0, B - x_cap)
-    hi = np.minimum(B, x_cap)
+    lo = np.maximum(0, 2 * B - x_cap)
+    hi = np.minimum(2 * B, x_cap)
     eff = np.maximum(hi - lo + 1, 0)
 
     return np.prod(eff, axis=1)
@@ -124,9 +128,11 @@ def run_refinement_level(parent_configs, m, c_target, n_half_child,
     d_parent = parent_configs.shape[1]
     d_child = 2 * d_parent
 
-    # Pre-filter infeasible parents (any bin > 2*x_cap)
+    # Pre-filter infeasible parents (any bin > x_cap).
+    # Cursor range for parent bin b_i is [max(0, 2*b_i - x_cap), min(2*b_i, x_cap)].
+    # Empty when b_i > x_cap (since lo > hi iff 2*b_i > 2*x_cap).
     x_cap = compute_x_cap(m, d_child, c_target, n_half_child)
-    max_bin_val = 2 * x_cap
+    max_bin_val = x_cap
     feasible_mask = np.all(parent_configs <= max_bin_val, axis=1)
     parent_configs = parent_configs[feasible_mask]
     n_filtered = parents_in - len(parent_configs)

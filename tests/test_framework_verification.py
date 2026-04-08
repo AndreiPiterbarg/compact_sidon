@@ -203,32 +203,48 @@ class TestCompositionCountDerivation(unittest.TestCase):
 class TestDynamicThresholdDerivation(unittest.TestCase):
     """Verify integer-space threshold matches Lean theorem dynamic_threshold_sound.
 
-    The correct threshold (Theorem 3.7, proof/lower_bound_proof.tex) is:
+    NOTE: These tests verify the Lean's flat-bound threshold (C&S Lemma 3),
+    which uses the old coarse-grid scaling factor ell/(4n).  The CPU code
+    now uses the fine-grid (S=4nm) threshold:
+      threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    The Lean formalization still uses the flat bound (2/m + 1/m^2).
+
+    Lean threshold (Theorem 3.7, proof/lower_bound_proof.tex):
       TV > c_target + (4n/ell) * (1/m^2 + 2*W/m)
     In integer space:
       ws > c_target*m^2*ell/(4n) + 1 + 2*W_int
     """
 
     def _lean_threshold_tv(self, c_target, m, W_int, ell, n_half):
-        """Lean-proven threshold in test-value space (Theorem 3.7)."""
+        """Lean-proven threshold in test-value space (Theorem 3.7).
+
+        Uses the coarse-grid scaling factor 4n/ell (Lean formalization).
+        """
         return c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) / (m * m)
 
     def _python_dyn_threshold_int(self, c_target, m, W_int, ell, n_half):
-        """Python integer-space threshold (C&S Lemma 3 + W_g correction)."""
+        """Old coarse-grid integer-space threshold (C&S Lemma 3 + W_g correction).
+
+        Uses ell/(4n) scaling.  The CPU code now uses the fine-grid formula
+        with 4n*ell scaling and W_int/(2n) correction term.
+        """
         eps_margin = 1e-9 * m * m
         return (c_target * m * m + 3.0 + eps_margin + 2.0 * W_int) * ell / (4.0 * n_half)
 
     def test_matlab_python_equivalence(self):
-        """Verify Python threshold >= MATLAB threshold for all valid parameters.
+        """Verify Lean threshold >= MATLAB flat threshold for all valid parameters.
 
-        The MATLAB uses a weaker correction (missing 4n/ell factor).
-        The correct formula is strictly >= MATLAB for all parameters.
+        The MATLAB uses a flat correction (no 4n/ell factor).
+        The Lean formula (with 4n/ell) is strictly >= MATLAB for ell <= 4n.
+
+        NOTE: This tests the Lean/coarse-grid threshold relationship.
+        The CPU code now uses the fine-grid threshold formula.
         """
         for m in [20, 50]:
             for c_target in [1.28, 1.3, 1.4]:
                 for W_int in range(0, m + 1):
                     W_cont = W_int / m
-                    # MATLAB: c_target + 1/m^2 + 2*W/m (missing 4n/ell)
+                    # MATLAB flat correction: c_target + 1/m^2 + 2*W/m (no 4n/ell factor)
                     matlab_thresh = c_target + 1.0 / (m * m) + 2.0 * W_cont / m
                     for n_half in [2, 4, 8, 16, 32]:
                         for ell in range(2, 4 * n_half + 1):
@@ -236,14 +252,18 @@ class TestDynamicThresholdDerivation(unittest.TestCase):
                                 c_target, m, W_int, ell, n_half)
                             self.assertGreaterEqual(
                                 lean_thresh, matlab_thresh - 1e-12,
-                                msg=f"Lean threshold {lean_thresh} < MATLAB {matlab_thresh} "
+                                msg=f"Lean threshold {lean_thresh} < MATLAB flat {matlab_thresh} "
                                     f"at m={m}, c={c_target}, W_int={W_int}, ell={ell}, n={n_half}")
 
     def test_dyn_base_encodes_correction(self):
         """Verify the C&S + W_g corrected threshold formula.
 
-        The ENTIRE correction (3 + 2*W_int) is scaled by ell/(4n).
-        In TV space: c_target + (3 + 2*W_int)/m².
+        In the old coarse-grid parameterization, the ENTIRE correction
+        (3 + 2*W_int) is scaled by ell/(4n).
+        In TV space: c_target + (3 + 2*W_int)/m^2.
+
+        NOTE: The CPU code now uses the fine-grid formula where the scaling
+        factor is 4n*ell, but the TV-space threshold is equivalent.
         """
         m = 20
         c_target = 1.4
@@ -264,6 +284,10 @@ class TestDynamicThresholdDerivation(unittest.TestCase):
         is equivalent to TV > c_target + (4n/ell)*(1/m^2 + 2*W_int/m^2).
 
         This is Theorem 3.7 (dynamic_threshold_sound) from the Lean proof.
+
+        NOTE: This tests the Lean/coarse-grid threshold conversion.
+        The CPU fine-grid formula uses a different integer scaling (4n*ell)
+        but yields the same TV-space threshold.
         """
         m = 20
         c_target = 1.4
@@ -279,7 +303,7 @@ class TestDynamicThresholdDerivation(unittest.TestCase):
                 # TV = ws * 4n/(m^2 * ell), so TV > thresh_int * 4n/(m^2 * ell)
                 tv_thresh = thresh_int * 4.0 * n_half / (m * m * ell)
 
-                # Expected: c_target + (4n/ell)*(1/m^2 + 2*W_int/m^2)
+                # Expected (Lean coarse-grid): c_target + (4n/ell)*(1/m^2 + 2*W_int/m^2)
                 expected = c_target + (4.0 * n_half / ell) * (1.0 + 2.0 * W_int) / (m * m)
 
                 self.assertAlmostEqual(tv_thresh, expected, places=10,

@@ -1,6 +1,13 @@
 """
 Compute exact worst-case discretization errors for the Sidon autoconvolution problem.
 
+NOTE: This analysis was written under the old coarse-grid (S=m) parameterization,
+where the scaling factor is 4n/ell.  The project has since switched to the C&S
+fine grid (S = 4nm), where the threshold formula uses 4n*ell as the scaling
+factor and W_int ranges 0..S instead of 0..m.  The alpha(ell) bounds computed
+here remain valid as mathematical analysis but should be interpreted in the
+context of the old parameterization.
+
 For each (d, m, composition c, window (ell, s0)), maximize the error
   E = sum_{s in window} (conv_w[s] - conv_mu[s])
 over valid pre-images mu, then find alpha(ell) such that
@@ -322,7 +329,9 @@ if __name__ == '__main__':
             print(f"{d:>3} | {m:>3} | {ell:>4} | {alpha:>12.6f} | {ref:>8.4f} | {pct:>9.1f}% | {tight:>12.6f}")
         print("-" * 75)
 
-    print("\nINTERPRETATION:")
+    print("\nINTERPRETATION (old coarse-grid parameterization, S=m):")
     print("- alpha(ell) = tightest factor s.t. (4n/ell)*max_E <= alpha*(1+2W)/m^2 for all c")
     print("- If alpha < 4n/ell, the threshold can be tightened for that window length")
     print("- '%_of_4n/l' shows how much of the current bound is actually used")
+    print("- NOTE: The project now uses the fine grid (S=4nm); these results are")
+    print("  still valid as analysis but the code's threshold formula has changed.")

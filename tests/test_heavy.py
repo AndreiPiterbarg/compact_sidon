@@ -1,8 +1,13 @@
 """Heavy benchmarks at production scales where optimization matters.
 
-S=m convention: integer coords sum to m (not 4nm).
-  d=4 large-m:  n=2, m=400  --  10.8M configs.
-  d=6 higher-d: n=3, m=16   --  20K configs.
+NOTE: These tests predate the switch to the C&S fine grid (S = 4nm).
+The core API (run_single_level, find_best_bound_direct) now uses
+S = 4*n_half*m internally, but the test parameters and expected
+combinatorial counts were calibrated under the old S=m convention
+and may need updating to match the fine-grid parameterization.
+
+  d=4 large-m:  n=2, m=400  --  10.8M configs (S=m count).
+  d=6 higher-d: n=3, m=16   --  20K configs (S=m count).
 """
 import sys, os
 import unittest
@@ -25,7 +30,11 @@ class TestHeavy(unittest.TestCase):
     # -- d=4 production scale (n=2, m=400) --
 
     def test_run_single_level_n2_m400(self):
-        """n=2, m=400: S=m=400 -> C(403,3) = 10,827,401 configs."""
+        """n=2, m=400: old S=m=400 -> C(403,3) = 10,827,401 configs.
+
+        NOTE: Under the fine grid (S=4nm=3200), the composition count
+        is much larger.  This test uses the old S=m convention count.
+        """
         n_half, m, target = 2, 400, 0.9
         n_total = count_compositions(2 * n_half, m)
         self.assertEqual(n_total, 10_827_401)
@@ -43,7 +52,11 @@ class TestHeavy(unittest.TestCase):
     # -- d=6 production scale (n=3, m=16) --
 
     def test_run_single_level_n3_m16(self):
-        """n=3, m=16: S=m=16 -> C(21,5) = 20,349 configs."""
+        """n=3, m=16: old S=m=16 -> C(21,5) = 20,349 configs.
+
+        NOTE: Under the fine grid (S=4nm=192), the composition count
+        is much larger.  This test uses the old S=m convention count.
+        """
         n_half, m, target = 3, 16, 0.5
         n_total = count_compositions(2 * n_half, m)
         self.assertEqual(n_total, 20_349)
@@ -64,7 +77,7 @@ class TestHeavy(unittest.TestCase):
         """Batch and single test values agree at n=2, m=400."""
         n_half, m = 2, 400
         d = 2 * n_half
-        S = m  # S=m convention
+        S = m  # Old S=m convention; fine grid uses S = 4*n_half*m
         rng = np.random.RandomState(42)
         configs = [
             np.array([S // d] * d, dtype=np.int32),
@@ -78,7 +91,7 @@ class TestHeavy(unittest.TestCase):
 
         batch_tvs = compute_test_values_batch(batch, n_half, m)
         for i in range(len(batch)):
-            # S=m: a = c * 4n/m
+            # Old S=m convention: convert integer coords to continuous via a = c * 4n/m
             a = batch[i].astype(np.float64) * (4 * n_half) / m
             single_tv = compute_test_value_single(a, n_half)
             self.assertAlmostEqual(
