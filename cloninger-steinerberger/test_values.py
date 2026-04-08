@@ -21,7 +21,7 @@ def _test_values_jit(batch_int, d, n_half, inv_m, early_stop=0.0):
     conv_len = 2 * d - 1
     result = np.empty(B, dtype=np.float64)
     do_early = early_stop > 0.0
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
     inv_ell2 = 1.0 / (4.0 * n_half * 2)
     for b in numba.prange(B):
         # Quick check: if max element squared alone exceeds threshold

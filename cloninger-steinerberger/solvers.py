@@ -64,7 +64,7 @@ def _find_min_eff_d4(c0_order, S, n_half, inv_m, margin, corr, init_min_eff):
     conv_len = 2 * d - 1
     total_mass = float(S)
     n_c0 = len(c0_order)
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
 
     thread_mins = np.full(n_c0, 1e30, dtype=np.float64)
     thread_cfg = np.zeros((n_c0, d), dtype=np.int32)
@@ -191,7 +191,7 @@ def _find_min_eff_d6(c0_order, S, n_half, inv_m, margin, corr, init_min_eff):
     conv_len = 2 * d - 1
     total_mass = float(S)
     n_c0 = len(c0_order)
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
 
     thread_mins = np.full(n_c0, 1e30, dtype=np.float64)
     thread_cfg = np.zeros((n_c0, d), dtype=np.int32)
@@ -340,7 +340,7 @@ def _find_min_eff_generic(c0_order, S, d, n_half, inv_m, margin, corr, init_min_
     total_mass = float(S)
     n_c0 = len(c0_order)
     half_d = d // 2
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
     norm_d_inv = scale * scale / (4.0 * n_half * d)
     inv_ell2 = 1.0 / (4.0 * n_half * 2)
 
@@ -592,7 +592,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
     n_c0 = len(c0_order)
     half_d = d // 2
     thresh = prune_target + fp_margin
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
     norm_d_inv = scale * scale / (4.0 * n_half * d)
     inv_ell2 = 1.0 / (4.0 * n_half * 2)
     # Asymmetry bound applies directly to c (not through discretization),
@@ -651,7 +651,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                     hi_bin_val = s_lo  # s_lo + ell - 2 = s_lo + 0 = s_lo for ell=2
                     hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                     W_pos = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                    corr_w = (3.0 + 2.0 * W_pos) * inv_m_sq
+                    corr_w = (3.0 + float(W_pos) / (2.0 * n_half)) * inv_m_sq
                     dyn_thresh_pos = c_target + corr_w + fp_margin
                     if tv > dyn_thresh_pos:
                         pruned_d2 = True
@@ -763,7 +763,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                             hi_bin_val = s_lo + ell - 2
                             hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                             W_int = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                            corr_w = (3.0 + 2.0 * W_int) * inv_m_sq
+                            corr_w = (3.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
                             dyn_thresh = c_target + corr_w + fp_margin
                             if tv > dyn_thresh:
                                 pruned = True
@@ -868,7 +868,7 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     total_mass = float(S)
     n_c0 = len(c0_order)
     thresh = prune_target + fp_margin
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
     # Max per-window correction (3+2W)/m² at W=m is (3+2m)/m² = 3/m² + 2/m.
     inv_m_sq = inv_m * inv_m
     correction_max = 3.0 * inv_m_sq + 2.0 * inv_m
@@ -1034,7 +1034,7 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     total_mass = float(S)
     n_c0 = len(c0_order)
     thresh = prune_target + fp_margin
-    scale = 4.0 * n_half * inv_m   # c -> a conversion factor (4n/m)
+    scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
     # Max per-window correction (3+2W)/m² at W=m is (3+2m)/m² = 3/m² + 2/m.
     inv_m_sq = inv_m * inv_m
     correction_max = 3.0 * inv_m_sq + 2.0 * inv_m
@@ -1165,7 +1165,7 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
                                 lo_bin = s_lo - 5 if s_lo > 5 else 0
                                 hi_bin = s_lo + ell - 2 if s_lo + ell - 2 < 5 else 5
                                 W_int = pc6[hi_bin + 1] - pc6[lo_bin]
-                                corr_w = (3.0 + 2.0 * W_int) * inv_m_sq
+                                corr_w = (3.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
                                 dyn_thresh = c_target + corr_w + fp_margin
                                 if tv > dyn_thresh:
                                     pruned = True
@@ -1210,7 +1210,7 @@ def run_single_level(n_half, m, c_target, batch_size=100000, verbose=True):
                     min_test_config, stats
     """
     d = 2 * n_half
-    S = m  # S=m convention: integer coords sum to m (not 4nm)
+    S = 4 * n_half * m  # Fine grid: integer coords sum to 4nm (C&S B_{n,m})
     n_total = count_compositions(d, S)
     corr = correction(m, n_half)
     prune_target = c_target + corr
@@ -1274,7 +1274,7 @@ def run_single_level(n_half, m, c_target, batch_size=100000, verbose=True):
         else:
             print(f"  NOT proven at target {c_target:.4f}")
             if min_test_config is not None:
-                a_cfg = min_test_config.astype(np.float64) * (4 * n_half) / m
+                a_cfg = min_test_config.astype(np.float64) / m  # heights = c_i/m
                 print(f"  Min test value: {min_test_val:.6f}")
                 print(f"  Min config (a-coords): {a_cfg}")
                 print(f"  Min config (mass frac): {a_cfg / (4*n_half)}")
@@ -1351,7 +1351,7 @@ def find_best_bound_direct(n_half, m, batch_size=50000, verbose=True):
     float : best provable lower bound on C_{1a}.
     """
     d = 2 * n_half
-    S = m  # S=m convention: integer coords sum to m (not 4nm)
+    S = 4 * n_half * m  # Fine grid: integer coords sum to 4nm (C&S B_{n,m})
     n_total = count_compositions(d, S)
     corr = correction(m, n_half)
     margin = 0.0  # No margin needed: left_frac exact for step functions
@@ -1393,7 +1393,7 @@ def find_best_bound_direct(n_half, m, batch_size=50000, verbose=True):
         print(f"  Completed in {elapsed:.1f}s")
         print(f"  >>> PROVEN: C_{{1a}} >= {min_eff:.6f} <<<")
         if min_config is not None:
-            a_cfg = min_config.astype(np.float64) * (4 * n_half) / m
+            a_cfg = min_config.astype(np.float64) / m  # heights = c_i/m
             print(f"  Minimizer (a-coords): {a_cfg}")
 
     return min_eff

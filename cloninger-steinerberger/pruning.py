@@ -12,8 +12,10 @@ def correction(m, n_half=None, ell_min=2):
     """Discretization error bound (C&S Lemma 3).
 
     C&S Lemma 3 bounds ||g*g - f*f||_∞ ≤ 2/m + 1/m² (pointwise on the
-    autoconvolution, NOT per-window on the test value).  The correction
-    is window-independent and level-independent — no 4n/ℓ factor.
+    autoconvolution, NOT per-window on the test value).  Valid because
+    the code uses the paper's fine grid B_{n,m} where heights are
+    multiples of 1/m (integer compositions sum to 4nm), giving
+    ||ε||_∞ ≤ 1/m.
 
     The n_half and ell_min parameters are accepted for API compatibility
     but are no longer used in the correction formula.
@@ -43,7 +45,7 @@ def asymmetry_prune_mask(batch_int, n_half, m, c_target):
     Returns True for configs that NEED test-value checking.
     """
     d = 2 * n_half
-    total = float(m)  # S=m convention: integer coords sum to m
+    total = float(4 * n_half * m)  # Fine grid: integer coords sum to 4nm
     threshold = asymmetry_threshold(c_target)
 
     # No discretization margin needed: left_frac = sum(c_i for left bins) / m
