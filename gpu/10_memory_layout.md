@@ -6,7 +6,7 @@
 parents[num_parents × d_parent]     int32, row-major, read-only
 lo_arrays[num_parents × d_parent]   int32, row-major, read-only
 hi_arrays[num_parents × d_parent]   int32, row-major, read-only
-threshold_table[max_ell × (m+1)]    int64, row-major, read-only (also copied to smem)
+threshold_table[max_ell × (S_child+1)] int64, row-major, read-only (S_child = 4*n_child*m; L2 cached)
 ell_order[max_ell]                  int32, read-only (also copied to smem)
 survivors[max_survivors × d_child]  int32, row-major, write-only
 survivor_count                      int32, atomic counter
@@ -32,19 +32,18 @@ Offset 2052:   gc_focus[33]            132B   int32
 Offset 2184:   active_pos[32]          128B   int32
 Offset 2312:   radix[32]               128B   int32
 Offset 2440:   ell_order[63]           252B   int32
-Offset 2692:   threshold_table[63×21]  10,584B int64
-Offset 13276:  surv_buf[64×64]         16,384B int32 (64 staging slots)
-Offset 29660:  surv_count              4B     int32
-Offset 29664:  misc (qc_ell, etc.)     64B
+Offset 2692:   (threshold_table moved to L2-cached global memory; S_child=4*n_child*m too large for smem)
+Offset 2692:   surv_buf[64×64]         16,384B int32 (64 staging slots)
+Offset 19076:  surv_count              4B     int32
+Offset 19080:  misc (qc_ell, etc.)     64B
                                        ─────────
-Total:                                 ~29.7KB
+Total:                                 ~19.1KB
 ```
 
-**Fits easily in 228KB shared memory.** Can run up to 7 blocks/SM (29.7KB × 7 = 208KB < 228KB).
-At 64 threads/block × 7 blocks/SM = 448 threads/SM (22% occupancy).
+**Fits easily in 228KB shared memory.** Can run up to 11 blocks/SM (19.1KB × 11 = 210KB < 228KB).
+At 64 threads/block × 11 blocks/SM = 704 threads/SM (34% occupancy).
 
-**To increase occupancy:** Reduce shared memory usage by moving threshold_table to constant memory or L2.
-Without threshold_table: ~19KB/block → 11 blocks/SM → 704 threads/SM (34% occupancy).
+**Note:** The threshold table is now in L2-cached global memory (too large for shared memory with `S_child = 4*n_child*m`), which frees significant shared memory and improves occupancy.
 
 **Alternative: 32 threads/block (one warp for d=64 too, with loop):**
 - Halves shared memory per block
@@ -88,7 +87,7 @@ At 28 regs × 64 threads × 7 blocks = 12,544 regs/SM out of 65,536. **Ample hea
 | Atomic contention on survivor_count | Performance loss | Block-level batching (flush 64 at a time, not 1 at a time) |
 | Parent load imbalance across GPUs | Idle GPUs | Pre-sort by estimated children, round-robin assign |
 | Memory limits (80GB) | OOM | Parents: 147M × 128B = 18.8GB. Survivors buffer: pre-allocate based on estimated rate. Total: ~25GB fits easily. |
-| Threshold table size at larger m | Shared memory overflow | For m > 200: use int64 conv, threshold table in L2 cache |
+| Threshold table size (S_child = 4*n_child*m) | Large table in L2 cache | Table is `max_ell × (S_child+1)` int64; already placed in L2-cached global memory |
 
 ---
 

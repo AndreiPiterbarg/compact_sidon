@@ -37,7 +37,7 @@ This gives us 32x (or 64x) parallelism on the two most expensive operations (con
 
 All autoconvolution values are computed and stored as **int32**. All threshold comparisons use **int64** from a precomputed table. There is **zero floating-point arithmetic** on the GPU hot path.
 
-**Correctness guarantee:** The threshold table is computed on the CPU using the exact same float64 formula as the CPU prover (`dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * W_int`, floored with `one_minus_4eps` rounding guard), then uploaded as an int64 lookup table. The GPU never performs float64 arithmetic -- it only performs integer comparisons against precomputed integer thresholds. This completely eliminates concerns about FMA rounding, flush-to-zero, and IEEE 754 compliance differences between CPU and GPU.
+**Correctness guarantee:** The threshold table is computed on the CPU using the exact same float64 formula as the CPU prover (`dyn_x = (c_target * m² + 3.0 + W_int/(2*n) + eps_margin) * 4*n*ell`, floored with `one_minus_4eps` rounding guard), then uploaded as an int64 lookup table. The GPU never performs float64 arithmetic -- it only performs integer comparisons against precomputed integer thresholds. This completely eliminates concerns about FMA rounding, flush-to-zero, and IEEE 754 compliance differences between CPU and GPU.
 
 **Overflow analysis for int32 convolution:**
 - Max conv entry = m^2 = 400 (self-term at m=20)
@@ -60,7 +60,7 @@ L3 (d_child=32): 132 SMs * 9 blocks/SM = 1188 concurrent blocks, 32 threads each
 L4 (d_child=64): 132 SMs * 5 blocks/SM = 660 concurrent blocks, 64 threads each
 ```
 
-Blocks per SM is limited by shared memory: ~42.8 KB per block at d=64 (threshold table is 21.3 KB since ell_count = 2*64-1 = 127, plus 2x 1 KB Kogge-Stone buffers), 228 KB / 42.8 KB ≈ 5 blocks/SM. At d=32: ~24.5 KB per block (threshold table 10.6 KB, ell_count = 63), 228 KB / 24.5 KB = 9 blocks/SM.
+Blocks per SM is limited by shared memory: ~21.5 KB per block at d=64 (threshold table is now in L2-cached global memory since S_child = 4*n_child*m makes it too large for smem; 2x 1 KB Kogge-Stone buffers remain), 228 KB / 21.5 KB ≈ 10 blocks/SM. At d=32: ~13.9 KB per block (no threshold table in smem), 228 KB / 13.9 KB = 16 blocks/SM.
 
 ### 3.2 Parent Dispatch: Persistent Blocks + Global Atomic Counter (Component A)
 
@@ -73,7 +73,7 @@ __global__ void cascade_kernel(
     const int32_t* __restrict__ parents,       // [num_parents x d_parent]
     const int32_t* __restrict__ lo_arrays,      // [num_parents x d_parent]
     const int32_t* __restrict__ hi_arrays,      // [num_parents x d_parent]
-    const int64_t* __restrict__ threshold_table, // [max_ell x (m+1)]
+    const int64_t* __restrict__ threshold_table, // [max_ell x (S_child+1)], S_child = 4*n_child*m
     const int32_t* __restrict__ ell_order,       // [max_ell]
     int32_t* __restrict__ survivors,             // [max_survivors x d_child]
     int32_t* __restrict__ survivor_count,        // global atomic counter
@@ -118,14 +118,14 @@ OFFSET   SIZE      NAME                  TYPE      DESCRIPTION
 2184     128 B     active_pos[32]        int32     Mapping from active index to parent position
 2312     128 B     radix[32]             int32     Per-position radix (hi-lo+1)
 2440     508 B     ell_order[127]        int32     Window size ordering for ell scan (ell_count = 2*d_child - 1 = 127)
-2948     21336 B   threshold_table[127*21] int64   Precomputed thresholds [ell_idx * (m+1) + W_int]
-24284    1024 B    prefix_conv[128]      int64     Inclusive prefix sum of raw_conv (Kogge-Stone scan)
-25308    1024 B    prefix_tmp[128]       int64     Ping-pong buffer for Kogge-Stone prefix sum
-26332    16384 B   surv_buf[64*64]       int32     Survivor staging buffer (64 slots x 64 bins)
-42716    4 B       surv_count            int32     Current survivors in staging buffer
-42720    64 B      misc                  various   qc_ell, qc_s, qc_W_int, n_active, total_tested, flags
+2948     (threshold_table in L2-cached global memory; S_child=4*n_child*m, table too large for smem)
+2948     1024 B    prefix_conv[128]      int64     Inclusive prefix sum of raw_conv (Kogge-Stone scan)
+3972     1024 B    prefix_tmp[128]       int64     Ping-pong buffer for Kogge-Stone prefix sum
+4996     16384 B   surv_buf[64*64]       int32     Survivor staging buffer (64 slots x 64 bins)
+21380    4 B       surv_count            int32     Current survivors in staging buffer
+21384    64 B      misc                  various   qc_ell, qc_s, qc_W_int, n_active, total_tested, flags
 ─────────────────────────────────────────────────
-TOTAL:   ~42.8 KB  (fits 5 blocks/SM: 228 KB / 42.8 KB ≈ 5)
+TOTAL:   ~21.4 KB  (threshold table in L2 global; fits 10 blocks/SM: 228 KB / 21.4 KB ≈ 10)
 ```
 
 **For d_child = 32 (L3):**
@@ -140,19 +140,18 @@ OFFSET   SIZE      NAME                  TYPE
 708      64 B      cursor[16]            int32
 ...      (same structure, halved dimensions)
 ell_o    252 B     ell_order[63]         int32     (ell_count = 2*d_child - 1 = 63)
-thresh   10584 B   threshold_table[63*21] int64
+         (threshold_table in L2-cached global memory; S_child=4*n_child*m too large for smem)
 surv     8192 B    surv_buf[64*32]       int32
 ─────────────────────────────────────────────────
-TOTAL:   ~24.5 KB  (fits 9 blocks/SM: 228 KB / 24.5 KB = 9)
+TOTAL:   ~13.9 KB  (threshold table in L2 global; fits 16 blocks/SM: 228 KB / 13.9 KB = 16)
 ```
 
-**Threshold table placement decision:** Placed in shared memory (21.3 KB at d=64, 10.6 KB at d=32). Although this is the largest single allocation, it is read-only and accessed on every non-quick-killed child's window scan. Placing it in constant memory would cause serialization (different lanes access different W_int values, breaking the broadcast requirement). Placing it in L2 would add ~30 cycle latency per lookup vs ~4 cycles for shared memory. Given that the threshold table is heavily reused (potentially millions of lookups per parent), shared memory is the correct choice. It is loaded cooperatively at block initialization:
+**Threshold table placement decision:** Placed in L2-cached global memory. With the fine-grid parameterization (compositions sum to `S_child = 4 * n_child * m`), the table has `ell_count × (S_child + 1)` entries, which is too large for shared memory (e.g., 127 × 2561 × 8B = ~2.5 MB at d=64, m=20). The table is read-only and benefits from L2 caching (50 MB L2 on H100). The ~30 cycle L2 latency is acceptable since the table is only accessed during the window scan of non-quick-killed children (~15% of all children). Constant memory is also insufficient (64 KB limit). No cooperative loading is needed:
 
 ```cuda
 // Cooperative load of threshold table from global to shared memory
-for (int i = lane; i < ell_count * (m + 1); i += blockDim.x)
-    threshold_table_smem[i] = threshold_table_global[i];
-__syncthreads();
+// Threshold table now lives in L2-cached global memory (too large for smem
+// with S_child = 4*n_child*m).  Access directly via threshold_table_global pointer.
 ```
 
 ### 3.4 Block Initialization Phase
@@ -187,7 +186,7 @@ __device__ void process_parent(int pid, /* params */) {
         int left_sum = 0;
         for (int i = 0; i < d_parent / 2; i++)
             left_sum += parent_smem[i];
-        float left_frac = (float)left_sum / (float)m;
+        float left_frac = (float)left_sum / (float)(4 * (d_parent / 2) * m);  // S_parent = 4*n_parent*m
         // Use float comparison: safe because this is a performance optimization,
         // not a soundness check.  Borderline parents just proceed to the full test.
         if (left_frac >= threshold_asym || left_frac <= 1.0f - threshold_asym)
@@ -222,7 +221,7 @@ __device__ void process_parent(int pid, /* params */) {
     if (lane < d_parent) {
         int c = cursor_smem[lane];
         child_smem[2 * lane]     = c;
-        child_smem[2 * lane + 1] = parent_smem[lane] - c;
+        child_smem[2 * lane + 1] = 2 * parent_smem[lane] - c;
     }
     __syncthreads();
 
@@ -352,7 +351,7 @@ __device__ void gray_code_enumeration_loop(/* shared memory pointers, params */)
         int old1 = child_smem[k1];
         int old2 = child_smem[k2];
         int new1 = new_cursor;
-        int new2 = parent_smem[pos] - new_cursor;
+        int new2 = 2 * parent_smem[pos] - new_cursor;
 
         // Update child array (two lanes write)
         if (lane == k1) child_smem[k1] = new1;
@@ -549,7 +548,7 @@ __device__ bool warp_cooperative_quick_check(
     __shared__ bool qc_killed_smem;
     if (lane == 0) {
         int ell_idx = qc_ell - 2;
-        int64_t thresh = threshold_table[ell_idx * (m + 1) + qc_W_int];
+        int64_t thresh = threshold_table[ell_idx * (S_child + 1) + qc_W_int];
         qc_killed_smem = (ws > thresh);
     }
     __syncthreads();  // broadcast result to both warps via shared memory
@@ -669,7 +668,7 @@ __device__ bool parallel_window_scan(
             if (hi_bin > d_child - 1) hi_bin = d_child - 1;
             int W_int = (int)(prefix_c[hi_bin + 1] - prefix_c[lo_bin]);
 
-            int64_t thresh = threshold_table[(ell - 2) * (m + 1) + W_int];
+            int64_t thresh = threshold_table[(ell - 2) * (S_child + 1) + W_int];
             if (ws > thresh) {
                 lane_pruned = true;
                 lane_killer_s = s_lo;
@@ -791,7 +790,7 @@ if (lane == 0 && gc_j == J_MIN && n_active > J_MIN) {
             int p = active_pos_smem[kk];
             cursor_smem[p] = lo_smem[p];
             child_smem[2 * p] = lo_smem[p];
-            child_smem[2 * p + 1] = parent_smem[p] - lo_smem[p];
+            child_smem[2 * p + 1] = 2 * parent_smem[p] - lo_smem[p];
         }
 
         // Accounting: the current child (created by the J_MIN advance) was
@@ -956,7 +955,7 @@ This kernel is computing a **rigorous mathematical proof**. The correctness requ
 
 **Precomputed threshold table:** The threshold comparison `ws > dyn_it` is performed entirely in integer arithmetic. `ws` is an int64 sum of int32 conv values (exact). `dyn_it` is an int64 value precomputed on the CPU from:
 ```
-dyn_x = ct_base_ell[ell] + 1.0 + eps_margin + 2.0 * (double)W_int
+dyn_x = (c_target * m * m + 3.0 + (double)W_int / (2.0 * n) + eps_margin) * 4.0 * n * ell
 dyn_it = (int64_t)(dyn_x * one_minus_4eps)
 ```
 where `one_minus_4eps = 1.0 - 4 * 2.220446049250313e-16`. This computation happens once on the CPU, is verified against the CPU prover's thresholds, and is uploaded as a read-only table. The GPU never performs float64 arithmetic.
@@ -1020,7 +1019,7 @@ INPUT (read-only):
   parents[147,279,894 x 32]        = 18.84 GB   int32, row-major
   lo_arrays[147,279,894 x 32]      = 18.84 GB   int32, row-major
   hi_arrays[147,279,894 x 32]      = 18.84 GB   int32, row-major
-  threshold_table[127 x 21]        = 21.3 KB     int64, row-major (ell_count = 2*d_child - 1 = 127)
+  threshold_table[127 x 2561]      = ~2.5 MB     int64, row-major (ell_count=127, S_child=4*32*20=2560)
   ell_order[127]                    = 508 B       int32
 
 OUTPUT:
@@ -1041,7 +1040,7 @@ GPU 1: parents[18.4M .. 36.8M-1]
 ...
 GPU 7: parents[128.8M .. 147.3M-1]
 
-Each GPU: 7.07 GB parents + 7.07 GB lo + 7.07 GB hi + 21.3 KB thresh + 51.2 MB surv
+Each GPU: 7.07 GB parents + 7.07 GB lo + 7.07 GB hi + ~2.5 MB thresh + 51.2 MB surv
         = ~21.3 GB per GPU (26.6% utilization)
 ```
 
@@ -1081,32 +1080,27 @@ This is optimistic (doesn't account for load imbalance, memory latency, host coo
 
 **d_child=64 (L4):**
 - Block size: 64 threads (2 warps)
-- Shared memory per block: ~42.8 KB (threshold table is 21.3 KB since ell_count = 127, plus 1 KB ping-pong buffer)
-- Blocks per SM: floor(228 KB / 41.8 KB) = 5
-- Threads per SM: 5 * 64 = 320
-- Warps per SM: 5 * 2 = 10
+- Shared memory per block: ~21.4 KB (threshold table in L2 global; Kogge-Stone ping-pong buffers 2 KB)
+- Blocks per SM: floor(228 KB / 21.4 KB) = 10
+- Threads per SM: 10 * 64 = 640
+- Warps per SM: 10 * 2 = 20
 - Max warps per SM: 64
-- **Occupancy: 10/64 = 15.6%**
+- **Occupancy: 20/64 = 31.3%**
 
-This is low. Mitigations:
-1. **Move threshold table to constant memory:** Saves 21.3 KB/block → ~20.5 KB/block → 11 blocks/SM → 704 threads → 34% occupancy. Tradeoff: constant memory broadcasts are efficient only when all threads in a warp access the same address. Different lanes access different W_int values during window scan, causing serialized access. However, this only affects the 15% of children that reach the full window scan.
+This is moderate. The threshold table is in L2-cached global memory (too large for shared memory with `S_child = 4*n_child*m`), which frees significant shared memory per block. The ~30 cycle L2 latency for threshold lookups is acceptable since it only affects the 15% of non-quick-killed children. With 10 concurrent parents per SM, there are enough independent instructions to hide memory latency.
 
-2. **Accept low occupancy:** The kernel is compute-bound, not latency-bound. With 5 concurrent parents per SM, there are enough independent instructions to hide shared memory latency (4 cycles). The bottleneck is ALU throughput, not memory latency. H100's instruction-level parallelism within each warp further helps.
-
-3. **Split threshold table across shared + L2:** Keep only the high-kill-rate ells (the first ~20 entries used by ell_order, covering ells 25-40 that kill 92% of non-quick-killed children) in shared memory (~3.4 KB), and put the remaining 107 ell rows in L2. This would reduce shared memory to ~24 KB/block → 9 blocks/SM → 28% occupancy. The rarely-accessed wide-ell lookups absorb the ~30 cycle L2 latency.
-
-**Recommendation: Keep threshold table in shared memory, accept ~16% occupancy for correctness and simplicity.** The window scan's random-access pattern to the threshold table is performance-critical, and shared memory provides 4-cycle access vs. potentially 30+ cycles for serialized constant memory access. Profile first; if occupancy proves to be the bottleneck, apply mitigation #3.
+**Recommendation: Accept ~31% occupancy with threshold table in L2.** Profile to determine if L2 cache hit rates are sufficient; if not, consider caching the most frequently accessed ell rows (covering ells that kill 92% of non-quick-killed children) in a small shared memory buffer.
 
 **d_child=32 (L3):**
 - Block size: 32 threads (1 warp)
-- Shared memory per block: ~24.5 KB (threshold table is 10.6 KB since ell_count = 63)
-- Blocks per SM: floor(228 / 24.5) = 9
-- Threads per SM: 9 * 32 = 288
-- Warps per SM: 9
+- Shared memory per block: ~13.9 KB (threshold table in L2 global)
+- Blocks per SM: floor(228 / 13.9) = 16
+- Threads per SM: 16 * 32 = 512
+- Warps per SM: 16
 - Max warps per SM: 64
-- **Occupancy: 9/64 = 14.1%**
+- **Occupancy: 16/64 = 25%**
 
-Similar reasoning: compute-bound, acceptable.
+Improved occupancy with threshold table in L2 global memory.
 
 ---
 
@@ -1243,7 +1237,7 @@ while not all_done:
 | Survivor buffer overflow | Medium (lost survivors) | Very low | SURV_CAP=64 >> expected 0.0005 survivors/parent. Global buffer 200K >> expected 76K. Overflow flag triggers host relaunch |
 | GPU load imbalance causes idle time | Low (perf only) | Medium | Pre-sorted round-robin + atomic work-stealing within each GPU. Statistical balancing over 18M+ parents per GPU |
 | Shared memory bank conflicts | Low (perf only) | Low | Conv access pattern is stride-1 (consecutive lanes access consecutive addresses). Analysis confirms zero bank conflicts for cross-term writes |
-| Low occupancy (~16%) limits throughput | Low (perf only) | Certain | Compute-bound kernel; 5 concurrent parents per SM at d=64 provide sufficient ILP. Shared memory ~42.8 KB/block (threshold table 21.3 KB for ell_count=127). If bottleneck, apply split threshold table mitigation (high-kill ells in smem, rest in L2) to reach ~28% |
+| Moderate occupancy (~31%) may limit throughput | Low (perf only) | Possible | Compute-bound kernel; 10 concurrent parents per SM at d=64 provide sufficient ILP. Shared memory ~21.4 KB/block (threshold table in L2 global). If bottleneck, consider caching high-kill ell rows in smem for faster access |
 
 ---
 

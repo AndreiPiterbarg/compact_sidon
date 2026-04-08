@@ -94,7 +94,7 @@ if (total_children > THRESHOLD) {
 
 ## Component B: Child Enumeration Strategy
 
-**What it does:** Generates all children of a parent by iterating through the Cartesian product of cursor ranges. Each parent bin `i` with mass `a_i` splits into `(c, a_i - c)` for `lo_i ≤ c ≤ hi_i`.
+**What it does:** Generates all children of a parent by iterating through the Cartesian product of cursor ranges. Each parent bin `i` with mass `a_i` splits into `(c, 2*a_i - c)` for `lo_i ≤ c ≤ hi_i`.
 
 ### Option B1: Sequential Mixed-Radix Gray Code (Port CPU Directly)
 
@@ -306,7 +306,7 @@ if (lane == 0 && qc_ell > 0) {
     int64_t ws = 0;
     for (int k = qc_s; k < qc_s + qc_ell - 1; k++)
         ws += (int64_t)conv_smem[k];
-    int64_t thresh = threshold_table_smem[qc_ell_idx * (m+1) + qc_W_int];
+    int64_t thresh = threshold_table_smem[qc_ell_idx * (S_child+1) + qc_W_int];
     quick_killed = (ws > thresh);
 }
 quick_killed = __shfl_sync(0xFFFFFFFF, quick_killed, 0);
@@ -327,7 +327,7 @@ if (qc_ell > 0) {
         partial += conv_smem[k];
     int64_t ws = warp_reduce_sum_i64((int64_t)partial);
     if (lane == 0) {
-        int64_t thresh = threshold_table_smem[qc_ell_idx * (m+1) + qc_W_int];
+        int64_t thresh = threshold_table_smem[qc_ell_idx * (S_child+1) + qc_W_int];
         quick_killed = (ws > thresh);
     }
     quick_killed = __shfl_sync(0xFFFFFFFF, quick_killed, 0);
@@ -393,7 +393,7 @@ for (int ell_oi = 0; ell_oi < ell_count; ell_oi++) {
     for (int s_lo = lane; s_lo < n_windows; s_lo += WARP_SIZE) {
         int64_t ws = prefix_conv[s_lo + n_cv - 1] - (s_lo > 0 ? prefix_conv[s_lo - 1] : 0);
         int W_int = compute_W_int(prefix_c_smem, s_lo, ell, d_child);
-        int64_t thresh = threshold_table_smem[ell_idx * (m+1) + W_int];
+        int64_t thresh = threshold_table_smem[ell_idx * (S_child+1) + W_int];
         if (ws > thresh) lane_pruned = true;
     }
     uint32_t pruned_mask = __ballot_sync(0xFFFFFFFF, lane_pruned);

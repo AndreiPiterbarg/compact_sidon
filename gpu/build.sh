@@ -35,11 +35,22 @@ echo "nvcc: $(nvcc --version | grep release)"
 
 # Detect GPU architecture
 ARCH="sm_90"  # H100 default
+GENCODE_EXTRA=""
 if command -v nvidia-smi &>/dev/null; then
     COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
     if [ -n "$COMPUTE_CAP" ]; then
-        ARCH="sm_${COMPUTE_CAP}"
-        echo "Detected GPU compute capability: ${COMPUTE_CAP} -> ${ARCH}"
+        # Check if nvcc supports this arch (B200 = sm_100 needs CUDA 12.8+)
+        if nvcc --help 2>&1 | grep -q "compute_${COMPUTE_CAP}" || \
+           [ "$COMPUTE_CAP" -le 90 ]; then
+            ARCH="sm_${COMPUTE_CAP}"
+            echo "Detected GPU: sm_${COMPUTE_CAP} (native)"
+        else
+            # GPU is newer than nvcc supports — compile sm_90 + PTX for JIT
+            ARCH="sm_90"
+            GENCODE_EXTRA="-gencode arch=compute_90,code=compute_90"
+            echo "Detected GPU: sm_${COMPUTE_CAP} (nvcc too old for native)"
+            echo "  Building sm_90 binary + compute_90 PTX for forward-compat JIT"
+        fi
     fi
 fi
 
@@ -83,7 +94,7 @@ echo "  output: $OUTPUT"
 echo "  flags:  ${NVCC_FLAGS[*]}"
 echo ""
 
-nvcc "${NVCC_FLAGS[@]}" cascade_kernel.cu cascade_host.cu -o "$OUTPUT"
+nvcc "${NVCC_FLAGS[@]}" $GENCODE_EXTRA cascade_kernel.cu cascade_host.cu -o "$OUTPUT"
 
 echo ""
 echo "BUILD OK: $OUTPUT"

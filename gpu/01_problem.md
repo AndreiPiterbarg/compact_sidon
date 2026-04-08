@@ -4,7 +4,7 @@
 
 We are exhaustively proving that **no** nonneg function on [-1/4, 1/4] with unit integral can have autoconvolution peak below a target threshold $C_{1a}$. The computation reduces to:
 
-1. **Enumerate** all integer compositions of $S = m$ into $d$ parts (mass distributions over $d$ bins)
+1. **Enumerate** all integer compositions of $S = 4nm$ into $d$ parts (mass distributions over $d$ bins)
 2. **Compute autoconvolution** for each composition — a discrete self-convolution yielding $2d - 1$ values
 3. **Test** whether any windowed sum of the autoconvolution exceeds a per-window dynamic threshold
 4. **Collect survivors** (compositions that pass all windows) for refinement at the next cascade level

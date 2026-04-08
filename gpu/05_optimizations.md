@@ -13,7 +13,7 @@
 - FP32 mantissa: 24 bits = exact to 16,777,216
 - **All values fit exactly in FP32 for m ≤ 200** (max intermediate: `2 × 200 × 200 × 64 = 5,120,000 < 16M`)
 
-**HOWEVER:** The threshold comparison uses int64: `ws (int64) > dyn_it (int64)`. The window sum can be up to `63 × 400 = 25,200` which fits int32. But `dyn_x = c_target × m² × ell / (4n) + 1 + eps + 2 × W_int` is float64.
+**HOWEVER:** The threshold comparison uses int64: `ws (int64) > dyn_it (int64)`. The window sum can be up to `63 × 400 = 25,200` which fits int32. But `dyn_x = (c_target × m² + 3 + W_int/(2n) + eps) × 4n × ell` is float64.
 
 **Recommendation:**
 - Compute autoconvolution cross-terms in **int32** (they must be exact for proof correctness)
@@ -72,7 +72,7 @@ This preserves the CPU's "skip prefix_c for quick-killed children" optimization.
 
 **Survivor writes:** The staging buffer flush writes `surv_count × d_child × 4B` to global memory. With cooperative writes (`threadIdx.x` stride), this is coalesced.
 
-**Threshold table:** Read-only, accessed by `[ell_idx × (m+1) + W_int]`. Different lanes may access different W_int values (different windows), causing **non-coalesced** access. Mitigation: place in shared memory (loaded once at block start, then fast random access).
+**Threshold table:** Read-only, accessed by `[ell_idx × (S_child+1) + W_int]` where `S_child = 4 * n_child * m`. Different lanes may access different W_int values (different windows), causing **non-coalesced** access. Mitigation: place in L2 cache (table is too large for shared memory at fine-grid S_child values).
 
 ## 5.7 Sparse Cross-Term Optimization (from CPU)
 

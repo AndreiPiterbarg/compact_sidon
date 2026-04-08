@@ -22,7 +22,7 @@ This kernel is part of a **rigorous mathematical proof**. A missed survivor inva
 
 The threshold computation involves float64:
 ```
-dyn_x = ct_base_ell + 1.0 + eps_margin + 2.0 * (double)W_int
+dyn_x = (c_target * m * m + 3.0 + (double)W_int / (2.0 * n) + eps_margin) * 4.0 * n * ell
 dyn_it = (int64_t)(dyn_x * one_minus_4eps)
 ```
 

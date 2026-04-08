@@ -31,7 +31,7 @@ For d_child=64:
 - `child[64]` = 256B
 - `parent[32]` = 128B
 - `prefix_c[65]` = 520B (int64)
-- `threshold_table[63 × 21]` = 10,584B (int64) — **too large for shared memory at m=20**
+- `threshold_table[ell_count × (S_child+1)]` where `S_child = 4*n_child*m` — ~2.5 MB at d_child=64, m=20 (ell_count=127, S_child=2560; L2 cached, too large for shared memory)
 - `cursor[32]` = 128B
 - `gc_state` (gc_a, gc_dir, gc_focus) = ~300B
 - `ell_order[63]` = 252B

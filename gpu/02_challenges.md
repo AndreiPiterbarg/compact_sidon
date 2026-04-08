@@ -52,7 +52,7 @@ The Knuth mixed-radix Gray code (TAOCP 7.2.1.1) maintains three coupled state ar
 
 ## Challenge 8: Dynamic Threshold Table Lookup Pattern
 
-The threshold table `threshold_table[ell_idx * (m+1) + W_int]` is accessed with data-dependent indices. At L4 with d_child=64 and m=20, this table is 127 × 21 = 2,667 int64 entries (21KB). It fits in shared memory, but the access pattern across threads in a warp is non-uniform (different threads have different `ell` and `W_int` values), causing **bank conflicts and serialized accesses**.
+The threshold table `threshold_table[ell_idx * (S_child+1) + W_int]` is accessed with data-dependent indices (where `S_child = 4 * n_child * m`). At L4 with d_child=64 and m=20, `S_child = 4*32*20 = 2560`, so this table is 127 × 2561 int64 entries (~2.5MB). This is far too large for shared memory (228KB) and must reside in L2-cached global memory. The access pattern across threads in a warp is non-uniform (different threads have different `ell` and `W_int` values), causing **cache pressure and serialized accesses**.
 
 ## Challenge 9: The Deduplication Pipeline Doesn't Map to GPU
 

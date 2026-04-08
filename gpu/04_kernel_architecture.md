@@ -77,7 +77,7 @@ int n_windows = conv_len - (ell - 1) + 1;
 for (int s_lo = lane; s_lo < n_windows; s_lo += 32) {
     int64_t ws = compute_window_sum(conv_smem, s_lo, ell - 1);
     int W_int = compute_W_int(prefix_c_smem, s_lo, ell, d_child);
-    int64_t thresh = threshold_table[ell_idx * (m+1) + W_int];
+    int64_t thresh = threshold_table[ell_idx * (S_child+1) + W_int];
     if (ws > thresh) {
         pruned = true;  // use warp vote to propagate
     }
@@ -128,16 +128,16 @@ The CPU quick-check re-tries the previous child's killing (ell, s_lo) before ful
 
 ## 4.4 Threshold Table Placement
 
-The threshold table for d_child=64, m=20 is: 63 ell values × 21 W_int values × 8 bytes = **10,584 bytes**.
+The threshold table for d_child=64, m=20 has dimensions: `ell_count` ell values × `(S_child+1)` W_int values × 8 bytes, where `S_child = 4 * n_child * m`. At d_child=64, n_child=32, m=20: `S_child = 2560`, so 127 × 2561 × 8 = **~2.5 MB**.
 
 Options:
-1. **Shared memory** — fits easily (10KB out of 228KB), fastest access
-2. **Constant memory** — 64KB limit, broadcast to all threads, but limited to read-only
-3. **L2 cache** — automatic, slightly slower, but saves shared memory
+1. **Shared memory** — too large at ~2.5MB; does not fit (228KB limit per SM)
+2. **Constant memory** — 64KB limit, broadcast to all threads, but limited to read-only; also too small
+3. **L2 cache** — automatic, fits in 50MB L2; slightly slower but the only viable option at this table size
 
-**Recommendation:** Place in shared memory. 10KB is small and heavily reused. Cooperatively load at block start.
+**Recommendation:** Place in L2 cache (global memory with caching). At 2.5MB the table is too large for shared memory or constant memory. Cooperatively load frequently-accessed slices into shared memory if profiling shows L2 latency is a bottleneck.
 
-For d_child=32, m=20: 31 × 21 × 8 = **5,208 bytes** — trivially fits shared memory.
+For d_child=32, m=20: n_child=16, `S_child = 4*16*20 = 1280`, so 63 × 1281 × 8 = **~630 KB** — also exceeds shared memory; use L2 cache.
 
 ## 4.5 Survivor Collection (Stream Compaction)
 
