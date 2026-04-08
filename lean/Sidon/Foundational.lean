@@ -40,9 +40,10 @@ theorem canonical_cumulative_distribution_zero (f : ℝ → ℝ) (n m : ℕ) :
       unfold canonical_cumulative_distribution; aesop;
 
 -- F3: D(2n) = m
+-- F3: D(2n) = S = 4nm (fine grid boundary condition)
 theorem canonical_cumulative_distribution_2n (f : ℝ → ℝ) (n m : ℕ) (_hn : n > 0) (_hm : m > 0)
     (h_mass_pos : ∑ j : Fin (2 * n), bin_masses f n j ≠ 0) :
-    canonical_cumulative_distribution f n m (2 * n) = m := by
+    canonical_cumulative_distribution f n m (2 * n) = 4 * n * m := by
       unfold canonical_cumulative_distribution; aesop;
 
 -- F4: Bin masses ≥ 0 for f ≥ 0
@@ -108,11 +109,12 @@ theorem sum_fin_telescope_nat (f : ℕ → ℕ) (n : ℕ) (h_mono : Monotone f) 
           omega
       rw [ ← h_telescope, Finset.sum_range ]
 
--- F15: ∑ c_i = m (full proof, positive mass)
+-- F15: ∑ c_i = 4nm (full proof, positive mass, fine grid)
+-- canonical_discretization now rounds to S = 4nm quanta (fine grid B_{n,m}).
 theorem canonical_discretization_sum_eq_m (f : ℝ → ℝ) (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (h_mass_pos : ∑ j : Fin (2 * n), bin_masses f n j ≠ 0)
     (hf_nonneg : ∀ x, 0 ≤ f x) :
-    ∑ i : Fin (2 * n), canonical_discretization f n m i = m := by
+    ∑ i : Fin (2 * n), canonical_discretization f n m i = 4 * n * m := by
       rw [canonical_discretization_sum_eq_telescope f n m hn hm h_mass_pos]
       rw [sum_fin_telescope_nat (canonical_cumulative_distribution f n m) (2 * n) (canonical_cumulative_distribution_mono f hf_nonneg n m)]
       rw [canonical_cumulative_distribution_2n f n m hn hm h_mass_pos]

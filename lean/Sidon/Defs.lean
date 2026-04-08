@@ -47,10 +47,14 @@ noncomputable def autoconvolution_constant : ℝ :=
 def discrete_autoconvolution {d : ℕ} (a : Fin d → ℝ) (k : ℕ) : ℝ :=
   ∑ i : Fin d, ∑ j : Fin d, if i.1 + j.1 = k then a i * a j else 0
 
-/-- Test value TV(n, m, c, ℓ, s_lo) for a composition c. -/
+/-- Test value TV(n, m, c, ℓ, s_lo) for a composition c.
+
+    Fine grid (C&S B_{n,m}): heights a_i = c_i / m where ∑ c_i = 4nm.
+    The TV = (1/(4nℓ)) · ∑_{k in window} conv[k] with conv[k] = ∑_{i+j=k} a_i·a_j.
+    This matches the CPU code's test_values.py with scale = 1/m. -/
 noncomputable def test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) (ℓ s_lo : ℕ) : ℝ :=
   let d := 2 * n
-  let a : Fin d → ℝ := fun i => (4 * n : ℝ) / m * (c i : ℝ)
+  let a : Fin d → ℝ := fun i => (c i : ℝ) / m
   let conv := discrete_autoconvolution a
   let sum_conv := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), conv k
   (1 / (4 * n * ℓ : ℝ)) * sum_conv
@@ -63,9 +67,12 @@ noncomputable def max_test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) : ℝ :=
   let values := range_ell.biUnion (fun ℓ => range_s_lo.image (fun s_lo => test_value n m c ℓ s_lo))
   if h : values.Nonempty then values.max' h else 0
 
-/-- A composition is a vector summing to m. -/
+/-- A composition on the fine grid B_{n,m}: integer masses summing to 4nm.
+    Heights a_i = c_i/m give a step function on 2n bins of width 1/(4n)
+    with ∫g = ∑ (c_i/m)·(1/(4n)) = S/(4nm) = 1 when S = 4nm.
+    Matches CPU convention: S = 4 * n_half * m. -/
 def is_composition (n m : ℕ) (c : Fin (2 * n) → ℕ) : Prop :=
-  ∑ i, c i = m
+  ∑ i, c i = 4 * n * m
 
 /-- Bin masses: integral of f over each bin. -/
 noncomputable def bin_masses (f : ℝ → ℝ) (n : ℕ) : Fin (2 * n) → ℝ :=
@@ -75,28 +82,35 @@ noncomputable def bin_masses (f : ℝ → ℝ) (n : ℕ) : Fin (2 * n) → ℝ :
     let b := -(1/4 : ℝ) + (i + 1) * δ
     MeasureTheory.integral MeasureTheory.volume (Set.indicator (Set.Ico a b) f)
 
-/-- Canonical discretization via floor-rounding of cumulative masses. -/
+/-- Canonical discretization via floor-rounding of cumulative masses.
+
+    Fine grid (C&S B_{n,m}): rounds to S = 4nm quanta so that
+    heights c_i/m are multiples of 1/m, giving ||ε||_∞ ≤ 1/m.
+    This is required for the C&S Lemma 3 bound (2/m + 1/m²). -/
 noncomputable def canonical_discretization (f : ℝ → ℝ) (n m : ℕ) : Fin (2 * n) → ℕ :=
   fun i =>
+    let S := 4 * n * m
     let masses := bin_masses f n
     let total_mass := ∑ j, masses j
     let cum_mass (k : ℕ) := ∑ j : Fin (2 * n), if j.1 < k then masses j else 0
-    let target_cum (k : ℕ) := (cum_mass k) / total_mass * m
+    let target_cum (k : ℕ) := (cum_mass k) / total_mass * S
     let discrete_cum (k : ℕ) := ⌊target_cum k⌋.natAbs
     if i.1 + 1 < 2 * n then discrete_cum (i.1 + 1) - discrete_cum i.1
-    else m - discrete_cum i.1
+    else S - discrete_cum i.1
 
 /-- Contributing bins for a window (ℓ, s_lo). -/
 def contributing_bins (n : ℕ) (ℓ s_lo : ℕ) : Finset (Fin (2 * n)) :=
   let d := 2 * n
   Finset.filter (fun i => ∃ j : Fin d, s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 ≤ s_lo + ℓ - 2) Finset.univ
 
-/-- Cumulative distribution helper D(k). -/
+/-- Cumulative distribution helper D(k).
+    Fine grid: targets S = 4nm quanta (matching canonical_discretization). -/
 noncomputable def canonical_cumulative_distribution (f : ℝ → ℝ) (n m : ℕ) (k : ℕ) : ℕ :=
+  let S := 4 * n * m
   let masses := bin_masses f n
   let total_mass := ∑ j, masses j
   let cum_mass := ∑ j : Fin (2 * n), if j.1 < k then masses j else 0
-  let target_cum := cum_mass / total_mass * m
+  let target_cum := cum_mass / total_mass * S
   ⌊target_cum⌋.natAbs
 
 /-- Restriction of f to bin i. -/

@@ -34,34 +34,44 @@ noncomputable section
 -- Final Result — Autoconvolution Constant Lower Bound
 -- ═══════════════════════════════════════════════════════════════════════════════
 
--- *** COMPUTATIONAL AXIOM — THIS IS THE ONLY AXIOM IN THE PROOF ***
--- The following axiom encodes the result of the 70-hour branch-and-prune cascade.
--- It is the sole unverified-in-Lean component: every other lemma and theorem above
--- is fully proved in Lean 4 / Mathlib. Removing this axiom (e.g. by replacing it
--- with a native_decide proof) would make the entire proof axiom-free, but that
--- would require evaluating ~10^13 test values in the Lean kernel, which is
--- currently infeasible.
+-- *** COMPUTATIONAL AXIOM ***
+-- The following axiom encodes the result of the branch-and-prune cascade.
+-- Every other lemma and theorem in the Lean formalization is fully proved;
+-- this axiom and cs_lemma3_per_window (C&S Lemma 3, in DiscretizationError.lean)
+-- are the only unverified-in-Lean components.
 --
--- Reproduction: run `python -m cloninger-steinerberger.cpu.run_cascade --n_half 2 --m 20 --c_target 1.40`
--- Result file: data/cpu_cascade_20260319_201644.json
+-- The threshold uses the C&S Lemma 3 flat bound (2/m + 1/m²), which is a
+-- pointwise bound on |(g*g)(x) - (f*f)(x)| that holds uniformly over all
+-- window positions and lengths. This matches dynamic_threshold_sound_cs.
+--
+-- Reproduction: run the cascade with the flat C&S threshold:
+--   python -m cloninger-steinerberger.cpu.run_cascade \
+--     --n_half 2 --m 20 --c_target 1.40 --use_flat_threshold
+-- and verify that every composition at d=128 has a killing window where
+-- the test value exceeds c_target + 2/m + 1/m² = 7/5 + 2/20 + 1/400 = 1.5025.
+--
+-- The --use_flat_threshold flag ensures the CPU uses the same flat C&S
+-- correction (2m+1)/m² as required by this axiom, rather than the tighter
+-- W-refined correction (3+W_int/(2n))/m² used by default.
+--
+-- Fine grid (C&S B_{n,m}): compositions sum to S = 4nm = 4*64*20 = 5120.
+-- Heights a_i = c_i/m are multiples of 1/m, giving ||ε||_∞ ≤ 1/m.
+-- This parameterization matches the CPU code exactly.
 /-- **Computational axiom**: The branch-and-prune cascade with parameters
-    n_half=2, m=20, c_target=1.4 terminated with zero survivors at level L5.
+    n_half=2, m=20, c_target=1.4 terminated with zero survivors.
 
-    This was verified by a 70-hour computation (see data/cpu_cascade_20260319_201644.json).
-    The cascade tested all compositions of m=20 into d=4 bins at successively finer
-    resolutions (d=4,8,16,32,64,128), pruning compositions whose test value exceeds
-    the dynamic threshold. At the finest level (d=128), zero compositions survived,
-    meaning every possible discretization is prunable.
+    Fine grid: compositions of S=4nm=5120 into d=128 bins.
+    For every such composition, there exists a window (ℓ, s_lo) where
+    the discrete test value exceeds the C&S Lemma 3 flat threshold:
+    c_target + 2/m + 1/m² = 7/5 + 2/20 + 1/400 = 1.5025.
 
-    Verifying this in Lean's kernel would require native_decide over ~10^13 cases,
-    which is infeasible. Instead, we accept the computational result as an axiom
-    backed by the reproducible computation stored in data/. -/
+    Reproduction:
+      python -m cloninger-steinerberger.cpu.run_cascade \
+        --n_half 2 --m 20 --c_target 1.40 --use_flat_threshold -/
 axiom cascade_all_pruned :
-  ∀ c : Fin (2 * 64) → ℕ, ∑ i, c i = 20 →
+  ∀ c : Fin (2 * 64) → ℕ, ∑ i, c i = 4 * 64 * 20 →
     ∃ ℓ s_lo, 2 ≤ ℓ ∧
-      test_value 64 20 c ℓ s_lo >
-        (7/5 : ℝ) + (4 * (64 : ℝ) / ℓ) *
-          (1 / (20 : ℝ)^2 + 2 * ((∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20) / 20)
+      test_value 64 20 c ℓ s_lo > (7/5 : ℝ) + 2 / 20 + 1 / 20 ^ 2
 
 /-- Scale invariance of the autoconvolution ratio.
     R(a·f) = R(f) for a > 0. -/
@@ -107,7 +117,7 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
 
     Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=64 with m=20,
     apply cascade_all_pruned to find a killing window (ℓ, s_lo) where TV exceeds the
-    per-window threshold, then apply dynamic_threshold_sound to conclude R(g) ≥ 7/5. -/
+    C&S Lemma 3 threshold, then apply dynamic_threshold_sound_cs to conclude R(g) ≥ 7/5. -/
 private lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
     (h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
@@ -148,15 +158,13 @@ theorem autoconvolution_ratio_ge_7_5 (f : ℝ → ℝ)
   set c := canonical_discretization g 64 20
   have h_mass_nz : ∑ j : Fin (2 * 64), bin_masses g 64 j ≠ 0 := by
     rw [sum_bin_masses_eq_one 64 (by norm_num) g hg_supp hg_int]; exact one_ne_zero
-  have hc_sum : ∑ i, c i = 20 :=
+  have hc_sum : ∑ i, c i = 4 * 64 * 20 :=
     canonical_discretization_sum_eq_m g 64 20 (by norm_num) (by norm_num) h_mass_nz hg_nonneg
   obtain ⟨ℓ, s_lo, hℓ, h_exceeds⟩ := cascade_all_pruned c hc_sum
   have h_conv_fin_g : MeasureTheory.eLpNorm (MeasureTheory.convolution g g
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤ :=
     eLpNorm_convolution_scale_ne_top f (1/I) h_conv_fin
-  set W := (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / 20
-  have h_W_def : W = (∑ i ∈ contributing_bins 64 ℓ s_lo, (c i : ℝ)) / (20 : ℝ) := rfl
-  exact dynamic_threshold_sound 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
-    c ℓ s_lo hℓ W h_W_def h_exceeds g hg_nonneg hg_supp hg_int h_conv_fin_g rfl
+  exact dynamic_threshold_sound_cs 64 20 (7/5 : ℝ) (by norm_num) (by norm_num) (by norm_num : (0:ℝ) < 7/5)
+    c ℓ s_lo hℓ h_exceeds g hg_nonneg hg_supp hg_int h_conv_fin_g rfl
 
 end -- noncomputable section

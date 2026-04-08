@@ -1,5 +1,9 @@
 # Rigorous Correctness Audit: `lean/Sidon/TestValueBounds.lean`
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **File audited:** `lean/Sidon/TestValueBounds.lean` (661 lines)
 
 **Date:** 2026-03-25

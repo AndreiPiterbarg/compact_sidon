@@ -375,10 +375,7 @@ theorem gray_code_subtree_enumeration_completeness
 -- run_cascade.py: dyn_x = c_target * m² * ℓ/(4n) + 1 + eps_margin + 2*W
 -- where ℓ/(4n) scales ONLY c_target*m², NOT the correction terms.
 --
--- IMPORTANT: This formula differs from DynamicThreshold.lean's dyn_it
--- definition, which incorrectly scales the ENTIRE expression by ℓ/(4n).
 -- The formula here matches the actual Python code (run_cascade.py:1111-1114).
--- See the corresponding fix in DynamicThreshold.lean.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Claim 4.23: The dynamic threshold is monotone non-decreasing in W_int.

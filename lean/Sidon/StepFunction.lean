@@ -87,8 +87,8 @@ lemma step_function_integrable (n m : ℕ) (c : Fin (2 * n) → ℕ) :
 
 -- Helper: integral of step function = 1/(4n)
 lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) :
-    ∫ x, step_function n m c x = 1 / (4 * (n : ℝ)) := by
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) :
+    ∫ x, step_function n m c x = 1 := by
   have h_restrict : ∫ x, step_function n m c x = ∫ x in Set.Ico (-1 / 4 : ℝ) (1 / 4), step_function n m c x := by
     rw [ MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero ] ; unfold step_function ; aesop;
   have h_const : ∀ i : Fin (2 * n), ∫ x in Set.Ico (-1 / 4 + (i : ℝ) / (4 * n)) (-1 / 4 + (i + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m * (1 / (4 * n)) := by
@@ -128,7 +128,7 @@ lemma discrete_autoconvolution_nonneg (n m : ℕ) (c : Fin (2 * n) → ℕ) (k :
     grid point y_k, equals (1/(4nm²)) · conv_c[k].
     Grid point: y_k = -1/2 + (k+1)·Δ where Δ = 1/(4n). -/
 lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) (k : ℕ) :
     MeasureTheory.convolution (step_function n m c) (step_function n m c)
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume
       (-1/2 + (↑k + 1) * (1 / (4 * ↑n))) =

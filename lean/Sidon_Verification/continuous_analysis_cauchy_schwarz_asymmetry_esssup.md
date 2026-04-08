@@ -1,5 +1,9 @@
 # Audit Report: Continuous Analysis Core (Cauchy-Schwarz, Asymmetry Bound, Essential Supremum)
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Files audited:**
 1. `lean/Sidon/CauchySchwarz.lean` — Cauchy-Schwarz single-bin bound (Claims 4.5, 4.7, 4.8)
 2. `lean/Sidon/AsymmetryBound.lean` — Asymmetry bound (Claim 2.1)

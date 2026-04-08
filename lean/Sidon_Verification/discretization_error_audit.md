@@ -1,5 +1,9 @@
 # Correctness Audit: `DiscretizationError.lean`
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Date**: 2026-03-25
 **File**: `lean/Sidon/DiscretizationError.lean` (742 lines)
 **Status**: BLOCKED (upstream errors in `TestValueBounds.lean`; logical content audited below is sound)

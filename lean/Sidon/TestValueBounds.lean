@@ -180,7 +180,7 @@ private lemma step_function_continuousAt (n m : ℕ) (hn : n > 0)
       rfl
 
 lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (k : ℕ) :
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) (k : ℕ) :
     (MeasureTheory.eLpNorm
       (MeasureTheory.convolution (step_function n m c) (step_function n m c)
         (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
@@ -271,7 +271,7 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
 
 -- Helper: window sum bound implies test_value ≤ autoconvolution_ratio
 lemma window_sum_le_max_times (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
     test_value n m c ℓ s_lo ≤
       autoconvolution_ratio (step_function n m c) := by
   have h_test_value : test_value n m c ℓ s_lo = (1 / (4 * n * ℓ : ℝ)) * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), (4 * n / m : ℝ) ^ 2 * discrete_autoconvolution (fun i => (c i : ℝ)) k := by
@@ -297,7 +297,7 @@ lemma window_sum_le_max_times (n m : ℕ) (hn : n > 0) (hm : m > 0)
 
 /-- Claim 1.1: Test value ≤ ‖f*f‖∞ / (∫f)² for the step function. -/
 theorem test_value_le_Linfty (n m : ℕ) (hn : n > 0) (hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) :
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) :
     (max_test_value n m c : ℝ) ≤ autoconvolution_ratio (step_function n m c) := by
   obtain ⟨ℓ, s_lo, hℓ_mem, _, h_eq⟩ := max_test_value_le_max n m hn c
   rw [h_eq]

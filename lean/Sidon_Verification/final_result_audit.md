@@ -1,5 +1,10 @@
 # Correctness Audit: `lean/Sidon/FinalResult.lean`
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization. The Lean definitions have been updated to the C&S fine grid
+> (compositions summing to 4nm, heights = c_i/m). The proof chain needs
+> re-verification with the updated definitions.
+
 **Audited**: 2026-03-25
 **File**: `lean/Sidon/FinalResult.lean` (163 lines)
 **Role**: Capstone of the formal proof that the autoconvolution constant c >= 7/5 = 1.4

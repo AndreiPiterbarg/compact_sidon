@@ -1,5 +1,9 @@
 # Audit Report: Subtree Pruning, Sliding Window & Dynamic Threshold
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Files audited:**
 1. `lean/Sidon/SubtreePruning.lean` — Subtree pruning (Claim 4.4)
 2. `lean/Sidon/SlidingWindow.lean` — Sliding window and zero-bin skip (Claims 4.12, 4.13)

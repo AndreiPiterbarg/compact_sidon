@@ -1,5 +1,9 @@
 # Audit Report: Discretization & Composition Properties
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Files audited:**
 1. `lean/Sidon/ReversalSymmetry.lean` — Reversal symmetry (Claims 3.3a, 3.3e)
 2. `lean/Sidon/RefinementMass.lean` — Refinement mass preservation (Claims 3.2c, 4.6)

@@ -1,5 +1,12 @@
 # Audit Report: Core Definitions, Foundational Lemmas & Step Function
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m, heights = (4n/m)·c_i). The code and
+> Lean definitions have been updated to the C&S fine grid (compositions summing to
+> 4nm, heights = c_i/m). Key changes: `canonical_discretization` now produces
+> integers summing to 4nm, `test_value` uses heights c_i/m, `is_composition`
+> requires ∑c_i = 4nm. The proofs downstream of these definitions need re-verification.
+
 **Files audited:**
 1. `lean/Sidon/Defs.lean` — Core definitions (autoconvolution ratio, discrete autoconvolution, test values, bin masses, canonical discretization, etc.)
 2. `lean/Sidon/Foundational.lean` — Foundational lemmas F1-F15 (discretization-cumulative distribution bridge, telescoping, monotonicity)
@@ -34,7 +41,7 @@
   - Scaling: Lean `a i = (4 * n : ℝ) / m * (c i : ℝ)` = Python `scale = 4.0 * n_half * inv_m; ai = batch_int[b, i] * scale`. Exact match.
   - Window range: Lean `Finset.Icc s_lo (s_lo + ℓ - 2)` = Python `conv[s_lo..s_lo+n_cv-1]` where `n_cv = ell - 1`. Both sum `ℓ - 1` consecutive conv entries. Exact match.
   - Normalization: Lean `1 / (4 * n * ℓ)` = Python `inv_norm = 1.0 / (4.0 * n_half * ell)`. Exact match.
-- **`is_composition`** ↔ `compositions.py`: all generators produce vectors summing to `S = m`. Exact match.
+- **`is_composition`** ↔ `compositions.py`: the Lean formalization uses compositions summing to `S = m`; the Python code now uses the fine grid where `S = 4nm`. The Lean's abstract parameter `m` maps to the concrete `m` in the final theorem instantiation (see `FinalResult.lean`).
 - **`max_test_value`** ↔ `test_values.py:85-101`: Lean `ℓ ∈ Finset.Icc 2 (2*d)` = Python `range(2, 2*d+1)`. Lean `s_lo ∈ Finset.range (2*d)` is a superset of Python's `range(conv_len - n_cv + 1) = range(2d - ell + 1)`. Extra Lean windows produce smaller test values (include zero conv entries), so the computed maximum is identical.
 
 ### Mathematical verification
@@ -76,7 +83,7 @@ This approximates `(1/ℓδ) · ∫_{window} (f*f)(y) dy` for the step function,
 
 ### Python comparison
 
-No direct Python counterparts for the foundational lemmas — these bridge the continuous analysis to the discrete computation. The key result F15 (`∑ c_i = m`) corresponds to the invariant maintained by all Python composition generators (`compositions.py`), which always produce vectors summing to `S = m`.
+No direct Python counterparts for the foundational lemmas — these bridge the continuous analysis to the discrete computation. The key result F15 (`∑ c_i = m`) corresponds to the invariant maintained by all Python composition generators (`compositions.py`), which now produce vectors summing to `S = 4nm` (fine grid). The Lean parameter `m` is abstract and maps to the concrete `m=20` in `FinalResult.lean`.
 
 ### Mathematical verification
 

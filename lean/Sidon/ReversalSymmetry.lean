@@ -56,11 +56,11 @@ theorem autoconv_reversal_symmetry {d : ℕ} (hd : d > 0) (a : Fin d → ℝ)
   convert h_change using 4;
   omega
 
-/-- Claim 3.3e (helper): left sum + reversed left sum = m. -/
+/-- Claim 3.3e (helper): left sum + reversed left sum = 4*n*m. -/
 theorem left_sum_reversal (n : ℕ) (hn : n > 0) (m : ℕ)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m) :
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) :
     (∑ i : Fin n, c ⟨i.1, by omega⟩) +
-    (∑ i : Fin n, c ⟨2 * n - 1 - i.1, by omega⟩) = m := by
+    (∑ i : Fin n, c ⟨2 * n - 1 - i.1, by omega⟩) = 4 * n * m := by
   rw [ ← hc, eq_comm ]
   generalize_proofs at *;
   have h_split : Finset.sum (Finset.univ : Finset (Fin (2 * n))) (fun i => c i) = Finset.sum (Finset.image (fun i : Fin n => ⟨i.val, by omega⟩) Finset.univ) (fun i => c i) + Finset.sum (Finset.image (fun i : Fin n => ⟨2 * n - 1 - i.val, by omega⟩) Finset.univ) (fun i => c i) := by
@@ -81,14 +81,14 @@ theorem left_sum_reversal (n : ℕ) (hn : n > 0) (m : ℕ)
 
 /-- Claim 3.3e: asymmetry condition is symmetric under reversal. -/
 theorem asymmetry_reversal_symmetric (n : ℕ) (hn : n > 0) (m : ℕ) (hm : 0 < m)
-    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = m)
+    (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m)
     (threshold : ℝ) (ht : 0 ≤ threshold) (ht1 : threshold ≤ 1)
-    (L : ℝ) (hL : L = (∑ i : Fin n, (c ⟨i.1, by omega⟩ : ℝ)) / m)
+    (L : ℝ) (hL : L = (∑ i : Fin n, (c ⟨i.1, by omega⟩ : ℝ)) / (4 * n * m))
     (h_prune : L ≥ threshold ∨ 1 - L ≥ threshold) :
-    let L_rev := (∑ i : Fin n, (c ⟨2 * n - 1 - i.1, by omega⟩ : ℝ)) / m
+    let L_rev := (∑ i : Fin n, (c ⟨2 * n - 1 - i.1, by omega⟩ : ℝ)) / (4 * n * m)
     L_rev ≥ threshold ∨ 1 - L_rev ≥ threshold := by
-  have h_sum : L + (∑ i : Fin n, (c ⟨2 * n - 1 - i.val, by omega⟩ : ℝ)) / m = 1 := by
-    have h_sum : (∑ i : Fin n, (c ⟨i.1, by omega⟩ : ℝ)) + (∑ i : Fin n, (c ⟨2 * n - 1 - i.1, by omega⟩ : ℝ)) = m := by
+  have h_sum : L + (∑ i : Fin n, (c ⟨2 * n - 1 - i.val, by omega⟩ : ℝ)) / (4 * n * m) = 1 := by
+    have h_sum : (∑ i : Fin n, (c ⟨i.1, by omega⟩ : ℝ)) + (∑ i : Fin n, (c ⟨2 * n - 1 - i.1, by omega⟩ : ℝ)) = 4 * n * m := by
       norm_cast; exact left_sum_reversal n hn m c hc;
     generalize_proofs at *; (
     rw [ hL, ← add_div, h_sum, div_self ( by positivity ) ]);

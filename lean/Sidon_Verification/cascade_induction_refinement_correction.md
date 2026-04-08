@@ -1,5 +1,9 @@
 # Audit Report: Cascade Induction, Refinement Support & Correction Terms
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Files audited:**
 1. `lean/Sidon/CascadeInduction.lean` — Cascade completeness (Claim 3.4)
 2. `lean/Sidon/RefinementSupport.lean` — Refinement & support properties (Claims 2.2, 2.3)

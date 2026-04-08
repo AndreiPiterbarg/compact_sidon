@@ -34,7 +34,7 @@ theorem support_convolution_subset_add {f : ℝ → ℝ} {s : Set ℝ} (hf : Fun
 
 /-- The boundary between the first n bins and the last n bins is exactly at x = 0. -/
 theorem left_frac_exact (n m : ℕ) (hn : n > 0) (_hm : m > 0)
-    (c : Fin (2 * n) → ℕ) (_hc : ∑ i, c i = m) :
+    (c : Fin (2 * n) → ℕ) (_hc : ∑ i, c i = 4 * n * m) :
     let δ := (1 : ℝ) / (4 * n)
     (-1/4 : ℝ) + n * δ = 0 := by
   field_simp [hn]

@@ -1,5 +1,9 @@
 # Audit Report: Incremental Updates & Iteration Machinery
 
+> **OUTDATED (2026-04-07):** This audit was conducted against the old coarse-grid
+> parameterization (compositions summing to m). The Lean definitions have been updated
+> to the C&S fine grid (compositions summing to 4nm, heights = c_i/m). Re-audit needed.
+
 **Files audited:**
 1. `lean/Sidon/IncrementalAutoconv.lean` — Incremental autoconvolution (Claim 4.2)
 2. `lean/Sidon/FusedKernel.lean` — Fused kernel and quick-check (Claims 4.1, 4.3)
