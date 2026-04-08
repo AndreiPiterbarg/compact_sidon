@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** The formulas in this document use the old coarse-grid parameterization (compositions summing to $S = m$, heights $a_i = c_i \cdot 4n/m$). The code now uses the C&S fine grid (compositions summing to $S = 4nm$, heights $a_i = c_i/m$). Under the fine grid, the threshold formula becomes `ws > floor((c_target * m^2 + 3 + W_int/(2n) + eps) * 4n*ell)` and `W_g = W_{\text{int}}/(4nm)`. The core insight of this document -- that the entire threshold (including correction) must be scaled uniformly -- remains valid under both parameterizations.
+
 # Explanation of the C&S Threshold Fix (2026-04-04)
 
 ## What Was Wrong
@@ -118,7 +120,7 @@ $$\text{ws\_int} > \left(c_{\text{target}} \cdot m^2 + 3 + 2W_{\text{int}} + \va
 
 Same structure: everything scaled by $\ell/(4n)$, but using per-window $W_{\text{int}}$ (from the discrete vector) instead of the global maximum $m$. The $+3$ (instead of $+1$) accounts for the cumulative rounding correction.
 
-**Note (2026-04-07):** The actual code caps the W-refined correction at the simple Lemma 3 bound: `min(2m+1, 3+2*W_int)`. This ensures the W-refinement never exceeds the basic bound $(2m+1)/m^2 = 2/m + 1/m^2$, which would be unsound. The cap only activates when $W_{\text{int}} > m - 1$ (nearly all mass in the contributing bins). The `eps_margin` is added as a flat term outside the scaling, not inside.
+**Note (2026-04-07):** The above uses the old coarse-grid formula. Under the fine grid (compositions summing to $S = 4nm$), the integer-space threshold becomes `ws > floor((c_target*m² + 3 + W_int/(2n) + eps) * 4n*ell)`, where `W_int` ranges up to `4nm`. The code caps the W-refined correction at the simple Lemma 3 bound: `min(2m+1, 3+W_int/(2n))`. The `eps_margin` is added as a flat term inside the base, not outside the scaling.
 
 ### Comparison at $\ell = 2$, $d = 32$ ($n = 16$), $m = 20$, $W_{\text{int}} = 10$:
 

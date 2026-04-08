@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** The code now uses the C&S fine grid (compositions summing to $S = 4nm$, heights $= c_i/m$). With this parameterization, the C&S Lemma 3 correction $2/m + 1/m^2$ applies directly, and Formula A (with its $4n/\ell$ factor) is no longer needed. The analysis below remains mathematically correct as a per-window bound for the old coarse-grid parameterization (compositions summing to $m$, heights $= c_i \cdot 4n/m$), but it is no longer the operative bound in the code.
+
 # Per-Window Discretization Error Bound: Complete Proof
 
 ## Summary of Results

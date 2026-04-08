@@ -38,22 +38,26 @@ quantifies its impact.
 
 ## 2. Notation
 
+> **Note:** The notation below uses the old coarse-grid parameterization ($\sum c_i = m$, heights $a_i = c_i \cdot 4n/m$). The code now uses the C&S fine grid ($\sum c_i = 4nm$, heights $a_i = c_i/m$), where $\mathrm{TV} = \mathrm{ws_{int}}/(4n \cdot \ell \cdot m^2)$ and $W = W_{\mathrm{int}}/(4nm)$. See `CLAUDE.md` for the current formulas. The analysis in this document remains correct for the old parameterization.
+
 | Symbol | Meaning |
 |--------|---------|
 | $d = 2n$ | number of bins (support $[-\tfrac14,\tfrac14]$, each bin width $\tfrac{1}{2d}$) |
-| $m$ | mass quantization: integer masses $c_i \ge 0$, $\sum c_i = m$ |
-| $\varepsilon = 1/m$ | mass resolution |
+| $m$ | mass quantization: integer masses $c_i \ge 0$, $\sum c_i = m$ (old coarse grid; now $\sum c_i = 4nm$) |
+| $\varepsilon = 1/m$ | mass resolution (height granularity) |
 | $\ell$ | window length in convolution space ($\ell = 2, \dots, 2d$) |
 | $\mathrm{ws_{int}}$ | integer window sum: $\displaystyle\sum_{s=s_0}^{s_0+\ell-2}\sum_{i+j=s} c_i c_j$ |
 | $W_{\mathrm{int}}$ | integer contributing-bin mass: $\displaystyle\sum_{i \in \mathcal{B}} c_i$ |
-| $W = W_{\mathrm{int}}/m$ | probability-space contributing-bin mass |
+| $W = W_{\mathrm{int}}/m$ | probability-space contributing-bin mass (old coarse grid; now $W = W_{\mathrm{int}}/(4nm)$) |
 
-The **test value** for window $(\ell, s_0)$ is
+The **test value** for window $(\ell, s_0)$ is (old coarse grid):
 
 $$\mathrm{TV}(\ell, s_0) \;=\; \frac{4n}{m^2 \ell} \;\mathrm{ws_{int}}.$$
 
+Under the fine grid: $\mathrm{TV} = \mathrm{ws_{int}}/(4n \cdot \ell \cdot m^2)$.
+
 This matches `test_values.py:89` — $\mathrm{tv} = \mathrm{ws} \cdot (4 n_\mathrm{half} \cdot \ell)^{-1}$
-— after accounting for the a-coordinate scaling $a_i = (4n/m) c_i$.
+— after accounting for the a-coordinate scaling $a_i = c_i/m$ (fine grid).
 
 ---
 

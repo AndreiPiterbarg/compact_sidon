@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** The code now uses the C&S fine grid (compositions summing to $S = 4nm$, heights $= c_i/m$). The height conversion formula $a_i = c_i \cdot 4n/m$ referenced below applies to the old coarse-grid parameterization. Under the fine grid, $a_i = c_i/m$ directly, and the test value formulas simplify accordingly.
+
 # Part 3: Autoconvolution, Test Values & Window Scan — Verification Report
 
 **Scope:** Verify the core mathematical computation: given a mass vector, compute the test value correctly.

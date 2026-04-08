@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** This analysis applies to the old coarse-grid parameterization (compositions summing to $m$, heights $= c_i \cdot 4n/m$). The code now uses the C&S fine grid (compositions summing to $S = 4nm$, heights $= c_i/m$), where the Lemma 3 correction $2/m + 1/m^2$ is valid directly. Formula A vs Formula B is no longer a practical concern under the fine grid, since the $4n/\ell$ factor arose from the coarse-grid height granularity mismatch.
+
 # Soundness Analysis of the MATLAB Pruning Threshold (Formula B)
 
 ## Verdict

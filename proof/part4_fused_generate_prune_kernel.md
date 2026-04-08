@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** This report was written against the old coarse-grid parameterization (compositions summing to $S = m$, threshold with unscaled correction `1 + 2*W_int`). The code now uses the C&S fine grid (compositions summing to $S = 4nm$, threshold `(c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell`). The kernel structure and correctness arguments are unchanged; only the threshold formula and composition sum differ.
+
 # Part 4: Fused Generate+Prune Kernel -- Verification Report
 
 **Scope:** Verify the fused kernel `_fused_generate_and_prune` (run_cascade.py:499-988) against the MATLAB baseline (initial_baseline.m:132-243) and the non-fused pure-Python reference pipeline.

@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** The code now uses the C&S fine grid: compositions sum to $S = 4nm$ with heights $a_i = c_i/m$ (multiples of $1/m$). The integer encoding and normalization formulas below describe the old coarse-grid parameterization ($\sum c_i = m$, heights $= c_i \cdot 4n/m$). Under the fine grid, the Lemma 3 correction $2/m + 1/m^2$ applies directly without the $4n$ scaling factor.
+
 # Part 1: Mathematical Framework & Parameter Derivations — Rigorous Verification
 
 **Date:** 2026-03-08

@@ -1,3 +1,5 @@
+> **Note (2026-04-07):** The code now uses the C&S fine grid: compositions sum to $S = 4nm$ (not $m$), and heights are $c_i/m$. References to "$S = m$" below reflect the old coarse-grid parameterization. The cascade structure and completeness arguments are unchanged; only the sum constraint and height formula differ.
+
 # Part 6: Cascade Orchestration, Completeness Argument & Deduplication — Verification Report
 
 **Scope:** Verify the cascade end-to-end: every configuration in the search space is either pruned or refined until exhausted. Verify deduplication correctness and checkpoint integrity.
@@ -33,11 +35,11 @@
 
 ## Item 1: L0 Completeness
 
-**Claim:** `run_level0` enumerates every non-negative integer vector of length $d = 2 \cdot n_{\text{half}}$ summing to $S = m$, and either prunes it (soundly) or includes it as a survivor.
+**Claim:** `run_level0` enumerates every non-negative integer vector of length $d = 2 \cdot n_{\text{half}}$ summing to $S = 4nm$ (formerly $S = m$ under the old coarse grid), and either prunes it (soundly) or includes it as a survivor.
 
 ### Proof
 
-**Enumeration.** Line 1229 calls `generate_compositions_batched(d, S, batch_size=200_000)`. This generator yields ALL $\binom{S+d-1}{d-1}$ compositions (verified in Part 2, Item 1). Every composition is processed.
+**Enumeration.** Line 1229 calls `generate_compositions_batched(d, S, batch_size=200_000)` with $S = 4nm$. This generator yields ALL $\binom{S+d-1}{d-1}$ compositions (verified in Part 2, Item 1). Every composition is processed.
 
 **Filter chain** (lines 1233-1253): For each batch, three filters are applied in sequence:
 
@@ -160,7 +162,7 @@ The child-parent relationship (fused kernel, lines 590-592):
 
 $$\text{child}[2k] + \text{child}[2k+1] = \text{parent}[k], \quad k = 0, \ldots, d_{\text{parent}} - 1$$
 
-This splits each parent bin $[k/(4n_{\text{parent}}),\; (k+1)/(4n_{\text{parent}}))$ into two child bins of half the width: $[2k/(4n_{\text{child}}),\; (2k+1)/(4n_{\text{child}}))$ and $[(2k+1)/(4n_{\text{child}}),\; (2k+2)/(4n_{\text{child}}))$. Total mass is preserved: $\sum \text{child} = \sum \text{parent} = m$.
+This splits each parent bin $[k/(4n_{\text{parent}}),\; (k+1)/(4n_{\text{parent}}))$ into two child bins of half the width: $[2k/(4n_{\text{child}}),\; (2k+1)/(4n_{\text{child}}))$ and $[(2k+1)/(4n_{\text{child}}),\; (2k+2)/(4n_{\text{child}}))$. Total mass is preserved: $\sum \text{child} = \sum \text{parent} = S$ (where $S = 4nm$).
 
 This matches MATLAB's refinement (initial_baseline.m, lines 86, 140-153): `numBins = 2*length(bin)`, with each parent bin split into two sub-bins via `partialBin = [subBins; weight-subBins]'`.
 
