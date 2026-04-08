@@ -20,18 +20,17 @@
 
 /* ───────────────────── compile-time constants ───────────────────── */
 
-/* Maximum supported dimensions. */
-#define MAX_D_PARENT  32
-#define MAX_D_CHILD   64
-#define MAX_CONV_LEN  127          /* 2*MAX_D_CHILD - 1           */
-#define MAX_ELL_COUNT 127          /* 2*MAX_D_CHILD - 1           */
+/* Maximum supported dimensions.
+ * Sized for n_half=3 cascade through L5: d_parent=96, d_child=192.
+ * Static shared memory ~24 KB per block (fits 5+ blocks/SM on H100/B200). */
+#define MAX_D_PARENT  128
+#define MAX_D_CHILD   256
+#define MAX_CONV_LEN  511          /* 2*MAX_D_CHILD - 1           */
+#define MAX_ELL_COUNT 511          /* 2*MAX_D_CHILD - 1           */
 #define WARP_SIZE     32
 
 /* Survivor staging-buffer capacity per block (shared memory). */
 #define SURV_CAP      64
-
-/* Quick-check cache: number of top killing windows to track. */
-#define QC_CACHE_K    5
 
 /* Subtree pruning: check at multiple J boundaries for more pruning.
  * At d_child=64, the partial conv signal is weaker (thresholds scale with
@@ -51,7 +50,7 @@ struct CascadeParams {
     const int32_t*  parents;          /* [num_parents x d_parent]         */
     const int32_t*  lo_arrays;        /* [num_parents x d_parent]         */
     const int32_t*  hi_arrays;        /* [num_parents x d_parent]         */
-    const int32_t*  threshold_table;  /* [ell_count x (m+1)], int32 safe  */
+    const int32_t*  threshold_table;  /* [ell_count x (S_child+1)]        */
     const int32_t*  ell_order;        /* [ell_count]                      */
     int32_t*        survivors;        /* [max_survivors x d_child]        */
     int32_t*        survivor_count;   /* scalar, global atomic            */
@@ -73,7 +72,9 @@ extern "C" {
 
 /*
  * Precompute the int32 threshold table on the host.
- *   table:  output, size ell_count * (m+1), row-major [ell_idx][W_int].
+ *   table:  output, size ell_count * (S_child+1), row-major [ell_idx][W_int].
+ *   S_child = 4 * n_half_child * m (fine-grid total mass).
+ *   W_int ranges from 0 to S_child (fine-grid mass in overlapping bins).
  *   ell_count = 2*d_child - 1.
  *   ell_idx = ell - 2  (ell ranges from 2 to 2*d_child).
  */

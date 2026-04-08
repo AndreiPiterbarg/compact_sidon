@@ -71,39 +71,41 @@ extern __global__ void cascade_kernel(
 /* ═══════════════════════════════════════════════════════════════════
  *  build_threshold_table
  *
- *  Precomputes int32 thresholds on the CPU.  C&S Lemma 3 formula:
+ *  Precomputes int32 thresholds on the CPU.  C&S Lemma 3 formula
+ *  (fine grid, S = 4nm):
  *
- *    threshold = floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n))
+ *    threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps_margin) * 4n*ell)
  *
- *  The ENTIRE expression (including correction) is scaled by ell/(4n)
- *  because Lemma 3 is a pointwise bound on (g*g)(x) and test values
- *  are window averages.  min(2m+1, ...) caps at the simple Lemma 3
- *  bound (2/m + 1/m^2) for soundness.  eps_margin is flat (not scaled).
+ *  The expression is scaled by 4n*ell (the fine-grid window-size factor).
+ *  Lemma 3 is a pointwise bound on (g*g)(x); test values are window
+ *  averages.  eps_margin is flat (not scaled).
  *  Matches the CPU fused kernel (_fused_generate_and_prune_gray).
  *
  *  where:
  *    n = n_half_child = d_child / 2
+ *    S = 4*n*m (fine-grid total mass; compositions sum to S)
  *    eps_margin   = 1e-9 * m^2
  *    ell ranges from 2 to 2*d_child (ell_idx = ell - 2)
- *    W_int ranges from 0 to m
+ *    W_int ranges from 0 to S (fine-grid mass in overlapping bins)
  * ═══════════════════════════════════════════════════════════════════ */
 void build_threshold_table(int32_t* table,
                            int d_child, int m, double c_target)
 {
     int n_half_child = d_child / 2;
+    int S_child = 4 * n_half_child * m;  /* Fine grid: compositions sum to 4nm */
     double m_d = (double)m;
-    double inv_4n = 1.0 / (4.0 * (double)n_half_child);
+    double four_n = 4.0 * (double)n_half_child;
+    double n_half_d = (double)n_half_child;
     double eps_margin = 1e-9 * m_d * m_d;
     double cs_base_m2 = c_target * m_d * m_d;
 
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int ell_idx = ell - 2;
-        double scale_ell = (double)ell * inv_4n;
-        for (int w = 0; w <= m; w++) {
-            double dyn_x = (cs_base_m2 + 3.0 + 2.0 * (double)w + eps_margin) * scale_ell;
-            /* int32 is safe: max threshold = (c_target*m^2 + 3 + 2m + eps) at ell=4n
-             * ~ 603 for m=20.  All values << INT32_MAX (2,147,483,647). */
-            table[ell_idx * (m + 1) + w] = (int32_t)(dyn_x);
+        double scale_ell = (double)ell * four_n;
+        for (int w = 0; w <= S_child; w++) {
+            double corr_w = 3.0 + (double)w / (2.0 * n_half_d);
+            double dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell;
+            table[ell_idx * (S_child + 1) + w] = (int32_t)(dyn_x);
         }
     }
 }
@@ -197,9 +199,12 @@ int launch_cascade_kernel(const CascadeParams* p)
     *h_progress_surv = 0;
 
     /* Grid configuration.
-     * Always at least 32 threads (one full warp) so that warp-level
-     * primitives (__ballot_sync, __shfl_down_sync) work correctly. */
-    int block_size = (p->d_child < 32) ? 32 : p->d_child;
+     * Round up to next multiple of 32 (warp size) so that every warp is
+     * full.  A partial last warp (e.g. d_child=48 → 16 threads in warp 1)
+     * causes __shfl_down_sync(0xFFFFFFFF) to reference non-existent lanes.
+     * Threads with lane >= d_child are idle (loop bounds exclude them). */
+    int block_size = ((p->d_child + 31) / 32) * 32;
+    if (block_size < 32) block_size = 32;
 
     int device_id = 0;
     cudaDeviceProp prop;
@@ -535,20 +540,19 @@ static bool compute_bin_ranges(
      * to match CPU source of truth; see pruning.py docstring.) */
     double corr = 2.0 / (double)m + 1.0 / ((double)m * (double)m);
     double thresh = c_target + corr + 1e-9;
-    int x_cap = (int)floor((double)m * sqrt(thresh / (double)d_child));
-    /* Cauchy-Schwarz bound: ||f*f||_∞ ≥ d_child·μ_i².  For adjusted bins
-     * (canonical rounding +1), μ_i can be as low as (c_i-1)/m, so add +1.
-     * Matches CPU _compute_bin_ranges exactly. */
-    int x_cap_cs = (int)floor((double)m * sqrt(c_target / (double)d_child)) + 1;
+    /* Fine grid: height = c/m, TV(ell=2) = c^2/(8n*m^2).
+     * c >= m*sqrt(4*d_child*thresh) implies TV >= thresh. */
+    int x_cap = (int)floor((double)m * sqrt(4.0 * (double)d_child * thresh));
+    int x_cap_cs = (int)floor((double)m * sqrt(4.0 * (double)d_child * c_target)) + 1;
     x_cap = std::min(x_cap, x_cap_cs);
-    x_cap = std::min(x_cap, m);
     x_cap = std::max(x_cap, 0);
 
     *total_children = 1;
     for (int i = 0; i < d_parent; i++) {
         int b_i = parent[i];
-        int lo = std::max(0, b_i - x_cap);
-        int hi = std::min(b_i, x_cap);
+        /* Fine grid: child_left + child_right = 2*b_i */
+        int lo = std::max(0, 2 * b_i - x_cap);
+        int hi = std::min(2 * b_i, x_cap);
         if (lo > hi) return false;
         lo_out[i] = lo;
         hi_out[i] = hi;
@@ -578,21 +582,25 @@ static bool tighten_ranges(
 {
     int conv_len = 2 * d_child - 1;
     int n_half_child = d_child / 2;
+    int S_child = 4 * n_half_child * m;
     double m_d = (double)m;
-    double inv_4n = 1.0 / (4.0 * (double)n_half_child);
+    double four_n = 4.0 * (double)n_half_child;
+    double n_half_d = (double)n_half_child;
     double eps_margin = 1e-9 * m_d * m_d;
     double c_target_m2 = c_target * m_d * m_d;
-    int m_plus_1 = m + 1;
+    int S_plus_1 = S_child + 1;
     int ell_count = conv_len;
 
-    /* C&S Lemma 3 threshold: floor((c_target*m^2 + 3 + 2*W_int + eps_margin) * ell/(4n)) */
-    std::vector<int32_t> threshold_table(ell_count * m_plus_1);
+    /* Fine grid (S = 4nm): threshold = floor((c_target*m^2 + 3 + W/(2n) + eps) * 4n*ell)
+     * W_int ranges 0..S (fine-grid mass in overlapping bins). */
+    std::vector<int32_t> threshold_table(ell_count * S_plus_1);
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int idx = ell - 2;
-        double scale_ell = (double)ell * inv_4n;
-        for (int w = 0; w <= m; w++) {
-            double dyn_x = (c_target_m2 + 3.0 + 2.0 * (double)w + eps_margin) * scale_ell;
-            threshold_table[idx * m_plus_1 + w] = (int32_t)(dyn_x);
+        double scale_ell = (double)ell * four_n;
+        for (int w = 0; w <= S_child; w++) {
+            double corr_w = 3.0 + (double)w / (2.0 * n_half_d);
+            double dyn_x = (c_target_m2 + corr_w + eps_margin) * scale_ell;
+            threshold_table[idx * S_plus_1 + w] = (int32_t)(dyn_x);
         }
     }
 
@@ -607,7 +615,7 @@ static bool tighten_ranges(
         /* Build child_min: each bin at its independent minimum. */
         for (int q = 0; q < d_parent; q++) {
             child_min[2*q]   = lo[q];
-            child_min[2*q+1] = parent[q] - hi[q];
+            child_min[2*q+1] = 2 * parent[q] - hi[q];
         }
 
         /* Full autoconvolution of child_min → lower bound. */
@@ -628,7 +636,7 @@ static bool tighten_ranges(
         for (int q = 0; q < d_parent; q++) {
             max_child_prefix[2*q+1] = max_child_prefix[2*q] + hi[q];
             max_child_prefix[2*q+2] = max_child_prefix[2*q+1]
-                                      + (parent[q] - lo[q]);
+                                      + (2 * parent[q] - lo[q]);
         }
 
         for (int p = 0; p < d_parent; p++) {
@@ -671,7 +679,7 @@ static bool tighten_ranges(
                     int hb = std::min(d_child - 1, ell - 2);
                     int64_t W_max = max_child_prefix[hb + 1];
                     if (W_max > m) W_max = m;
-                    if (ws > threshold_table[ell_idx * m_plus_1 + (int)W_max])
+                    if (ws > threshold_table[ell_idx * S_plus_1 + (int)W_max])
                         return true;
 
                     for (int s = 1; s < n_windows; s++) {
