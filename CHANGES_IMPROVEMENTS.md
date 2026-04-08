@@ -15,7 +15,7 @@ categories, each requiring a different measurement approach.
 
 ### Category A: Pruning Power (changes that affect how many children survive)
 
-**Changes:** §1, §2, §3, §4, §12, §13, §15, §16
+**Changes:** §1, §2, §3, §4, §12, §13, §15, §16, §23, §24
 
 **How to measure:** Run a fixed cascade level (e.g. L2→L3 with n_half=2,
 m=20, c_target=1.40) twice: once with the change enabled, once with it
@@ -40,9 +40,19 @@ survivor count changes (it should not — these are performance
 optimisations that do not affect pruning power, only speed). If the
 survivor count is identical, these belong in Category B instead.
 
+For §23 (arc consistency), compare total_children (product of ranges)
+before and after `_tighten_ranges`. Also count parents eliminated
+entirely (range becomes empty). Run on the same parent set with and
+without tightening and compare both Cartesian product sizes and final
+survivor counts.
+
+For §24 (Cauchy-Schwarz cap), compare x_cap with and without the CS
+bound. Measure total_children with x_cap_energy alone vs
+min(x_cap_energy, x_cap_cs).
+
 ### Category B: Per-Child Cost (changes that reduce work per child without affecting which children survive)
 
-**Changes:** §5, §6, §7, §8, §9, §10, §11, §15, §16, §21
+**Changes:** §5, §6, §7, §8, §9, §10, §11, §15, §16, §21, §26
 
 **How to measure:** Run the fused kernel on a fixed parent set (e.g.
 1000 parents from L2 checkpoint). Measure **wall-clock time** and
@@ -71,7 +81,7 @@ sets with and without quick-check.
 
 ### Category C: Search Space Reduction (changes that reduce the number of children enumerated)
 
-**Changes:** §14, §22
+**Changes:** §14, §22, §25
 
 **How to measure:**
 
@@ -79,6 +89,12 @@ For §14 (canonical symmetry): the reduction is exactly 2× by
 construction — each composition and its reversal are equivalent, and
 only one is kept. Verify by counting total children enumerated with and
 without the canonical filter.
+
+For §25 (mass-based palindrome grid): compare L0 survivor counts and
+enumeration sizes between the standard `run_level0` (all compositions)
+and `run_level0_mass` (palindromic only). Also compare subsequent level
+branching factors — palindromic parents have only `d_parent/2` free
+cursor variables vs `d_parent` in the standard cascade.
 
 For §22 (right-to-left ordering): this does not change the set of
 children enumerated. It changes the effectiveness of subtree pruning
@@ -171,6 +187,23 @@ speedup factors will overcount.
     Measuring §2 in isolation requires §1 to be correct.
     The meaningful comparison is: flat threshold (§1 only)
     vs W-refined threshold (§1 + §2).
+
+§23 (arc consistency) ──amplifies──▶ §12 (subtree pruning)
+    Tighter cursor ranges reduce the Cartesian product.
+    Smaller products mean subtree pruning (§12) fires on
+    smaller subtrees but the PROPORTION skipped may change.
+
+§23 (arc consistency) ──overlaps──▶ §24 (Cauchy-Schwarz cap)
+    Both tighten cursor ranges before enumeration. §24 sets
+    the initial cap, §23 iteratively tightens further. §23
+    subsumes §24's effect for positions it successfully
+    tightens, but §24 provides a cheap initial narrowing
+    that makes §23 converge faster.
+
+§25 (palindrome grid) ──replaces──▶ §14 (canonical symmetry) at L0
+    The palindrome grid generates only self-reversing
+    compositions at L0. Canonical reduction (§14) still
+    applies at L1+ where children are no longer palindromic.
 ```
 
 **Measurement protocol to avoid double-counting:**
@@ -265,6 +298,10 @@ speedup factors will overcount.
    §13 min-contrib    No                    Speed (tighter §12)
    §15 ℓ=2 shortcut   No                    Speed
    §16 pair-sum       No                    Speed
+   §23 arc consistency Yes                   Fewer children enumerated
+   §24 C-S cap        Yes                   Fewer children enumerated
+   §25 palindrome     Yes                   Smaller L0 search space
+   §26 unrolled conv  No                    Speed
    ```
 
    For the "speed only" mechanisms, the right metric is
@@ -275,7 +312,7 @@ speedup factors will overcount.
    §17 int32/int64, §19 sort-dedup) can be measured by disabling
    one at a time. Their contributions do not overlap.
 
-5. **Final total: build up from the naive baseline.**
+6. **Final total: build up from the naive baseline.**
    Start from the simplest correct implementation (generate all
    children, full O(d²) conv, flat threshold, sequential ℓ order,
    no quick-check, no subtree pruning, no symmetry reduction).
@@ -601,3 +638,80 @@ for subtree pruning a **left prefix** of `child[]` — the region most
 likely to be concentrated and thus exceed the threshold.
 
 **Reference:** `run_cascade.py:1246–1256`
+
+---
+
+## 23. Arc Consistency — Pre-Enumeration Range Tightening
+
+Before enumerating children, the cursor ranges `[lo_arr[i], hi_arr[i]]`
+are tightened by removing provably-infeasible edge values. For each
+position `p` and each edge value `v`, the algorithm computes a lower
+bound on the window sum when all OTHER positions take their minimum-
+contribution values (full autoconvolution of `child_min` plus the
+incremental delta from position `p` taking value `v`). If this lower
+bound exceeds the pruning threshold for ANY window, then `v` cannot
+produce a surviving child and is removed from the range.
+
+This is iterated up to `d_parent + 1` rounds until convergence (no
+range changes). The net effect is smaller Cartesian products before
+enumeration begins, sometimes eliminating parents entirely (range
+becomes empty → zero children).
+
+Soundness: uses `W_int_max` (maximum possible mass in window) for the
+threshold lookup, which is the highest (hardest-to-exceed) threshold.
+Since the minimum window sum already exceeds this conservative
+threshold, every child with `cursor[p] = v` will also exceed the actual
+(lower) threshold.
+
+**Reference:** `run_cascade.py:1748–1998`
+
+---
+
+## 24. Cauchy-Schwarz Cursor Cap
+
+The per-bin cursor cap `x_cap` (maximum allowed child bin value) is
+tightened using Cauchy-Schwarz in addition to the energy bound:
+
+```
+x_cap_energy = floor(m * sqrt(4 * d_child * (c_target + correction)))
+x_cap_cs     = floor(m * sqrt(4 * d_child * c_target)) + 1
+x_cap        = min(x_cap_energy, x_cap_cs)
+```
+
+The Cauchy-Schwarz bound is independent of the correction term and
+provides a tighter cap when the correction is large relative to
+`c_target`. This reduces the size of cursor ranges before enumeration.
+
+**Reference:** `run_cascade.py:1726–1728`
+
+---
+
+## 25. Mass-Based Palindrome Grid (Alternative L0)
+
+An alternative L0 generator uses a mass-based grid with palindromic
+symmetry: compositions of `n_half` elements summing to `m` (half-domain)
+are mirrored to create palindromic `2*n_half`-element vectors summing to
+`2m`. This exploits the fact that the autoconvolution is symmetric, so
+only palindromic (self-reversing) compositions need to be tested at L0.
+
+The cascade then continues from these palindromic survivors using a
+mass-based split (`child[2i] + child[2i+1] = parent[i]`, not
+`2*parent[i]`), with only `d_parent/2` free cursor variables per parent
+(the other half determined by the palindrome constraint).
+
+This reduces the L0 search space and the branching factor at subsequent
+levels.
+
+**Reference:** `run_cascade.py:2075–2196` (`_fused_mass_palindrome`),
+`run_cascade.py:2199–2270` (`run_level0_mass`)
+
+---
+
+## 26. Unrolled Autoconvolution for d=4 and d=6
+
+The autoconvolution in `_test_values_jit` is fully unrolled for d=4
+(7 conv entries, 6 unique products) and d=6 (11 conv entries, 15 unique
+products). This eliminates the inner double loop and all branch
+overhead, replacing it with straight-line arithmetic.
+
+**Reference:** `test_values.py:41–70`
