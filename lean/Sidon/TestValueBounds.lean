@@ -198,29 +198,29 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     apply CompactIccSpace.isCompact_Icc.of_isClosed_subset isClosed_closure
     exact (closure_mono ((step_function_support n m c).trans Set.Ico_subset_Icc_self)).trans
       (by rw [closure_Icc])
-  have h_S_le_one : ∀ x, S x ≤ 1 := by
+  have h_S_le_bound : ∀ x, S x ≤ 4 * n := by
     intro x; simp only [S, step_function]
     split_ifs with h1 h2
-    · linarith
-    · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
-    · linarith
-  have h_bound : ∀ y, MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume y ≤ ∫ t, S t := by
+    · positivity
+    · rw [div_le_iff₀ (by positivity : (0 : ℝ) < m)]
+      exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ 4 * n * m)
+    · positivity
+  have h_bound : ∀ y, MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume y ≤ (4 * n) * ∫ t, S t := by
     intro y
     simp only [MeasureTheory.convolution, ContinuousLinearMap.mul_apply']
-    apply MeasureTheory.integral_mono
-    · exact (h_S_int.comp_sub_left y).bdd_mul' h_S_int.aestronglyMeasurable
-        (MeasureTheory.ae_of_all _ (fun x => by
-          rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
-          exact h_S_le_one x))
-    · exact h_S_int
-    · exact (fun t =>
-        calc S t * S (y - t) ≤ S t * 1 :=
-              mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
-          _ = S t := mul_one _)
+    calc ∫ t, S t * S (y - t) ≤ ∫ t, S t * (4 * n) := by
+          apply MeasureTheory.integral_mono
+          · exact (h_S_int.comp_sub_left y).bdd_mul' h_S_int.aestronglyMeasurable
+              (MeasureTheory.ae_of_all _ (fun x => by
+                rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
+                exact h_S_le_bound x))
+          · exact h_S_int.mul_const _
+          · exact fun t => mul_le_mul_of_nonneg_left (h_S_le_bound _) (h_S_nn t)
+      _ = (4 * n) * ∫ t, S t := by rw [MeasureTheory.integral_mul_right]; ring
   have h_conv_int : MeasureTheory.Integrable (MeasureTheory.convolution S S (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) MeasureTheory.volume :=
     h_S_int.integrable_convolution (ContinuousLinearMap.mul ℝ ℝ) h_S_int
   have h_memLp := MeasureTheory.memLp_top_of_bound
-    h_conv_int.aestronglyMeasurable (∫ t, S t)
+    h_conv_int.aestronglyMeasurable ((4 * n) * ∫ t, S t)
     (MeasureTheory.ae_of_all _ (fun y => by
       rw [Real.norm_eq_abs, abs_of_nonneg (h_conv_nn y)]
       exact h_bound y))
@@ -234,15 +234,16 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
       apply Filter.Eventually.of_forall; intro z
       exact ((h_S_int.comp_sub_left z).bdd_mul' h_S_int.aestronglyMeasurable
         (MeasureTheory.ae_of_all _ fun x => by
-          rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]; exact h_S_le_one x)).aestronglyMeasurable
-    · -- Dominated by S (integrable bound)
+          rw [Real.norm_eq_abs, abs_of_nonneg (h_S_nn x)]
+          exact h_S_le_bound x)).aestronglyMeasurable
+    · -- Dominated by (4*n) * S (integrable bound)
       apply Filter.Eventually.of_forall; intro z
       exact MeasureTheory.ae_of_all _ fun t => by
         rw [Real.norm_eq_abs, abs_of_nonneg (mul_nonneg (h_S_nn t) (h_S_nn (z - t)))]
-        calc S t * S (z - t) ≤ S t * 1 :=
-              mul_le_mul_of_nonneg_left (h_S_le_one _) (h_S_nn t)
-          _ = S t := mul_one _
-    · exact h_S_int
+        calc S t * S (z - t) ≤ S t * (4 * n) :=
+              mul_le_mul_of_nonneg_left (h_S_le_bound _) (h_S_nn t)
+          _ = (4 * n) * S t := by ring
+    · exact h_S_int.const_mul _
     · -- ContinuousAt for ae-every t
       -- The boundary set {t : z₀ - t is a bin boundary} is finite, hence null
       -- Bad set: where z₀ - t is a bin boundary
@@ -270,30 +271,76 @@ lemma eLpNorm_conv_ge_discrete (n m : ℕ) (hn : n > 0) (hm : m > 0)
     h_conv_nn h_conv_int _ h_conv_ca' h_fin
 
 -- Helper: window sum bound implies test_value ≤ autoconvolution_ratio
+-- Fine grid: test_value = (1/(4nℓ)) · ∑_window DA(a,k) where a_i = c_i/m.
+-- eLpNorm_conv_ge_discrete gives DA(a,k) ≤ 4n · ‖g*g‖_∞ (via convolution_at_grid_point).
+-- So test_value ≤ ((ℓ-1)/ℓ) · ‖g*g‖_∞ ≤ ‖g*g‖_∞ = R(g).
 lemma window_sum_le_max_times (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) (ℓ s_lo : ℕ) (hℓ : 2 ≤ ℓ) :
     test_value n m c ℓ s_lo ≤
       autoconvolution_ratio (step_function n m c) := by
-  have h_test_value : test_value n m c ℓ s_lo = (1 / (4 * n * ℓ : ℝ)) * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), (4 * n / m : ℝ) ^ 2 * discrete_autoconvolution (fun i => (c i : ℝ)) k := by
-    unfold test_value;
-    unfold discrete_autoconvolution; norm_num [ Finset.mul_sum _ _ _, mul_pow ] ; ring;
-  have h_sum_bound : ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), ((4 * n / m : ℝ) ^ 2) * discrete_autoconvolution (fun i => (c i : ℝ)) k ≤ (ℓ - 1) * ((4 * n / m : ℝ) ^ 2) * (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal * (4 * n * m ^ 2 : ℝ) := by
-    have h_sum_bound : ∀ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), discrete_autoconvolution (fun i => (c i : ℝ)) k ≤ (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal * (4 * n * m ^ 2 : ℝ) := by
-      intros k hk
-      have h_discrete_conv : discrete_autoconvolution (fun i => (c i : ℝ)) k ≤ (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal * (4 * n * m ^ 2 : ℝ) := by
-        have := eLpNorm_conv_ge_discrete n m hn hm c hc k
-        rw [ div_div, div_mul_eq_mul_div, ge_iff_le, div_le_iff₀ ] at this <;> first | positivity | linarith;
-      exact h_discrete_conv;
-    convert Finset.sum_le_sum fun k hk => mul_le_mul_of_nonneg_left ( h_sum_bound k hk ) ( sq_nonneg ( 4 * n / m : ℝ ) ) using 1 ; norm_num [ mul_assoc, mul_comm, mul_left_comm, Finset.mul_sum _ _ _ ] ; ring; (
-    exact Or.inl <| Or.inl <| Or.inl <| by rw [ Nat.cast_sub <| by omega ] ; rw [ Nat.cast_add, Nat.cast_sub <| by omega ] ; push_cast ; ring;);
-  rw [h_test_value]
-  have h_subst : (1 / (4 * n * ℓ : ℝ)) * ((ℓ - 1) * ((4 * n / m : ℝ) ^ 2) * (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal * (4 * n * m ^ 2 : ℝ)) ≤ (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c) (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal / (1 / (4 * n : ℝ)) ^ 2 := by
-    field_simp;
-    exact mul_le_mul_of_nonneg_right ( by linarith ) ( ENNReal.toReal_nonneg );
-  convert le_trans _ h_subst using 1;
-  · unfold autoconvolution_ratio;
-    rw [ integral_step_function n m hn hm c hc ];
-  · exact mul_le_mul_of_nonneg_left h_sum_bound <| by positivity;
+  set N := (MeasureTheory.eLpNorm (MeasureTheory.convolution (step_function n m c) (step_function n m c)
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume).toReal
+  -- Each discrete_autoconvolution(a, k) where a_i = c_i/m is bounded:
+  -- eLpNorm_conv_ge_discrete: N ≥ (1/(4n·m²)) · conv_int[k]
+  -- Since DA(a, k) = (1/m²) · conv_int[k], we get DA(a, k) ≤ 4n · N
+  have h_DA_bound : ∀ k, discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ) / m) k ≤ 4 * n * N := by
+    intro k
+    have h_ge := eLpNorm_conv_ge_discrete n m hn hm c hc k
+    -- h_ge : N ≥ (1/(4n) / m²) · ∑_{i+j=k} c_i·c_j
+    -- We need: DA(c/m, k) = (1/m²) · ∑_{i+j=k} c_i·c_j ≤ 4n · N
+    have h_da_eq : discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ) / m) k =
+        (1 / (m : ℝ)^2) * discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ)) k := by
+      unfold discrete_autoconvolution; simp_rw [Finset.mul_sum]; congr 1; ext i
+      congr 1; ext j; split_ifs <;> ring
+    rw [h_da_eq]
+    have hm_pos : (0 : ℝ) < m := Nat.cast_pos.mpr hm
+    have hn_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
+    rw [ge_iff_le] at h_ge
+    -- h_ge: (1/(4n) / m²) · conv_int ≤ N, so conv_int ≤ 4n·m² · N
+    have h_conv_int_le : discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ)) k ≤ 4 * n * (m : ℝ)^2 * N := by
+      rw [div_div, div_mul_eq_mul_div] at h_ge
+      rw [div_le_iff₀ (by positivity : (0 : ℝ) < 4 * n * m^2)] at h_ge; linarith
+    calc (1 / (m : ℝ)^2) * discrete_autoconvolution (fun i => (c i : ℝ)) k
+        ≤ (1 / (m : ℝ)^2) * (4 * n * (m : ℝ)^2 * N) :=
+          mul_le_mul_of_nonneg_left h_conv_int_le (by positivity)
+      _ = 4 * n * N := by field_simp
+  -- test_value = (1/(4nℓ)) · ∑_window DA(a, k)
+  -- window has ≤ ℓ-1 terms, each ≤ 4n·N
+  have h_card : (Finset.Icc s_lo (s_lo + ℓ - 2)).card ≤ ℓ - 1 := by
+    rw [Nat.card_Icc]; omega
+  have h_window_sum : ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+      discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ) / m) k ≤ (ℓ - 1) * (4 * n * N) := by
+    calc ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+          discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ) / m) k
+        ≤ ∑ _ ∈ Finset.Icc s_lo (s_lo + ℓ - 2), (4 * n * N) :=
+          Finset.sum_le_sum fun k _ => h_DA_bound k
+      _ = (Finset.Icc s_lo (s_lo + ℓ - 2)).card * (4 * n * N) := by rw [Finset.sum_const, nsmul_eq_mul]
+      _ ≤ (ℓ - 1) * (4 * n * N) := by
+          apply mul_le_mul_of_nonneg_right _ (by positivity)
+          have : (↑(Finset.Icc s_lo (s_lo + ℓ - 2)).card : ℝ) ≤ ↑(ℓ - 1) := by exact_mod_cast h_card
+          have hℓ1 : (1 : ℕ) ≤ ℓ := by omega
+          rw [Nat.cast_sub hℓ1] at this; push_cast at this ⊢; linarith
+  -- test_value ≤ (1/(4nℓ)) · (ℓ-1) · 4n · N = ((ℓ-1)/ℓ) · N ≤ N
+  have h_tv_le : test_value n m c ℓ s_lo ≤ N := by
+    unfold test_value; dsimp only []
+    calc (1 / (4 * ↑n * ↑ℓ)) * ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2),
+          discrete_autoconvolution (fun i : Fin (2 * n) => (↑(c i) : ℝ) / ↑m) k
+        ≤ (1 / (4 * ↑n * ↑ℓ)) * ((↑ℓ - 1) * (4 * ↑n * N)) :=
+          mul_le_mul_of_nonneg_left h_window_sum (by positivity)
+      _ = ((↑ℓ - 1) / ↑ℓ) * N := by
+          have hℓ_pos : (0 : ℝ) < ℓ := by exact_mod_cast Nat.lt_of_lt_of_le (by norm_num) hℓ
+          have hn_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
+          field_simp
+      _ ≤ N := by
+          have hN_nn : 0 ≤ N := ENNReal.toReal_nonneg
+          have : (↑ℓ - 1 : ℝ) / ↑ℓ ≤ 1 := by
+            rw [div_le_one₀ (by positivity : (0 : ℝ) < ℓ)]; linarith
+          exact mul_le_of_le_one_left hN_nn this
+  -- autoconvolution_ratio = N / (∫g)² = N / 1 = N
+  have h_ratio : autoconvolution_ratio (step_function n m c) = N := by
+    unfold autoconvolution_ratio; dsimp only []
+    rw [integral_step_function n m hn hm c hc, one_pow, div_one]
+  linarith
 
 /-- Claim 1.1: Test value ≤ ‖f*f‖∞ / (∫f)² for the step function. -/
 theorem test_value_le_Linfty (n m : ℕ) (hn : n > 0) (hm : m > 0)

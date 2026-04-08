@@ -3,6 +3,13 @@ Sidon Autocorrelation Project — Core Definitions
 
 Core definitions used throughout the proof: autoconvolution ratio, discrete
 autoconvolution, test values, bin masses, canonical discretization, etc.
+
+Fine-grid convention (C&S B_{n,m}):
+  - d = 2n bins of width δ = 1/(4n)
+  - Integer coordinates c_i ≥ 0 with ∑ c_i = S = 4nm
+  - Physical heights a_i = c_i / m  (multiples of 1/m)
+  - ∫g = ∑ (c_i/m)·δ = S/(4nm) = 1
+  - Correction: 2/m + 1/m² (C&S Lemma 3)
 -/
 
 import Mathlib
@@ -47,11 +54,13 @@ noncomputable def autoconvolution_constant : ℝ :=
 def discrete_autoconvolution {d : ℕ} (a : Fin d → ℝ) (k : ℕ) : ℝ :=
   ∑ i : Fin d, ∑ j : Fin d, if i.1 + j.1 = k then a i * a j else 0
 
-/-- Test value TV(n, m, c, ℓ, s_lo) for a composition c.
+/-- Test value TV(n, m, c, ℓ, s_lo) for a composition c on the C&S fine grid.
 
-    Fine grid (C&S B_{n,m}): heights a_i = c_i / m where ∑ c_i = 4nm.
-    The TV = (1/(4nℓ)) · ∑_{k in window} conv[k] with conv[k] = ∑_{i+j=k} a_i·a_j.
-    This matches the CPU code's test_values.py with scale = 1/m. -/
+    Fine grid B_{n,m}: d = 2n bins, integer coordinates c_i summing to S = 4nm.
+    Physical heights a_i = c_i / m (multiples of 1/m).
+    TV = (1 / (4nℓ)) · ∑_{k in window} ∑_{i+j=k} a_i · a_j
+       = (1 / (4nℓm²)) · ∑_{k in window} ∑_{i+j=k} c_i · c_j.
+    Matches CPU code: test_values.py uses scale = 1/m, norm = 1/(4n·ℓ). -/
 noncomputable def test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) (ℓ s_lo : ℕ) : ℝ :=
   let d := 2 * n
   let a : Fin d → ℝ := fun i => (c i : ℝ) / m
@@ -67,10 +76,11 @@ noncomputable def max_test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) : ℝ :=
   let values := range_ell.biUnion (fun ℓ => range_s_lo.image (fun s_lo => test_value n m c ℓ s_lo))
   if h : values.Nonempty then values.max' h else 0
 
-/-- A composition on the fine grid B_{n,m}: integer masses summing to 4nm.
-    Heights a_i = c_i/m give a step function on 2n bins of width 1/(4n)
-    with ∫g = ∑ (c_i/m)·(1/(4n)) = S/(4nm) = 1 when S = 4nm.
-    Matches CPU convention: S = 4 * n_half * m. -/
+/-- A composition on the C&S fine grid B_{n,m}: integer coordinates summing to S = 4nm.
+    Physical heights a_i = c_i / m give a step function on 2n bins
+    of width 1/(4n) with ∫g = ∑ (c_i/m)·(1/(4n)) = S/(4nm) = 1.
+    Matches CPU convention: S = 4 * n * m.
+    Palindrome symmetry: c i = c (2n - 1 - i) halves the search space. -/
 def is_composition (n m : ℕ) (c : Fin (2 * n) → ℕ) : Prop :=
   ∑ i, c i = 4 * n * m
 
@@ -84,9 +94,9 @@ noncomputable def bin_masses (f : ℝ → ℝ) (n : ℕ) : Fin (2 * n) → ℝ :
 
 /-- Canonical discretization via floor-rounding of cumulative masses.
 
-    Fine grid (C&S B_{n,m}): rounds to S = 4nm quanta so that
-    heights c_i/m are multiples of 1/m, giving ||ε||_∞ ≤ 1/m.
-    This is required for the C&S Lemma 3 bound (2/m + 1/m²). -/
+    Fine grid (C&S B_{n,m}): rounds to S = 4nm quanta.  The height quantum is
+    1/m, so heights a_i = c_i/m approximate ∫_bin f / δ with ||ε||_∞ ≤ 1/m
+    (C&S Lemma 2).  The correction is 2/m + 1/m² (C&S Lemma 3). -/
 noncomputable def canonical_discretization (f : ℝ → ℝ) (n m : ℕ) : Fin (2 * n) → ℕ :=
   fun i =>
     let S := 4 * n * m

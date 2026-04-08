@@ -56,7 +56,7 @@ theorem autoconv_reversal_symmetry {d : ℕ} (hd : d > 0) (a : Fin d → ℝ)
   convert h_change using 4;
   omega
 
-/-- Claim 3.3e (helper): left sum + reversed left sum = 4*n*m. -/
+/-- Claim 3.3e (helper): left sum + reversed left sum = S (fine grid, S = 4nm). -/
 theorem left_sum_reversal (n : ℕ) (hn : n > 0) (m : ℕ)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) :
     (∑ i : Fin n, c ⟨i.1, by omega⟩) +

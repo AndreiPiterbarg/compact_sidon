@@ -777,9 +777,9 @@ theorem dynamic_threshold_sound (n m : ℕ) (c_target : ℝ)
     Cloninger & Steinerberger (2017), Lemma 3 (arXiv:1403.7988):
     The pointwise discretization error satisfies
       |(g*g)(x) - (f*f)(x)| ≤ 2/m + 1/m²
-    where g is the step function with heights c_i/m on the fine grid B_{n,m}.
+    where g is the step function with heights c_i/m on the fine grid.
 
-    Fine grid: canonical_discretization rounds to S = 4nm quanta, giving
+    Fine grid (C&S B_{n,m}): canonical_discretization rounds to S = 4nm quanta, giving
     heights a_i = c_i/m that are multiples of 1/m.  The rounding error
     per bin satisfies |a_i - ideal_i| ≤ 1/m (C&S Lemma 2), hence:
       |(g*g)(x) - (f*f)(x)| ≤ 2·||ε||_∞ + ||ε||_∞² ≤ 2/m + 1/m²

@@ -3,6 +3,8 @@ Sidon Autocorrelation Project — Step Function and Grid Convolution
 
 Step function definition, basic properties (nonneg, support, integrability, integral),
 and the key lemma that convolution at grid points equals scaled discrete autoconvolution.
+
+Fine grid (C&S B_{n,m}): d = 2n bins, heights a_i = c_i/m, ∑c_i = 4nm.
 -/
 
 import Mathlib
@@ -27,7 +29,7 @@ set_option autoImplicit false
 noncomputable section
 
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Step Function and Grid Convolution (part of Section 18)
+-- Step Function and Grid Convolution
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 /-- Test value computed from continuous bin masses (for comparison). -/
@@ -38,7 +40,9 @@ noncomputable def test_value_continuous (n : ℕ) (f : ℝ → ℝ) (ℓ s_lo : 
   let sum_conv := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), conv k
   (1 / (4 * n * ℓ : ℝ)) * sum_conv
 
-/-- Step function on the 2n-bin grid. -/
+/-- Step function on the 2n-bin grid (fine grid, C&S B_{n,m}).
+    Height in bin i = c_i / m, where c_i are integer coordinates summing to 4nm.
+    Integral: ∑ (c_i/m)·(1/(4n)) = (∑c_i)/(4nm) = 4nm/(4nm) = 1. -/
 noncomputable def step_function (n m : ℕ) (c : Fin (2 * n) → ℕ) : ℝ → ℝ :=
   fun x =>
     let d := 2 * n
@@ -64,33 +68,55 @@ lemma step_function_support (n m : ℕ) (c : Fin (2 * n) → ℕ) :
 -- Helper: step function is integrable
 lemma step_function_integrable (n m : ℕ) (c : Fin (2 * n) → ℕ) :
     MeasureTheory.Integrable (step_function n m c) MeasureTheory.volume := by
-  have h_bounded : ∃ C, ∀ x, abs (step_function n m c x) ≤ C := by
-    use ( ∑ i : Fin ( 2 * n ), ( c i : ℝ ) ) / m;
-    intro x; by_cases hx : x < -1 / 4 ∨ x ≥ 1 / 4 <;> simp_all +decide [ step_function ] ;
-    · exact div_nonneg ( Finset.sum_nonneg fun _ _ => Nat.cast_nonneg _ ) ( Nat.cast_nonneg _ );
-    · split_ifs <;> norm_num at *;
-      · exact div_nonneg ( Finset.sum_nonneg fun _ _ => Nat.cast_nonneg _ ) ( Nat.cast_nonneg _ );
-      · rw [ abs_of_nonneg ( by positivity ) ] ; exact div_le_div_of_nonneg_right ( mod_cast Finset.single_le_sum ( fun a _ => Nat.zero_le ( c a ) ) ( Finset.mem_univ _ ) ) ( Nat.cast_nonneg _ ) ;
-      · exact div_nonneg ( Finset.sum_nonneg fun _ _ => Nat.cast_nonneg _ ) ( Nat.cast_nonneg _ );
-  refine' MeasureTheory.Integrable.mono' _ _ _;
-  refine' fun x => h_bounded.choose * Set.indicator ( Set.Ico ( -1 / 4 ) ( 1 / 4 ) ) ( fun _ => 1 ) x;
-  · exact MeasureTheory.Integrable.const_mul ( MeasureTheory.integrable_indicator_iff ( measurableSet_Ico ) |>.2 ( by norm_num ) ) _;
-  · unfold step_function;
-    refine' Measurable.aestronglyMeasurable _;
-    refine' Measurable.ite ( measurableSet_Iio.union measurableSet_Ici ) measurable_const _;
-    fun_prop;
-  · filter_upwards [ ] with x ; by_cases hx : x ∈ Set.Ico ( -1 / 4 ) ( 1 / 4 ) <;> simp_all +decide [ Set.indicator ];
-    · exact h_bounded.choose_spec x;
-    · split_ifs <;> simp_all +decide [ abs_le ];
-      · linarith;
-      · exact ⟨ by unfold step_function; split_ifs <;> aesop, by unfold step_function; split_ifs <;> aesop ⟩
+  -- step_function is bounded and supported on [-1/4, 1/4), hence integrable
+  -- Strategy: bound ‖step_function‖ ≤ C · 1_{[-1/4, 1/4)}, integrate the bound
+  set C := (∑ i : Fin (2 * n), (c i : ℝ)) / m with hC_def
+  have hC_nn : 0 ≤ C := div_nonneg (Finset.sum_nonneg fun _ _ => Nat.cast_nonneg _) (Nat.cast_nonneg _)
+  have h_bounded : ∀ x, ‖step_function n m c x‖ ≤ C := by
+    intro x
+    rw [Real.norm_eq_abs]; simp only [step_function]
+    split_ifs with h1 h2
+    · simp; exact hC_nn
+    · rw [abs_of_nonneg (by positivity)]
+      exact div_le_div_of_nonneg_right
+        (by exact_mod_cast Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _))
+        (Nat.cast_nonneg _)
+    · simp; exact hC_nn
+  have h_vanish : ∀ x, x ∉ Set.Ico (-1/4 : ℝ) (1/4) → step_function n m c x = 0 := by
+    intro x hx; simp only [Set.mem_Ico, not_and_or, not_le, not_lt] at hx
+    simp only [step_function]; rcases hx with hx | hx
+    · exact if_pos (Or.inl (by linarith))
+    · exact if_pos (Or.inr (by linarith))
+  apply MeasureTheory.Integrable.mono' (g := fun x => C * Set.indicator (Set.Ico (-1/4 : ℝ) (1/4)) (fun _ => 1) x)
+  · exact (MeasureTheory.integrable_indicator_iff measurableSet_Ico |>.2 (by norm_num)).const_mul _
+  · exact (measurable_step_function n m c).aestronglyMeasurable
+  · exact MeasureTheory.ae_of_all _ fun x => by
+      by_cases hx : x ∈ Set.Ico (-1/4 : ℝ) (1/4)
+      · rw [Set.indicator_of_mem hx, mul_one]; exact h_bounded x
+      · rw [h_vanish x hx, norm_zero]
+        exact mul_nonneg hC_nn (Set.indicator_nonneg (fun _ _ => zero_le_one) x)
+where
+  measurable_step_function (n m : ℕ) (c : Fin (2 * n) → ℕ) :
+      Measurable (step_function n m c) := by
+    unfold step_function; dsimp only []
+    refine Measurable.ite ?_ measurable_const ?_
+    · exact measurableSet_Iio.union measurableSet_Ici
+    · -- else branch = (lookup : ℕ → ℝ) ∘ (Int.toNat : ℤ → ℕ) ∘ (⌊·⌋ : ℝ → ℤ) ∘ (linear : ℝ → ℝ)
+      exact (measurable_from_top (f := fun i : ℕ =>
+          if h : i < 2 * n then (↑(c ⟨i, h⟩) : ℝ) / ↑m else 0)).comp
+        ((measurable_from_top (f := Int.toNat)).comp
+          ((Int.measurable_floor (R := ℝ)).comp
+            (Measurable.div_const (Measurable.add_const measurable_id (1 / 4 : ℝ))
+              (1 / (4 * (↑n : ℝ))))))
 
--- Helper: integral of step function = 1/(4n)
+-- Helper: integral of step function = 1
 lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) :
     ∫ x, step_function n m c x = 1 := by
+  -- The integral over ℝ equals the integral over [-1/4, 1/4) since step_function = 0 outside
   have h_restrict : ∫ x, step_function n m c x = ∫ x in Set.Ico (-1 / 4 : ℝ) (1 / 4), step_function n m c x := by
     rw [ MeasureTheory.setIntegral_eq_integral_of_forall_compl_eq_zero ] ; unfold step_function ; aesop;
+  -- Each bin contributes c_i / m * (1/(4n))
   have h_const : ∀ i : Fin (2 * n), ∫ x in Set.Ico (-1 / 4 + (i : ℝ) / (4 * n)) (-1 / 4 + (i + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m * (1 / (4 * n)) := by
     intro i
     have h_const_interval : ∀ x ∈ Set.Ico (-1 / 4 + (i : ℝ) / (4 * n)) (-1 / 4 + (i + 1) / (4 * n)), step_function n m c x = (c i : ℝ) / m := by
@@ -98,10 +124,29 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
       field_simp;
       intro x hx; split_ifs <;> simp_all +decide ;
       · cases ‹_› <;> nlinarith [ show ( i : ℝ ) + 1 ≤ 2 * n by norm_cast; linarith [ Fin.is_lt i ], div_mul_cancel₀ ( -n + ( i : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ), div_mul_cancel₀ ( -n + ( i + 1 : ℝ ) ) ( by positivity : ( 4 * n : ℝ ) ≠ 0 ) ] ;
-      · rw [ mul_div_cancel₀ _ ( by positivity ) ] ; congr ; ring;
-        rw [ div_le_iff₀ ( by positivity ), lt_div_iff₀ ( by positivity ) ] at hx ; norm_num [ show ⌊ ( n : ℝ ) + n * x * 4⌋ = i from Int.floor_eq_iff.mpr ⟨ by norm_num; linarith, by norm_num; linarith ⟩ ] at *;
+      · have h4n_pos : (4 * n : ℝ) > 0 := by positivity
+        rw [ div_le_iff₀ h4n_pos, lt_div_iff₀ h4n_pos ] at hx
+        have h_floor : ⌊(↑n * (4 * x + 1) : ℝ)⌋ = (i : ℤ) := by
+          rw [Int.floor_eq_iff]
+          constructor <;> · push_cast; nlinarith [hx.1, hx.2]
+        have h_idx : ⌊(↑n * (4 * x + 1) : ℝ)⌋.toNat = i.val := by
+          rw [h_floor]; exact Int.toNat_natCast _
+        have h_c : ∀ h_lt, c (⟨⌊(↑n * (4 * x + 1) : ℝ)⌋.toNat, h_lt⟩ : Fin (2 * n)) = c i :=
+          fun _ => congrArg c (Fin.ext h_idx)
+        simp only [h_c]; field_simp
       · rw [ Int.le_floor ] at * ; norm_num at * ; nlinarith [ ( by norm_cast : ( 1 :ℝ ) ≤ n ), mul_div_cancel₀ ( -n + ( i + 1 ) :ℝ ) ( by positivity : ( 4 * n :ℝ ) ≠ 0 ) ] ;
-    rw [ MeasureTheory.setIntegral_congr_fun measurableSet_Ico h_const_interval ] ; ring ; norm_num [ hn.ne' ] ; ring;
+    rw [ MeasureTheory.setIntegral_congr_fun measurableSet_Ico h_const_interval ]
+    rw [MeasureTheory.setIntegral_const]
+    simp only [MeasureTheory.Measure.real, Real.volume_Ico, smul_eq_mul]
+    have h4n_pos : (0 : ℝ) < 4 * n := by positivity
+    have h_width : -1 / 4 + ((i : ℝ) + 1) / (4 * n) - (-1 / 4 + (i : ℝ) / (4 * n)) = 1 / (4 * n) := by
+      field_simp; ring
+    have h_nn : (0 : ℝ) ≤ -1 / 4 + ((i : ℝ) + 1) / (4 * ↑n) - (-1 / 4 + (i : ℝ) / (4 * ↑n)) := by
+      have h_pos : (0 : ℝ) < 1 / (4 * ↑n) := by positivity
+      linarith [h_width]
+    rw [ENNReal.toReal_ofReal h_nn, h_width]
+    ring
+  -- Split integral into sum over bins
   have h_split : ∫ x in Set.Ico (-1 / 4 : ℝ) (1 / 4), step_function n m c x = ∑ i : Fin (2 * n), ∫ x in Set.Ico (-1 / 4 + (i : ℝ) / (4 * n)) (-1 / 4 + (i + 1) / (4 * n)), step_function n m c x := by
     rw [ ← MeasureTheory.integral_biUnion_finset ];
     · congr with x ; norm_num [ Finset.mem_univ ];
@@ -116,17 +161,30 @@ lemma integral_step_function (n m : ℕ) (hn : n > 0) (hm : m > 0)
     · intro i hi; specialize h_const i; contrapose! h_const; rw [ MeasureTheory.integral_undef h_const ] ; ring; norm_num [ hn.ne', hm.ne' ] ;
       intro H; simp_all +decide;
       exact h_const <| MeasureTheory.Integrable.integrableOn <| step_function_integrable n m c;
-  simp_all +decide [ ← Finset.sum_mul _ _ _, ← Finset.sum_div ];
-  rw [ ← Nat.cast_sum, hc, div_self ( by positivity ), one_mul ]
+  -- Now sum the bin contributions: ∑ (c_i / m) * (1/(4n)) = (∑ c_i) / (4nm) = 1
+  rw [h_restrict, h_split]
+  simp only [fun i => h_const i]
+  have hm_ne : (m : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (by omega)
+  have hn_ne : (n : ℝ) ≠ 0 := Nat.cast_ne_zero.mpr (by omega)
+  have h4n_ne : (4 * (n : ℝ)) ≠ 0 := by positivity
+  -- ∑ (c_i/m * (1/(4n))) = (∑ c_i) / (4nm) = 1
+  have h_term : ∀ i : Fin (2 * n), (c i : ℝ) / ↑m * (1 / (4 * ↑n)) = (c i : ℝ) / (↑m * (4 * ↑n)) := by
+    intro i; ring
+  simp_rw [h_term, ← Finset.sum_div]
+  rw [show (∑ i : Fin (2 * n), (c i : ℝ)) = (4 * ↑n * ↑m : ℝ) from by exact_mod_cast hc]
+  field_simp
 
 -- Helper: discrete autoconvolution nonneg
 lemma discrete_autoconvolution_nonneg (n m : ℕ) (c : Fin (2 * n) → ℕ) (k : ℕ) :
-    0 ≤ discrete_autoconvolution (fun i : Fin (2 * n) => (4 * (n : ℝ)) / m * (c i : ℝ)) k := by
+    0 ≤ discrete_autoconvolution (fun i : Fin (2 * n) => (c i : ℝ) / m) k := by
   exact Finset.sum_nonneg fun i _hi => Finset.sum_nonneg fun j _hj => by positivity;
 
-/-- Sub-lemma: the convolution of the step function with itself, evaluated at
-    grid point y_k, equals (1/(4nm²)) · conv_c[k].
-    Grid point: y_k = -1/2 + (k+1)·Δ where Δ = 1/(4n). -/
+/-- The convolution of the step function with itself, evaluated at
+    grid point y_k, equals (1/(4n) · (1/m)²) · conv_int[k].
+    Grid point: y_k = -1/2 + (k+1)·δ where δ = 1/(4n).
+    With fine-grid heights a_i = c_i/m: (g*g)(y_k) = δ · ∑_{i+j=k} a_i·a_j.
+    So (g*g)(y_k) = (1/(4n)) · discrete_autoconvolution(a, k)
+                   = (1/(4nm²)) · ∑_{i+j=k} c_i·c_j. -/
 lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
     (c : Fin (2 * n) → ℕ) (hc : ∑ i, c i = 4 * n * m) (k : ℕ) :
     MeasureTheory.convolution (step_function n m c) (step_function n m c)
@@ -142,8 +200,16 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
     field_simp
     intro i x hx; split_ifs <;> simp_all +decide
     · cases ‹_› <;> nlinarith [show (i : ℝ) + 1 ≤ 2 * n by norm_cast; linarith [Fin.is_lt i], div_mul_cancel₀ (-n + (i : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0), div_mul_cancel₀ (-n + (i + 1 : ℝ)) (by positivity : (4 * n : ℝ) ≠ 0)]
-    · rw [mul_div_cancel₀ _ (by positivity)]; congr; ring
-      rw [div_le_iff₀ (by positivity), lt_div_iff₀ (by positivity)] at hx; norm_num [show ⌊(n : ℝ) + n * x * 4⌋ = i from Int.floor_eq_iff.mpr ⟨by norm_num; linarith, by norm_num; linarith⟩] at *
+    · have h4n_pos : (4 * n : ℝ) > 0 := by positivity
+      rw [ div_le_iff₀ h4n_pos, lt_div_iff₀ h4n_pos ] at hx
+      have h_floor : ⌊(↑n * (4 * x + 1) : ℝ)⌋ = (i : ℤ) := by
+          rw [Int.floor_eq_iff]
+          constructor <;> · push_cast; nlinarith [hx.1, hx.2]
+      have h_idx : ⌊(↑n * (4 * x + 1) : ℝ)⌋.toNat = i.val := by
+        rw [h_floor]; exact Int.toNat_natCast _
+      have h_c : ∀ h_lt, c (⟨⌊(↑n * (4 * x + 1) : ℝ)⌋.toNat, h_lt⟩ : Fin (2 * n)) = c i :=
+        fun _ => congrArg c (Fin.ext h_idx)
+      simp only [h_c]; field_simp
     · rw [Int.le_floor] at *; norm_num at *; nlinarith [(by norm_cast : (1 : ℝ) ≤ n), mul_div_cancel₀ (-n + (i + 1) : ℝ) (by positivity : (4 * n : ℝ) ≠ 0)]
   have h_n_pos : (0 : ℝ) < n := Nat.cast_pos.mpr hn
   have h_m_pos : (0 : ℝ) < m := Nat.cast_pos.mpr hm
@@ -285,14 +351,15 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
       have h1 := step_function_integrable n m c
       have h2 : MeasureTheory.Integrable (fun t => step_function n m c (y - t)) MeasureTheory.volume :=
         h1.comp_sub_left y
-      have h_bdd : ∀ x, ‖step_function n m c x‖ ≤ 1 := by
+      have h_bdd : ∀ x, ‖step_function n m c x‖ ≤ ↑(4 * n * m) / ↑m := by
         intro x
         rw [Real.norm_eq_abs, abs_of_nonneg (step_function_nonneg n m hm c x)]
         simp only [step_function]
         split_ifs with h1 h2
-        · linarith
-        · exact div_le_one_of_le₀ (by exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ m)) (by positivity)
-        · linarith
+        · positivity
+        · apply div_le_div_of_nonneg_right _ (by positivity : (0 : ℝ) ≤ ↑m)
+          exact_mod_cast (hc ▸ Finset.single_le_sum (fun a _ => Nat.zero_le (c a)) (Finset.mem_univ _) : c _ ≤ 4 * n * m)
+        · positivity
       exact (h2.bdd_mul' h1.aestronglyMeasurable
         (MeasureTheory.ae_of_all _ (fun x => h_bdd x))).integrableOn
   rw [h_restrict, h_split, Finset.sum_congr rfl fun i _ => h_bin_contrib i]
@@ -328,7 +395,8 @@ lemma convolution_at_grid_point (n m : ℕ) (hn : n > 0) (hm : m > 0)
   simp only [h_inner]
   rw [Finset.mul_sum]
   congr 1; ext i; split_ifs with h
-  · field_simp
+  · -- Goal: (c i / m) * ((c ⟨k-i, _⟩) / m) * (1/(4*n)) = 1/(4*n) / m^2 * ((c i) * (c ⟨k-i, _⟩))
+    field_simp
   · simp
 
 end -- noncomputable section
