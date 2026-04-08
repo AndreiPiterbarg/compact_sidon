@@ -1998,6 +1998,302 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
     return total
 
 
+# =====================================================================
+# Mass-based grid + palindrome symmetry (MATLAB-style C&S algorithm)
+#
+# Fix A: Only d_parent/2 free cursor variables (palindrome symmetry).
+# Fix B: Mass-based split: child[2i]+child[2i+1] = parent[i] (not 2*parent[i]).
+#        S = 2*m (constant across all levels).
+#
+# Threshold formula (mass-conv space):
+#   TV = n_half_current * ws_mass / (m^2 * ell)
+#   Prune if ws_mass > floor((c_target*m^2 + corr_int + eps) * ell / n_half_current)
+#   where corr_int = 2*m + 1 (flat C&S correction with epsilon=1/m).
+# =====================================================================
+
+@njit(parallel=True, cache=True)
+def _prune_mass_flat(batch_int, n_half_current, m, c_target):
+    """Mass-based flat threshold pruning for L0.
+
+    batch_int: (B, d) int32, palindromic mass vectors summing to 2*m.
+    n_half_current: d/2 at the current level.
+
+    Threshold: ws_mass > floor((c_target*m^2 + 2m+1 + eps) * ell / n_half_current)
+    Returns boolean mask: True = survived.
+    """
+    B = batch_int.shape[0]
+    d = batch_int.shape[1]
+    conv_len = 2 * d - 1
+    survived = np.ones(B, dtype=numba.boolean)
+
+    m_d = np.float64(m)
+    n_d = np.float64(n_half_current)
+    eps_margin = 1e-9
+    base = c_target * m_d * m_d + 2.0 * m_d + 1.0 + eps_margin
+
+    max_ell = 2 * d
+    threshold_arr = np.empty(max_ell + 1, dtype=np.int64)
+    for ell in range(2, max_ell + 1):
+        threshold_arr[ell] = np.int64(base * np.float64(ell) / n_d)
+
+    for b in prange(B):
+        conv = np.zeros(conv_len, dtype=np.int32)
+        for i in range(d):
+            ci = np.int32(batch_int[b, i])
+            if ci != 0:
+                conv[2 * i] += ci * ci
+                for j in range(i + 1, d):
+                    cj = np.int32(batch_int[b, j])
+                    if cj != 0:
+                        conv[i + j] += np.int32(2) * ci * cj
+
+        pruned = False
+        for ell in range(2, max_ell + 1):
+            if pruned:
+                break
+            n_cv = ell - 1
+            n_windows = conv_len - n_cv + 1
+            ws = np.int64(0)
+            for k in range(n_cv):
+                ws += np.int64(conv[k])
+            dyn_it = threshold_arr[ell]
+            for s_lo in range(n_windows):
+                if s_lo > 0:
+                    ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(
+                        conv[s_lo - 1])
+                if ws > dyn_it:
+                    pruned = True
+                    break
+
+        if pruned:
+            survived[b] = False
+
+    return survived
+
+
+@njit(cache=True)
+def _fused_mass_palindrome(parent_int, n_half_child, m, c_target, out_buf):
+    """Mass-based palindrome cascade kernel.
+
+    Enumerates palindromic children via mass-based split.
+    Only n_half_parent = d_parent/2 free cursor variables.
+
+    parent_int: (d_parent,) palindromic int32 mass vector (sum = 2*m).
+    n_half_child: d_child/2 = d_parent (n_half at the child level).
+    out_buf: (max_survivors, d_child) int32 pre-allocated.
+
+    Returns (n_survivors, total_children_tested).
+    """
+    d_parent = parent_int.shape[0]
+    n_half_parent = d_parent // 2
+    d_child = 2 * d_parent
+    conv_len = 2 * d_child - 1
+
+    m_d = np.float64(m)
+    n_d = np.float64(n_half_child)
+    eps_margin = 1e-9
+    base = c_target * m_d * m_d + 2.0 * m_d + 1.0 + eps_margin
+
+    max_ell = 2 * d_child
+    threshold_arr = np.empty(max_ell + 1, dtype=np.int64)
+    for ell in range(2, max_ell + 1):
+        threshold_arr[ell] = np.int64(base * np.float64(ell) / n_d)
+
+    # x_cap: max child bin mass (from ell=2 single-bin energy bound)
+    thresh_phys = c_target + 2.0 / m_d + 1.0 / (m_d * m_d) + eps_margin
+    x_cap = np.int32(m_d * math.sqrt(2.0 * thresh_phys / n_d))
+
+    # Cursor ranges for free variables (first half of parent)
+    lo_arr = np.empty(n_half_parent, dtype=np.int32)
+    hi_arr = np.empty(n_half_parent, dtype=np.int32)
+    total_product = np.int64(1)
+    for i in range(n_half_parent):
+        p = parent_int[i]
+        lo = np.int32(0)
+        hi = p
+        if p > x_cap:
+            lo = p - x_cap
+        if hi > x_cap:
+            hi = x_cap
+        if lo > hi:
+            return 0, 0
+        lo_arr[i] = lo
+        hi_arr[i] = hi
+        total_product *= np.int64(hi - lo + 1)
+
+    max_survivors = out_buf.shape[0]
+    n_surv = 0
+    child = np.empty(d_child, dtype=np.int32)
+    conv = np.empty(conv_len, dtype=np.int32)
+    cursor = np.empty(n_half_parent, dtype=np.int32)
+    for i in range(n_half_parent):
+        cursor[i] = lo_arr[i]
+
+    n_tested = np.int64(0)
+
+    while True:
+        # Build palindromic child from cursor
+        for i in range(n_half_parent):
+            j = d_parent - 1 - i
+            c_val = cursor[i]
+            p_val = parent_int[i]
+            child[2 * i] = c_val
+            child[2 * i + 1] = p_val - c_val
+            child[2 * j] = p_val - c_val
+            child[2 * j + 1] = c_val
+
+        n_tested += 1
+
+        # Full autoconvolution (O(d_child^2))
+        for k in range(conv_len):
+            conv[k] = np.int32(0)
+        for ii in range(d_child):
+            ci = np.int32(child[ii])
+            if ci != 0:
+                conv[2 * ii] += ci * ci
+                for jj in range(ii + 1, d_child):
+                    cj = np.int32(child[jj])
+                    if cj != 0:
+                        conv[ii + jj] += np.int32(2) * ci * cj
+
+        # Window scan with flat threshold
+        pruned = False
+        for ell in range(2, max_ell + 1):
+            if pruned:
+                break
+            n_cv = ell - 1
+            n_windows = conv_len - n_cv + 1
+            ws = np.int64(0)
+            for k in range(n_cv):
+                ws += np.int64(conv[k])
+            dyn_it = threshold_arr[ell]
+            for s_lo in range(n_windows):
+                if s_lo > 0:
+                    ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(
+                        conv[s_lo - 1])
+                if ws > dyn_it:
+                    pruned = True
+                    break
+
+        if not pruned:
+            if n_surv < max_survivors:
+                for ii in range(d_child):
+                    out_buf[n_surv, ii] = child[ii]
+            n_surv += 1
+
+        # Advance odometer (rightmost = fastest)
+        carry = n_half_parent - 1
+        while carry >= 0:
+            cursor[carry] += 1
+            if cursor[carry] <= hi_arr[carry]:
+                break
+            cursor[carry] = lo_arr[carry]
+            carry -= 1
+
+        if carry < 0:
+            break
+
+    return n_surv, n_tested
+
+
+def run_level0_mass(n_half, m, c_target, verbose=True):
+    """L0 with mass-based grid: palindromic compositions summing to 2*m.
+
+    Generates compositions of n_half elements summing to m (half-domain),
+    mirrors to create palindromic 2*n_half element vectors (full domain).
+    """
+    d = 2 * n_half
+    S_half = m
+    n_total_half = count_compositions(n_half, S_half)
+    corr = correction(m)
+
+    if verbose:
+        _log(f"\n[L0 mass-grid] d={d}, m={m}, S=2m={2*m}, "
+             f"palindromic comps={n_total_half:,}")
+        _log(f"     correction(1/m)={corr:.6f}, "
+             f"threshold={c_target+corr:.6f}")
+
+    t0 = time.time()
+    all_survivors = []
+    n_pruned = 0
+    n_processed = 0
+    last_report = t0
+
+    for half_batch in generate_compositions_batched(n_half, S_half,
+                                                     batch_size=200_000):
+        batch = np.empty((len(half_batch), d), dtype=np.int32)
+        batch[:, :n_half] = half_batch
+        batch[:, n_half:] = half_batch[:, ::-1]
+
+        n_processed += len(batch)
+
+        survived_mask = _prune_mass_flat(batch, n_half, m, c_target)
+        n_pruned += int(np.sum(~survived_mask))
+
+        survivors = batch[survived_mask]
+        if len(survivors) > 0:
+            all_survivors.append(survivors)
+
+        now = time.time()
+        if verbose and (now - last_report >= 2.0):
+            pct = n_processed / n_total_half * 100
+            n_surv_so_far = sum(len(s) for s in all_survivors)
+            _log(f"     [L0] {n_processed:,}/{n_total_half:,} ({pct:.1f}%) "
+                 f"| {n_surv_so_far:,} survivors")
+            last_report = now
+
+    elapsed = time.time() - t0
+
+    if all_survivors:
+        all_survivors = np.vstack(all_survivors)
+    else:
+        all_survivors = np.empty((0, d), dtype=np.int32)
+
+    n_survivors = len(all_survivors)
+    proven = n_survivors == 0
+
+    if verbose:
+        _log(f"     {elapsed:.2f}s: {n_processed:,} palindromic compositions")
+        _log(f"     pruned: {n_pruned:,}, survivors: {n_survivors:,}")
+        if proven:
+            _log(f"     PROVEN at L0!")
+
+    return {
+        'survivors': all_survivors,
+        'n_survivors': n_survivors,
+        'n_pruned_asym': 0,
+        'n_pruned_test': n_pruned,
+        'n_processed': n_processed,
+        'elapsed': elapsed,
+        'proven': proven,
+    }
+
+
+def process_parent_mass(parent_int, m, c_target, n_half_child, buf_cap=None):
+    """Process one palindromic parent with mass-based split + palindrome.
+
+    Returns (survivors, total_children_tested).
+    """
+    d_parent = len(parent_int)
+    d_child = 2 * d_parent
+
+    if buf_cap is None:
+        buf_cap = 100_000
+    out_buf = np.empty((buf_cap, d_child), dtype=np.int32)
+
+    n_surv, n_tested = _fused_mass_palindrome(
+        parent_int, n_half_child, m, c_target, out_buf)
+
+    if n_surv > buf_cap:
+        out_buf = np.empty((n_surv, d_child), dtype=np.int32)
+        n2, _ = _fused_mass_palindrome(
+            parent_int, n_half_child, m, c_target, out_buf)
+        assert n2 == n_surv
+        n_surv = n2
+
+    return out_buf[:n_surv].copy(), n_tested
+
+
 def _default_buf_cap(d_child):
     """Default survivor buffer capacity, scaled by dimension.
 
@@ -2677,7 +2973,7 @@ def _effective_cpu_count():
 
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                 verbose=True, output_dir='data', resume_dir=None,
-                use_flat_threshold=False):
+                use_flat_threshold=False, mass_grid=False):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
@@ -2733,15 +3029,19 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         pass  # Windows or insufficient permissions — proceed anyway
     d0 = 2 * n_half
     corr = correction(m, n_half)
-    n_total = count_compositions(d0, m)
+    if mass_grid:
+        n_total = count_compositions(n_half, m)  # palindromic half-domain
+    else:
+        n_total = count_compositions(d0, m)
 
     if verbose:
         _log(f"\n{'='*70}")
-        _log(f"CPU CASCADE PROVER")
+        _log(f"CPU CASCADE PROVER{' (MASS-GRID)' if mass_grid else ''}")
         _log(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
         _log(f"  correction(m, n_half={n_half})={corr:.6f}, "
              f"effective threshold={c_target+corr:.6f}")
-        _log(f"  L0 compositions: {n_total:,}")
+        _log(f"  L0 compositions: {n_total:,}"
+             f"{' (palindromic)' if mass_grid else ''}")
         _log(f"  workers: {n_workers} (logical CPUs: {mp.cpu_count()}, "
              f"effective: {_effective_cpu_count()})")
         _log(f"  max refinement levels: {max_levels}")
@@ -2779,8 +3079,11 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
 
     if start_level == 0:
         # --- Level 0 (fresh run) ---
-        l0 = run_level0(n_half, m, c_target, verbose=verbose,
-                         use_flat_threshold=use_flat_threshold)
+        if mass_grid:
+            l0 = run_level0_mass(n_half, m, c_target, verbose=verbose)
+        else:
+            l0 = run_level0(n_half, m, c_target, verbose=verbose,
+                             use_flat_threshold=use_flat_threshold)
 
         info = {
             'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
@@ -2860,6 +3163,72 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         total_children = 0
         total_survived = 0
         report_interval = _progress_interval(n_parents)
+
+        if mass_grid:
+            # --- Mass-grid palindrome path (serial, small search space) ---
+            all_survivors_mg = []
+            for pi in range(n_parents):
+                parent = current_configs[pi]
+                surv, n_ch = process_parent_mass(
+                    parent, m, c_target, n_half_child)
+                total_children += n_ch
+                total_survived += len(surv)
+                if len(surv) > 0:
+                    all_survivors_mg.append(surv)
+                if verbose and (pi + 1) % max(1, n_parents // 10) == 0:
+                    elapsed_so_far = time.time() - t_level
+                    n_surv = sum(len(s) for s in all_survivors_mg)
+                    _log(f"     {pi+1:,}/{n_parents:,} parents "
+                         f"| {n_surv:,} survivors | "
+                         f"{elapsed_so_far:.1f}s")
+
+            elapsed_level = time.time() - t_level
+            if all_survivors_mg:
+                all_surv = np.vstack(all_survivors_mg)
+                all_surv = _fast_dedup(all_surv)
+            else:
+                all_surv = np.empty((0, d_child), dtype=np.int32)
+
+            n_survived_level = len(all_surv)
+            expansion = n_survived_level / n_parents if n_parents > 0 else 0
+
+            level_info = {
+                'level': level_num,
+                'd_parent': d_parent,
+                'd_child': d_child,
+                'parents_in': n_parents,
+                'survivors': n_survived_level,
+                'total_children': total_children,
+                'expansion': expansion,
+                'elapsed': elapsed_level,
+            }
+            info['levels'].append(level_info)
+
+            if verbose:
+                _log(f"     L{level_num}: {n_survived_level:,} survivors "
+                     f"(expansion {expansion:.1f}x) in {elapsed_level:.2f}s")
+
+            if n_survived_level == 0:
+                info['proven_at'] = f'L{level_num}'
+                info['total_time'] = time.time() - t_total
+                if verbose:
+                    _log(f"\n  PROVEN at L{level_num}!")
+                return info
+
+            # Checkpoint
+            _save_checkpoint(output_dir, level_num, all_surv, {
+                'n_half': n_half, 'm': m, 'c_target': c_target,
+                'level_completed': level_num,
+                'd_survivors': d_child,
+                'n_survived': n_survived_level,
+                'info': info,
+            })
+
+            current_configs = all_surv
+            d_parent = d_child
+            n_half_parent = n_half_child
+            continue
+        # --- End mass_grid path ---
 
         # Memory-safe survivor collection: accumulate in RAM up to a
         # budget, then spill to disk shards.  Final dedup merges shards.
@@ -3265,6 +3634,10 @@ def main():
                              'instead of W-refined.  Required for verifying '
                              'the Lean axiom cascade_all_pruned.  Higher '
                              'threshold = fewer prunes = more survivors.')
+    parser.add_argument('--mass_grid', action='store_true',
+                        help='Use MATLAB-style mass-based grid with palindrome '
+                             'symmetry.  S=2*m (constant), only d_parent/2 '
+                             'free cursors.  Dramatically reduces search space.')
     args = parser.parse_args()
 
     info = run_cascade(
@@ -3277,6 +3650,7 @@ def main():
         output_dir=args.output_dir,
         resume_dir=args.resume,
         use_flat_threshold=args.use_flat_threshold,
+        mass_grid=args.mass_grid,
     )
 
     print_summary(info)
