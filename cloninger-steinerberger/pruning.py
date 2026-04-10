@@ -43,9 +43,10 @@ def asymmetry_prune_mask(batch_int, n_half, m, c_target):
     """Return boolean mask: True for configs NOT covered by asymmetry argument.
 
     Returns True for configs that NEED test-value checking.
+    n_half can be a float (e.g. 1.5 for d=3 starting dimension).
     """
-    d = 2 * n_half
-    total = float(4 * n_half * m)  # Fine grid: integer coords sum to 4nm
+    d = batch_int.shape[1]
+    total = float(2 * d * m)  # Fine grid: integer coords sum to 2*d*m
     threshold = asymmetry_threshold(c_target)
 
     # No discretization margin needed: left_frac = sum(c_i for left bins) / m
@@ -53,7 +54,8 @@ def asymmetry_prune_mask(batch_int, n_half, m, c_target):
     # preserved exactly under refinement (child bins sum to parent bins).
     # See docs/verification_part1_framework.md, Verification 8 for full proof.
 
-    left = batch_int[:, :n_half].sum(axis=1).astype(np.float64)
+    left_bins = d // 2  # floor(d/2) bins as "left half"
+    left = batch_int[:, :left_bins].sum(axis=1).astype(np.float64)
     left_frac = left / total
 
     # Asymmetry covers: left_frac >= threshold or left_frac <= 1 - threshold
