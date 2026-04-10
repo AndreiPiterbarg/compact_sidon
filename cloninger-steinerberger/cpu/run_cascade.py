@@ -2493,20 +2493,30 @@ _warmup_jit()
 # Level 0: generate all compositions, prune, collect survivors
 # =====================================================================
 
-def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False):
+def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
+               d0=None):
     """Run Level 0: enumerate compositions, prune, collect survivors.
 
-    Matches GPU semantics exactly:
-      - Canonical palindrome filter (only c <= rev(c))
-      - Dynamic per-window threshold (integer-space)
+    Parameters
+    ----------
+    n_half : int or float
+        Half-dimension.  For even d: integer, d = 2*n_half.
+        For odd d: pass d0 instead, n_half is computed as d0/2.
+    d0 : int, optional
+        Starting dimension (number of bins).  Overrides n_half if given.
+        Allows odd starting dimensions like d=3 (C&S original).
 
     Returns
     -------
     dict with: survivors (N, d) int32, n_survivors, n_pruned_asym,
                n_pruned_test, elapsed, proven
     """
-    d = 2 * n_half
-    S = 4 * n_half * m  # Fine grid: integer coords sum to 4nm (C&S B_{n,m})
+    if d0 is not None:
+        d = d0
+        n_half = d / 2.0  # float for odd d
+    else:
+        d = 2 * n_half
+    S = int(2 * d * m)  # Fine grid: integer coords sum to 2*d*m
     n_total = count_compositions(d, S)
     corr = correction(m, n_half)
 
@@ -2973,13 +2983,15 @@ def _effective_cpu_count():
 
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                 verbose=True, output_dir='data', resume_dir=None,
-                use_flat_threshold=False, mass_grid=False):
+                use_flat_threshold=False, mass_grid=False, d0=None):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
     ----------
-    n_half : int
-        Initial n_half (d0 = 2 * n_half).
+    n_half : int or float
+        Initial n_half (d0 = 2 * n_half).  Can be float for odd d0.
+    d0 : int, optional
+        Starting dimension (overrides n_half).  Allows odd d like d0=3.
     m : int
         Grid resolution.
     c_target : float
@@ -3027,12 +3039,16 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                                (min(needed, hard), hard))
     except (ImportError, ValueError, OSError):
         pass  # Windows or insufficient permissions — proceed anyway
-    d0 = 2 * n_half
+    if d0 is not None:
+        n_half = d0 / 2.0  # float for odd d
+    else:
+        d0 = 2 * n_half
     corr = correction(m, n_half)
+    S0 = int(2 * d0 * m)
     if mass_grid:
         n_total = count_compositions(n_half, m)  # palindromic half-domain
     else:
-        n_total = count_compositions(d0, m)
+        n_total = count_compositions(d0, S0)
 
     if verbose:
         _log(f"\n{'='*70}")
@@ -3799,6 +3815,9 @@ def main():
         description='CPU-only cascade prover (no GPU, no dimension limits)')
     parser.add_argument('--n_half', type=int, default=2,
                         help='Initial n_half (d0 = 2*n_half, default: 2)')
+    parser.add_argument('--d0', type=int, default=None,
+                        help='Starting dimension (overrides n_half, allows odd d). '
+                             'C&S original uses d0=3.')
     parser.add_argument('--m', type=int, default=20,
                         help='Grid resolution (default: 20)')
     parser.add_argument('--c_target', type=float, default=1.30,
