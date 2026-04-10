@@ -43,13 +43,6 @@ noncomputable def autoconvolution_ratio (f : ℝ → ℝ) : ℝ :=
   let integral := MeasureTheory.integral MeasureTheory.volume f
   norm_inf / (integral ^ 2)
 
-/-- The autoconvolution constant c = inf R(f) over admissible f with positive integral.
-    The condition ∫f > 0 is necessary: without it, zero-integral functions would give
-    R(f) = 0/0 = 0, making the infimum trivially ≤ 0. -/
-noncomputable def autoconvolution_constant : ℝ :=
-  sInf {r : ℝ | ∃ (f : ℝ → ℝ), (∀ x, 0 ≤ f x) ∧ (Function.support f ⊆ Set.Ioo (-1/4) (1/4))
-    ∧ MeasureTheory.integral MeasureTheory.volume f > 0 ∧ r = autoconvolution_ratio f}
-
 /-- Discrete autoconvolution: conv[k] = ∑_{i+j=k} a_i · a_j. -/
 def discrete_autoconvolution {d : ℕ} (a : Fin d → ℝ) (k : ℕ) : ℝ :=
   ∑ i : Fin d, ∑ j : Fin d, if i.1 + j.1 = k then a i * a j else 0
@@ -67,22 +60,6 @@ noncomputable def test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) (ℓ s_lo : �
   let conv := discrete_autoconvolution a
   let sum_conv := ∑ k ∈ Finset.Icc s_lo (s_lo + ℓ - 2), conv k
   (1 / (4 * n * ℓ : ℝ)) * sum_conv
-
-/-- Maximum test value over all windows (ℓ, s_lo). -/
-noncomputable def max_test_value (n m : ℕ) (c : Fin (2 * n) → ℕ) : ℝ :=
-  let d := 2 * n
-  let range_ell := Finset.Icc 2 (2 * d)
-  let range_s_lo := Finset.range (2 * d)
-  let values := range_ell.biUnion (fun ℓ => range_s_lo.image (fun s_lo => test_value n m c ℓ s_lo))
-  if h : values.Nonempty then values.max' h else 0
-
-/-- A composition on the C&S fine grid B_{n,m}: integer coordinates summing to S = 4nm.
-    Physical heights a_i = c_i / m give a step function on 2n bins
-    of width 1/(4n) with ∫g = ∑ (c_i/m)·(1/(4n)) = S/(4nm) = 1.
-    Matches CPU convention: S = 4 * n * m.
-    Palindrome symmetry: c i = c (2n - 1 - i) halves the search space. -/
-def is_composition (n m : ℕ) (c : Fin (2 * n) → ℕ) : Prop :=
-  ∑ i, c i = 4 * n * m
 
 /-- Bin masses: integral of f over each bin. -/
 noncomputable def bin_masses (f : ℝ → ℝ) (n : ℕ) : Fin (2 * n) → ℝ :=
@@ -108,11 +85,6 @@ noncomputable def canonical_discretization (f : ℝ → ℝ) (n m : ℕ) : Fin (
     if i.1 + 1 < 2 * n then discrete_cum (i.1 + 1) - discrete_cum i.1
     else S - discrete_cum i.1
 
-/-- Contributing bins for a window (ℓ, s_lo). -/
-def contributing_bins (n : ℕ) (ℓ s_lo : ℕ) : Finset (Fin (2 * n)) :=
-  let d := 2 * n
-  Finset.filter (fun i => ∃ j : Fin d, s_lo ≤ i.1 + j.1 ∧ i.1 + j.1 ≤ s_lo + ℓ - 2) Finset.univ
-
 /-- Cumulative distribution helper D(k).
     Fine grid: targets S = 4nm quanta (matching canonical_discretization). -/
 noncomputable def canonical_cumulative_distribution (f : ℝ → ℝ) (n m : ℕ) (k : ℕ) : ℕ :=
@@ -123,11 +95,43 @@ noncomputable def canonical_cumulative_distribution (f : ℝ → ℝ) (n m : ℕ
   let target_cum := cum_mass / total_mass * S
   ⌊target_cum⌋.natAbs
 
-/-- Restriction of f to bin i. -/
-noncomputable def f_restricted (f : ℝ → ℝ) (n : ℕ) (i : Fin (2 * n)) : ℝ → ℝ :=
-  let δ := 1 / (4 * n : ℝ)
-  let a := -(1/4 : ℝ) + i * δ
-  let b := -(1/4 : ℝ) + (i + 1) * δ
-  Set.indicator (Set.Ico a b) f
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Cascade Pruning Definitions
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+/-- A child at resolution 2*n_half is a valid refinement of parent at n_half.
+    Allows ±1 deviation per bin pair (from floor rounding in canonical_discretization).
+    Total mass is exact: child sums to 2 * parent sum (S doubles when n_half doubles). -/
+def is_valid_child (n_half : ℕ) (parent : Fin (2 * n_half) → ℕ)
+    (child : Fin (2 * (2 * n_half)) → ℕ) : Prop :=
+  (∑ i, child i = 2 * ∑ i, parent i) ∧
+  (∀ i : Fin (2 * n_half),
+    let pair_sum := child ⟨2 * i.val, by omega⟩ + child ⟨2 * i.val + 1, by omega⟩
+    pair_sum + 1 ≥ 2 * parent i ∧ 2 * parent i + 1 ≥ pair_sum)
+
+/-- A composition is cascade-pruned if either directly pruned (TV > threshold)
+    or ALL valid children are cascade-pruned at the next resolution.
+
+    This mirrors the cascade algorithm: at each level, the code either
+    prunes a composition (TV > threshold) or refines it into children
+    and processes each child recursively. The cascade terminating with
+    0 survivors means every root composition is CascadePruned. -/
+inductive CascadePruned (m : ℕ) (c_target correction : ℝ) :
+    (n_half : ℕ) → (Fin (2 * n_half) → ℕ) → Prop where
+  | direct {n_half : ℕ} {c : Fin (2 * n_half) → ℕ}
+      (h : ∃ ℓ s_lo, 2 ≤ ℓ ∧ test_value n_half m c ℓ s_lo > c_target + correction) :
+      CascadePruned m c_target correction n_half c
+  | refine {n_half : ℕ} {c : Fin (2 * n_half) → ℕ}
+      (h : ∀ child : Fin (2 * (2 * n_half)) → ℕ,
+        is_valid_child n_half c child →
+        CascadePruned m c_target correction (2 * n_half) child) :
+      CascadePruned m c_target correction n_half c
+
+/-- Convolution of nonneg functions is nonneg. -/
+theorem convolution_nonneg {f g : ℝ → ℝ} (hf : ∀ x, 0 ≤ f x) (hg : ∀ x, 0 ≤ g x) :
+    ∀ x, 0 ≤ MeasureTheory.convolution f g (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume x := by
+  intro x
+  simp [MeasureTheory.convolution]
+  exact MeasureTheory.integral_nonneg fun t => mul_nonneg (hf t) (hg (x - t))
 
 end -- noncomputable section
