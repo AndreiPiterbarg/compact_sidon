@@ -1,0 +1,23 @@
+/-
+Sidon Autocorrelation Project — Main Proof
+
+The complete proof chain for the main theorem:
+  autoconvolution_ratio_ge_32_25 : C₁ₐ ≥ 32/25 = 1.28
+
+Proof structure:
+  Defs → Foundational → StepFunction → TestValueBounds → DiscretizationError → FinalResult
+  with CauchySchwarz and AsymmetryBound as dependencies of TestValueBounds.
+
+Axioms (2):
+  • cascade_all_pruned — computational result from CPU cascade (n=2, m=20, c=1.28)
+  • cs_lemma3_per_window — C&S Lemma 3 discretization error bound (2/m + 1/m²)
+-/
+
+import Sidon.Proof.Foundational
+import Sidon.Proof.CauchySchwarz
+import Sidon.Proof.AsymmetryBound
+import Sidon.Proof.StepFunction
+import Sidon.Proof.TestValueBounds
+import Sidon.Proof.DiscretizationError
+import Sidon.Proof.RefinementBridge
+import Sidon.Proof.FinalResult
