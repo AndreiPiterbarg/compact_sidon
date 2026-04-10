@@ -103,7 +103,7 @@ void build_threshold_table(int32_t* table,
         int ell_idx = ell - 2;
         double scale_ell = (double)ell * four_n;
         for (int w = 0; w <= S_child; w++) {
-            double corr_w = 3.0 + (double)w / (2.0 * n_half_d);
+            double corr_w = 1.0 + (double)w / (2.0 * n_half_d);
             double dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell;
             table[ell_idx * (S_child + 1) + w] = (int32_t)(dyn_x);
         }
@@ -598,7 +598,7 @@ static bool tighten_ranges(
         int idx = ell - 2;
         double scale_ell = (double)ell * four_n;
         for (int w = 0; w <= S_child; w++) {
-            double corr_w = 3.0 + (double)w / (2.0 * n_half_d);
+            double corr_w = 1.0 + (double)w / (2.0 * n_half_d);
             double dyn_x = (c_target_m2 + corr_w + eps_margin) * scale_ell;
             threshold_table[idx * S_plus_1 + w] = (int32_t)(dyn_x);
         }
