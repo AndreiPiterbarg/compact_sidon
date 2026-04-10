@@ -9,6 +9,7 @@ Usage:
     python tests/benchmark_sweep.py --sample 100 --use_flat_threshold
 """
 import argparse
+import math
 import os
 import sys
 import time
@@ -86,14 +87,65 @@ def main():
             sample_n_actual = n_parents
 
         sample_n_actual = len(sample)
+
+        # Pre-check: estimate children per parent from first few samples
+        from pruning import correction as _corr
+        _c = _corr(m, n_half_child)
+        _thresh = c_target + _c + 1e-9
+        _x_cap = int(math.floor(m * math.sqrt(4 * d_child * _thresh)))
+        _x_cap_cs = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
+        _x_cap = min(_x_cap, _x_cap_cs)
+        # Estimate avg children/parent from the sample
+        _B = sample.astype(np.int64)
+        _lo = np.maximum(0, 2 * _B - _x_cap)
+        _hi = np.minimum(2 * _B, _x_cap)
+        _eff = np.maximum(_hi - _lo + 1, 0)
+        _counts = np.prod(_eff, axis=1)
+        _median_cpp = int(np.median(_counts))
+        _est_total = float(_median_cpp) * n_parents
+
         print(f"\nL{level}: d_parent={d_parent} -> d_child={d_child}, "
               f"{n_parents:,} parents, sampling {sample_n_actual}")
+        print(f"    x_cap={_x_cap}, median children/parent={_median_cpp:,}")
+        print(f"    estimated total children: {_est_total:.2e}")
+
+        BUDGET = 160e12
+        if _est_total > BUDGET:
+            print(f"\n*** EXCEEDS BUDGET before processing: "
+                  f"{_est_total:.2e} > {BUDGET:.0e} "
+                  f"({_est_total/BUDGET:.0f}x over) ***")
+            return
+        print(f"    budget usage: {_est_total/BUDGET*100:.1f}%")
+
+        # Sort by children count, only process parents under 500M children
+        next_level_surv = []
+        MAX_CHILDREN_PER_PARENT = 500_000_000
+        _order = np.argsort(_counts)
+        sample = sample[_order]
+        _counts_sorted = _counts[_order]
+
+        # Filter to processable parents
+        processable = _counts_sorted <= MAX_CHILDREN_PER_PARENT
+        n_processable = int(processable.sum())
+        if n_processable == 0:
+            lightest = int(_counts_sorted[0])
+            print(f"    No parents under {MAX_CHILDREN_PER_PARENT:,} "
+                  f"(lightest={lightest:,}), skipping level")
+            # Still pass survivors through for next level estimate
+            if len(next_level_surv) == 0 and level > 1:
+                return
+            break
+        sample = sample[processable][:sample_n]
+        sample_n_actual = len(sample)
+        print(f"    {n_processable} processable parents "
+              f"(< {MAX_CHILDREN_PER_PARENT:,} children)", flush=True)
 
         total_children_sampled = 0
         total_survivors_sampled = 0
-        next_level_surv = []  # only keep up to sample_n for next level
+        next_level_surv = []
         need_more = True
         t0 = time.time()
+        n_completed = 0
 
         for i, parent in enumerate(sample):
             surv_i, n_children_i = process_parent_fused(
@@ -102,23 +154,22 @@ def main():
             total_children_sampled += n_children_i
             n_surv_i = len(surv_i)
             total_survivors_sampled += n_surv_i
+            n_completed += 1
             if need_more and n_surv_i > 0:
                 next_level_surv.append(surv_i)
                 if sum(len(s) for s in next_level_surv) >= sample_n:
                     need_more = False
 
-            if (i + 1) % 10 == 0:
-                elapsed = time.time() - t0
-                avg_children = total_children_sampled / (i + 1)
-                avg_surv = total_survivors_sampled / (i + 1)
-                print(f"    [{i+1}/{sample_n_actual}] "
-                      f"avg children/parent={avg_children:,.0f}, "
-                      f"avg survivors/parent={avg_surv:,.1f}, "
-                      f"{elapsed:.1f}s")
+            print(f"    [{i+1}/{sample_n_actual}] "
+                  f"{n_children_i:,} children, {n_surv_i:,} surv",
+                  flush=True)
 
         elapsed = time.time() - t0
-        avg_children = total_children_sampled / sample_n_actual
-        avg_survivors = total_survivors_sampled / sample_n_actual
+        if n_completed == 0:
+            print(f"  L{level}: no parents completed, stopping")
+            return
+        avg_children = total_children_sampled / n_completed
+        avg_survivors = total_survivors_sampled / n_completed
         expansion = avg_survivors  # survivors per parent
 
         print(f"  L{level} summary: {elapsed:.1f}s")
@@ -127,7 +178,9 @@ def main():
         print(f"    expansion factor:     {expansion:.2f}x")
 
         est_total_survivors = int(expansion * n_parents)
+        est_total_children = int(avg_children * n_parents)
         print(f"    estimated total survivors: {est_total_survivors:,}")
+        print(f"    estimated total children:  {est_total_children:,}")
 
         # --- Futility checks ---
         if total_survivors_sampled == 0:
@@ -135,17 +188,16 @@ def main():
                   f"Cascade converges. ***")
             return
 
-        if expansion > 50:
-            print(f"\n*** FUTILE: expansion {expansion:.0f}x at L{level}. "
-                  f"Children per parent ~{avg_children:,.0f}, "
-                  f"survivors ~{avg_survivors:,.0f}. "
-                  f"This config won't converge. ***")
+        # Budget check: 160T children total across all remaining levels
+        BUDGET = 160e12
+        if est_total_children > BUDGET:
+            print(f"\n*** EXCEEDS BUDGET: {est_total_children:.2e} total children "
+                  f"at L{level} > {BUDGET:.0e} budget. "
+                  f"({est_total_children/BUDGET:.0f}x over) ***")
             return
 
-        if avg_children > 1e12:
-            print(f"\n*** FUTILE: {avg_children:.1e} children/parent at L{level}. "
-                  f"Enumeration alone is intractable. ***")
-            return
+        print(f"    budget usage: {est_total_children/BUDGET*100:.1f}% "
+              f"of {BUDGET:.0e}")
 
         # Only keep enough survivors to seed next level's sample
         survivors = np.vstack(next_level_surv)
