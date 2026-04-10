@@ -47,3 +47,13 @@ prompts_IGNORE/
 # RunPod secrets and session state
 .env
 gpupod/.session.json
+
+# Large data files (exceed GitHub 100MB limit)
+data/*.npy
+data/*.dat
+data/_shards_L2/
+data/subtree_test/
+
+# Temp/backup files
+*.stackdump
+*.bak
