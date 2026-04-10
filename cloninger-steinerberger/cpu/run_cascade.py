@@ -3606,6 +3606,191 @@ def print_summary(info):
 
 
 # =====================================================================
+# Relaxed child verification (for Lean axiom soundness)
+# =====================================================================
+
+def _generate_delta_vectors(d):
+    """Generate all delta vectors in {-1,0,1}^d that sum to 0.
+
+    For d=4: 19 vectors.  For d=8: 1107 vectors.
+    These represent the +/-1 floor-rounding deviations that can occur
+    when canonical_discretization at doubled resolution doesn't exactly
+    match the cascade's exact child constraint (child[2i]+child[2i+1] = 2*parent[i]).
+    """
+    deltas = []
+    for combo in itertools.product([-1, 0, 1], repeat=d):
+        if sum(combo) == 0:
+            deltas.append(combo)
+    return deltas
+
+
+def verify_relaxed_children(parents, n_half_parent, m, c_target,
+                            use_flat_threshold=True, verbose=True):
+    """Verify that ALL +/-1 rounding variants of children are also pruned.
+
+    For each parent at the current level, the cascade checks children with
+    child[2i]+child[2i+1] = 2*parent[i] exactly.  But canonical_discretization
+    at doubled resolution can produce child[2i]+child[2i+1] = 2*parent[i] + delta_i
+    where delta_i in {-1, 0, 1} and sum(delta_i) = 0.
+
+    This function verifies that the cascade ALSO prunes all such +/-1 variants,
+    ensuring the CascadePruned axiom with relaxed is_valid_child is sound.
+
+    Parameters
+    ----------
+    parents : (N, d_parent) int32 array
+        Parent compositions that SURVIVED at this level (need children checked).
+    n_half_parent : int
+        Half-dimension of parent (n_half at the parent level).
+    m, c_target : cascade parameters
+    use_flat_threshold : bool
+        Must be True for Lean axiom verification.
+
+    Returns
+    -------
+    dict with 'all_pruned' (bool), 'n_delta_variants', 'n_unpruned_variants',
+    'unpruned_examples' (list of dicts with parent, delta, survivors).
+    """
+    d_parent = parents.shape[1]
+    n_half_child = 2 * n_half_parent
+    d_child = 2 * d_parent
+
+    # Generate non-zero delta vectors (skip all-zeros — that's the standard cascade)
+    all_deltas = _generate_delta_vectors(d_parent)
+    nonzero_deltas = [d for d in all_deltas if any(di != 0 for di in d)]
+
+    if verbose:
+        _log(f"  Relaxed verification: {len(nonzero_deltas)} non-zero delta "
+             f"vectors for d_parent={d_parent}")
+
+    n_parents = len(parents)
+    total_variants = 0
+    unpruned_variants = 0
+    unpruned_examples = []
+
+    for pi in range(n_parents):
+        parent = parents[pi]
+
+        for delta in nonzero_deltas:
+            # Create modified parent: each bin i has pair sum 2*parent[i] + delta[i]
+            # instead of 2*parent[i].
+            # We need to check if ALL compositions with these modified pair sums
+            # are pruned.
+            #
+            # Approach: create a virtual parent where pair_sum_i = 2*parent[i] + delta[i].
+            # The cursor range for bin i is [0, pair_sum_i], and
+            # child[2i] = cursor[i], child[2i+1] = pair_sum_i - cursor[i].
+            # Skip if any pair_sum_i < 0.
+            pair_sums = [2 * int(parent[i]) + delta[i] for i in range(d_parent)]
+            if any(ps < 0 for ps in pair_sums):
+                continue
+
+            total_variants += 1
+
+            # Generate all children for this delta variant
+            # Total children = product of (pair_sum_i + 1) for each bin
+            total_children = 1
+            for ps in pair_sums:
+                total_children *= (ps + 1)
+
+            if total_children == 0:
+                continue
+
+            # For small child counts, generate explicitly and batch-prune
+            # For large child counts, use the fused kernel with modified ranges
+            if total_children <= 100_000:
+                # Generate all children explicitly
+                children = np.empty((total_children, d_child), dtype=np.int32)
+                idx = 0
+                ranges = [range(ps + 1) for ps in pair_sums]
+                for combo in itertools.product(*ranges):
+                    for i in range(d_parent):
+                        children[idx, 2 * i] = combo[i]
+                        children[idx, 2 * i + 1] = pair_sums[i] - combo[i]
+                    idx += 1
+
+                # Apply Cauchy-Schwarz pre-filter (x_cap)
+                from pruning import correction as _correction
+                corr = _correction(m, n_half_child)
+                thresh = c_target + corr + 1e-9
+                x_cap = int(math.floor(m * math.sqrt(4 * d_child * thresh)))
+                x_cap_cs = int(math.floor(
+                    m * math.sqrt(4 * d_child * c_target))) + 1
+                x_cap = min(x_cap, x_cap_cs)
+                feasible = np.all(children <= x_cap, axis=1)
+                children = children[feasible]
+
+                if len(children) == 0:
+                    continue
+
+                # Batch prune
+                survived = _prune_dynamic_int32(
+                    children, n_half_child, m, c_target,
+                    use_flat_threshold=use_flat_threshold)
+                n_survived = int(np.sum(survived))
+
+                if n_survived > 0:
+                    unpruned_variants += 1
+                    if len(unpruned_examples) < 5:
+                        surv_arr = children[survived]
+                        unpruned_examples.append({
+                            'parent': parent.tolist(),
+                            'delta': list(delta),
+                            'n_survived': n_survived,
+                            'example_survivor': surv_arr[0].tolist(),
+                        })
+            else:
+                # For very large child counts, use fused kernel approach
+                # Create a "virtual parent" with modified pair sums
+                virtual_parent = np.array(pair_sums, dtype=np.int32)
+                # Divide by 2 (rounding) to create effective parent for the kernel
+                # The kernel generates child[2i]+child[2i+1] = 2*vp[i]
+                # We need pair_sum = 2*vp[i], so vp[i] = pair_sum/2
+                # But pair_sum may be odd! In that case, split differently.
+                # For odd pair_sum ps: one child has ceil(ps/2), other has floor(ps/2)
+                # We can handle this by running the kernel with vp[i] = (ps+1)//2
+                # and adjusting, but this gets complex.
+                #
+                # Simpler: just skip this and warn. For d_parent=4, total_children
+                # is at most ~(2*160+1)^4 which is huge, but the delta shifts are small
+                # (+/-1 from 2*parent[i]) so the actual pair sums are close to even.
+                # In practice with m=20 and d_parent=4, max parent bin ~160, so
+                # pair_sum max ~321, giving ~321^4 ~ 10^10 children. Too many to enumerate.
+                #
+                # However: the x_cap pre-filter typically reduces this dramatically.
+                # And for the Lean axiom, we only care about the case n_half=2, m=20.
+                # At L0 (d_parent=4), the surviving parents have small bin values,
+                # so total_children after x_cap filtering should be manageable.
+                _log(f"  WARNING: delta variant for parent {pi} has {total_children:,} "
+                     f"children — too many to enumerate. Skipping.")
+                unpruned_variants += 1  # conservative: count as unpruned
+
+        if verbose and (pi + 1) % max(1, n_parents // 10) == 0:
+            _log(f"     Relaxed verify: {pi+1}/{n_parents} parents checked, "
+                 f"{unpruned_variants} unpruned variants so far")
+
+    all_pruned = unpruned_variants == 0
+
+    if verbose:
+        if all_pruned:
+            _log(f"  RELAXED VERIFICATION PASSED: all {total_variants} "
+                 f"delta variants pruned across {n_parents} parents")
+        else:
+            _log(f"  RELAXED VERIFICATION FAILED: {unpruned_variants}/"
+                 f"{total_variants} variants have survivors")
+            for ex in unpruned_examples[:3]:
+                _log(f"    parent={ex['parent']}, delta={ex['delta']}, "
+                     f"survivors={ex['n_survived']}")
+
+    return {
+        'all_pruned': all_pruned,
+        'n_delta_variants': total_variants,
+        'n_unpruned_variants': unpruned_variants,
+        'unpruned_examples': unpruned_examples,
+    }
+
+
+# =====================================================================
 # CLI
 # =====================================================================
 
@@ -3638,6 +3823,11 @@ def main():
                         help='Use MATLAB-style mass-based grid with palindrome '
                              'symmetry.  S=2*m (constant), only d_parent/2 '
                              'free cursors.  Dramatically reduces search space.')
+    parser.add_argument('--verify_relaxed', action='store_true',
+                        help='After cascade completes, verify that +/-1 floor '
+                             'rounding variants of children are also pruned. '
+                             'Required for soundness of the Lean CascadePruned '
+                             'axiom with relaxed is_valid_child.')
     args = parser.parse_args()
 
     info = run_cascade(
@@ -3654,6 +3844,53 @@ def main():
     )
 
     print_summary(info)
+
+    # --- Relaxed verification (optional) ---
+    if args.verify_relaxed:
+        print(f"\n{'='*70}")
+        print("RELAXED CHILD VERIFICATION (+/-1 floor rounding)")
+        print(f"{'='*70}")
+        if not args.use_flat_threshold:
+            print("WARNING: --verify_relaxed should be used with --use_flat_threshold "
+                  "for Lean axiom soundness.")
+
+        # Load checkpoints for each level and verify relaxed children
+        all_relaxed_ok = True
+        n_half_cur = args.n_half
+
+        # L0 survivors need relaxed verification at the L1 child level
+        for level in range(20):  # up to max levels
+            ckpt_path = os.path.join(args.output_dir,
+                                     f'checkpoint_L{level}_survivors.npy')
+            if not os.path.exists(ckpt_path):
+                break
+
+            survivors = np.load(ckpt_path)
+            if len(survivors) == 0:
+                continue
+
+            n_half_parent = args.n_half * (2 ** level)
+            print(f"\n[L{level}] Verifying {len(survivors)} survivors "
+                  f"(d_parent={2*n_half_parent})")
+
+            result = verify_relaxed_children(
+                survivors, n_half_parent, args.m, args.c_target,
+                use_flat_threshold=args.use_flat_threshold,
+                verbose=True)
+
+            if not result['all_pruned']:
+                all_relaxed_ok = False
+                print(f"  FAILED at L{level}!")
+
+        if all_relaxed_ok:
+            print(f"\n{'='*70}")
+            print("ALL RELAXED VERIFICATIONS PASSED")
+            print(f"The CascadePruned axiom with is_valid_child (+/-1 tolerance) is sound.")
+            print(f"{'='*70}")
+        else:
+            print(f"\n{'='*70}")
+            print("RELAXED VERIFICATION FAILED — some delta variants have survivors")
+            print(f"{'='*70}")
 
     # Save result
     os.makedirs(args.output_dir, exist_ok=True)
