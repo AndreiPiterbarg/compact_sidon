@@ -598,8 +598,8 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
     # Asymmetry bound applies directly to c (not through discretization),
     # so compare against c_target, not prune_target.
     inv_m_sq = inv_m * inv_m
-    # Max per-window correction (3+2W)/m² at W=m is (3+2m)/m² = 3/m² + 2/m.
-    correction_max = 3.0 * inv_m_sq + 2.0 * inv_m
+    # Max per-window correction (1+W/(2n))/m² at W=S is (1+2m)/m² = 1/m² + 2/m.
+    correction_max = 1.0 * inv_m_sq + 2.0 * inv_m
     c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
@@ -651,7 +651,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                     hi_bin_val = s_lo  # s_lo + ell - 2 = s_lo + 0 = s_lo for ell=2
                     hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                     W_pos = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                    corr_w = (3.0 + float(W_pos) / (2.0 * n_half)) * inv_m_sq
+                    corr_w = (1.0 + float(W_pos) / (2.0 * n_half)) * inv_m_sq
                     dyn_thresh_pos = c_target + corr_w + fp_margin
                     if tv > dyn_thresh_pos:
                         pruned_d2 = True
@@ -763,7 +763,7 @@ def _prove_target_generic(c0_order, S, d, n_half, inv_m, margin, prune_target, f
                             hi_bin_val = s_lo + ell - 2
                             hi_bin = hi_bin_val if hi_bin_val < d_minus_1 else d_minus_1
                             W_int = prefix_c_arr[hi_bin + 1] - prefix_c_arr[lo_bin]
-                            corr_w = (3.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
+                            corr_w = (1.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
                             dyn_thresh = c_target + corr_w + fp_margin
                             if tv > dyn_thresh:
                                 pruned = True
@@ -869,9 +869,9 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     n_c0 = len(c0_order)
     thresh = prune_target + fp_margin
     scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
-    # Max per-window correction (3+2W)/m² at W=m is (3+2m)/m² = 3/m² + 2/m.
+    # Max per-window correction (1+W/(2n))/m² at W=S is (1+2m)/m² = 1/m² + 2/m.
     inv_m_sq = inv_m * inv_m
-    correction_max = 3.0 * inv_m_sq + 2.0 * inv_m
+    correction_max = 1.0 * inv_m_sq + 2.0 * inv_m
     c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
@@ -995,7 +995,7 @@ def _prove_target_d4(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
                         lo_bin = s_lo - 3 if s_lo > 3 else 0
                         hi_bin = s_lo + ell - 2 if s_lo + ell - 2 < 3 else 3
                         W_int = pc[hi_bin + 1] - pc[lo_bin]
-                        corr_w = (3.0 + 2.0 * W_int) * inv_m_sq
+                        corr_w = (1.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
                         dyn_thresh = c_target + corr_w + fp_margin
                         if tv > dyn_thresh:
                             pruned = True
@@ -1035,9 +1035,9 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
     n_c0 = len(c0_order)
     thresh = prune_target + fp_margin
     scale = inv_m   # c -> a conversion factor (1/m); fine grid heights = c_i/m
-    # Max per-window correction (3+2W)/m² at W=m is (3+2m)/m² = 3/m² + 2/m.
+    # Max per-window correction (1+W/(2n))/m² at W=S is (1+2m)/m² = 1/m² + 2/m.
     inv_m_sq = inv_m * inv_m
-    correction_max = 3.0 * inv_m_sq + 2.0 * inv_m
+    correction_max = 1.0 * inv_m_sq + 2.0 * inv_m
     c_target = prune_target - correction_max
 
     thread_survivors = np.zeros(n_c0, dtype=np.int64)
@@ -1165,7 +1165,7 @@ def _prove_target_d6(c0_order, S, n_half, inv_m, margin, prune_target, fp_margin
                                 lo_bin = s_lo - 5 if s_lo > 5 else 0
                                 hi_bin = s_lo + ell - 2 if s_lo + ell - 2 < 5 else 5
                                 W_int = pc6[hi_bin + 1] - pc6[lo_bin]
-                                corr_w = (3.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
+                                corr_w = (1.0 + float(W_int) / (2.0 * n_half)) * inv_m_sq
                                 dyn_thresh = c_target + corr_w + fp_margin
                                 if tv > dyn_thresh:
                                     pruned = True
