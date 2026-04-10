@@ -138,7 +138,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target,
                     if hi_bin > d_minus_1:
                         hi_bin = d_minus_1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    corr_w = 3.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
                     dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                     dyn_it = np.int64(dyn_x)
                     if ws > dyn_it:
@@ -233,7 +233,7 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target,
                     if hi_bin > d_minus_1:
                         hi_bin = d_minus_1
                     W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    corr_w = 3.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
                     dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                     dyn_it = np.int64(dyn_x)
                     if ws > dyn_it:
@@ -986,7 +986,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
                             W_int_unfixed = np.int64(0)
 
                         W_int_max = W_int_fixed + W_int_unfixed
-                        corr_w = 3.0 + np.float64(W_int_max) / (2.0 * n_half_d)
+                        corr_w = 1.0 + np.float64(W_int_max) / (2.0 * n_half_d)
                         dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                         dyn_it = np.int64(dyn_x)
                         if ws > dyn_it:
@@ -1183,7 +1183,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                 threshold_table[idx * S_child_plus_1 + w] = flat_val
         else:
             for w in range(S_child_plus_1):
-                corr_w = 3.0 + np.float64(w) / (2.0 * n_half_d)
+                corr_w = 1.0 + np.float64(w) / (2.0 * n_half_d)
                 dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                 threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
 
@@ -1792,7 +1792,7 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
                 threshold_table[idx * S_child_plus_1 + w] = flat_val
         else:
             for w in range(S_child_plus_1):
-                corr_w = 3.0 + np.float64(w) / (2.0 * n_half_d)
+                corr_w = 1.0 + np.float64(w) / (2.0 * n_half_d)
                 dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                 threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
 
