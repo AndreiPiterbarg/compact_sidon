@@ -13,7 +13,7 @@
 - FP32 mantissa: 24 bits = exact to 16,777,216
 - **All values fit exactly in FP32 for m ≤ 200** (max intermediate: `2 × 200 × 200 × 64 = 5,120,000 < 16M`)
 
-**HOWEVER:** The threshold comparison uses int64: `ws (int64) > dyn_it (int64)`. The window sum can be up to `63 × 400 = 25,200` which fits int32. But `dyn_x = (c_target × m² + 3 + W_int/(2n) + eps) × 4n × ell` is float64.
+**HOWEVER:** The threshold comparison uses int64: `ws (int64) > dyn_it (int64)`. The window sum can be up to `63 × 400 = 25,200` which fits int32. But `dyn_x = (c_target × m² + 1 + W_int/(2n) + eps) × 4n × ell` is float64 (W-refined), or `(c_target × m² + 2m + 1 + eps) × 4n × ell` (flat, for Lean axiom).
 
 **Recommendation:**
 - Compute autoconvolution cross-terms in **int32** (they must be exact for proof correctness)

@@ -79,7 +79,7 @@ def main():
 
         # Sample
         if n_parents > sample_n:
-            idx = np.random.default_rng(42).choice(n_parents, sample_n,
+            idx = np.random.default_rng().choice(n_parents, sample_n,
                                                     replace=False)
             sample = survivors[idx]
         else:

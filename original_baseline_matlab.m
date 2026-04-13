@@ -1,3 +1,70 @@
+% =========================================================================
+% CLONINGER-STEINERBERGER LOWER BOUND PROVER FOR C_{1a}
+% =========================================================================
+%
+% WHAT THIS PROVES:
+%   For any nonneg f supported on [-1/4, 1/4] with integral 1,
+%   max_{|t|<=1/2} (f*f)(t) >= lowerBound (here 1.28).
+%   The proof is by exhaustive branch-and-prune: if every discretized
+%   mass distribution is pruned, no continuous function can beat the bound.
+%
+% CORE INSIGHT:
+%   This is an infinite-dimensional optimization problem that can be
+%   approximated by finite-dimensional ones. Partition [-1/4, 1/4] into
+%   d equal bins. Any nonneg function with integral 1 must spread its
+%   mass across those bins. Two facts drive the entire algorithm:
+%
+%   1. CONVOLUTION SUPPORT: If f is supported on interval I and g on J,
+%      then (f*g) is supported on the Minkowski sum I+J.
+%
+%   2. AVERAGING BOUND: If a function has integral >= A over a set of
+%      length B, then its maximum >= A/B.
+%
+%   Together: for a window W of j consecutive bins in convolution space
+%   (total length j/(2*numBins)), the integral of (f*f) over W equals
+%   sum_{pairs (i,k) contributing to W} m_i * m_k, so
+%   max(f*f) over W >= sum(m_i*m_k) * (2*numBins)/j.
+%
+%   We use unions of consecutive bins as windows (other shapes spread
+%   I+J too much and lose efficiency).
+%
+% CASCADE (BRANCH-AND-PRUNE):
+%   Start with a small number of bins. For each mass distribution, check
+%   whether any window's convolution value already exceeds the target
+%   bound. If so, that distribution is PRUNED -- no finer decomposition
+%   can avoid the bound. Only survivors are refined: each bin splits in
+%   two, and the process repeats at the next level.
+%
+% THRESHOLD CORRECTION (C&S eq(1)):
+%   The discrete step function g approximates the true continuous f.
+%   With quantization step epsilon (= gridSpace), C&S eq(1) gives:
+%     (g*g)(x) <= (f*f)(x) + 2*epsilon*W(x) + epsilon^2
+%   where W(x) = total mass of bins overlapping the window at x.
+%   So to prove (f*f)(x) >= c, it suffices to show:
+%     (g*g)(x) >= c + epsilon^2 + 2*epsilon*W(x)
+%   This is the "boundToBeat" on line 219 below.
+%
+% PER-BIN MASS BOUND:
+%   If a single bin of width 1/(2*numBins) has mass w, then the
+%   self-convolution (f_i*f_i) over a window of 1 convolution bin
+%   (length 1/(2*numBins)) has max >= w^2 * numBins. So any bin with
+%   w >= sqrt(lowerBound / numBins) is already pruned by self-convolution
+%   alone. This is used to limit the range of child masses (line 148).
+%
+% VARIABLES:
+%   lowerBound   - the target C_{1a} lower bound to prove
+%   gridSpace    - mass quantization step (= epsilon, = 1/m in our code)
+%   numBins      - current number of bins (doubles each cascade level)
+%   binStore     - cell array of surviving mass distributions to refine
+%   storeWorstFinal - per-master-bin collection of all survivors
+%   functionMult - m_i * m_j for all pairs (i,j), for all children
+%   sumIndicesStore{j} - indicator: which (i,k) pairs contribute to each
+%                        window of size j in convolution space
+%   binsContribute{j}  - which original bins overlap each window of size j
+%                         (used to compute W(x) for the threshold)
+%   convFunctionVals    - convolution integral / window length = max estimate
+%   boundToBeat         - c + eps^2 + 2*eps*W (dynamic per-window threshold)
+% =========================================================================
 
 % set parameters
 lowerBound = 1.28;

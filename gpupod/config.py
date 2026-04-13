@@ -17,7 +17,7 @@ RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "")
 DOCKER_IMAGE = "runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04"
 GPU_TYPE = "NVIDIA H100 80GB HBM3"
 GPU_COUNT = int(os.environ.get("GPU_COUNT", "8"))
-CLOUD_TYPE = os.environ.get("CLOUD_TYPE", "SPOT")  # SPOT for spot, SECURE for on-demand
+CLOUD_TYPE = os.environ.get("CLOUD_TYPE", "ALL")  # ALL = spot+on-demand, SECURE = on-demand only
 CONTAINER_DISK_GB = 100
 VOLUME_IN_GB = 200
 
