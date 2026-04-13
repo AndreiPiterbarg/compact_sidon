@@ -167,7 +167,7 @@ theorem autoconvolution_ratio_scale_invariant (f : ℝ → ℝ) (a : ℝ) (ha : 
     Proof: Normalize f to g with ∫g = 1, discretize g at resolution n=2 with m=20,
     apply cascade_all_pruned to find a killing window (ℓ, s_lo) where TV exceeds the
     C&S threshold, then apply dynamic_threshold_sound_cs to conclude R(g) ≥ 32/25. -/
-private lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
+lemma eLpNorm_convolution_scale_ne_top (f : ℝ → ℝ) (a : ℝ)
     (h_fin : MeasureTheory.eLpNorm (MeasureTheory.convolution f f
       (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) ⊤ MeasureTheory.volume ≠ ⊤) :
     MeasureTheory.eLpNorm (MeasureTheory.convolution (fun x => a * f x) (fun x => a * f x)

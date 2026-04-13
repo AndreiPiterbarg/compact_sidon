@@ -8,9 +8,15 @@ Proof structure:
   Defs → Foundational → StepFunction → TestValueBounds → DiscretizationError → FinalResult
   with CauchySchwarz and AsymmetryBound as dependencies of TestValueBounds.
 
-Axioms (2):
-  • cascade_all_pruned — computational result from CPU cascade (n=2, m=20, c=1.28)
-  • cs_lemma3_per_window — C&S Lemma 3 discretization error bound (2/m + 1/m²)
+W-Refined proof chain (tighter thresholds):
+  WRefinedBound extends DiscretizationError with per-window W-refined correction.
+  Uses C&S equation (1) instead of Lemma 3 for ~3-5× tighter threshold.
+
+Axioms:
+  • cs_lemma3_per_window — C&S Lemma 3 flat bound (2/m + 1/m²)
+  • cs_eq1_w_refined    — C&S eq(1) W-refined bound (W_int/(2n·m²) + 1/m²)
+  • cascade_all_pruned  — computational result with flat threshold
+  • cascade_all_pruned_w — computational result with W-refined threshold
 -/
 
 import Sidon.Proof.Foundational
@@ -21,3 +27,5 @@ import Sidon.Proof.TestValueBounds
 import Sidon.Proof.DiscretizationError
 import Sidon.Proof.RefinementBridge
 import Sidon.Proof.FinalResult
+import Sidon.Proof.WRefinedBound
+import Sidon.Proof.CoarseCascade

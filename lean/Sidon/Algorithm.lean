@@ -43,3 +43,9 @@ import Sidon.Algorithm.ArcConsistency
 import Sidon.Algorithm.RefinementSupport
 import Sidon.Algorithm.CorrectionSupport
 import Sidon.Algorithm.EssSup
+
+-- Block mass invariant (parent-level pruning)
+import Sidon.Algorithm.BlockMassInvariant
+
+-- GPU kernel soundness (stubs — not yet proved)
+import Sidon.Algorithm.GpuKernelSoundness
