@@ -39,7 +39,8 @@ sys.path.insert(0, _cs_dir)
 from compositions import (generate_canonical_compositions_batched,
                          generate_compositions_batched)
 from pruning import (correction, asymmetry_threshold, count_compositions,
-                     asymmetry_prune_mask, _canonical_mask)
+                     asymmetry_prune_mask, _canonical_mask,
+                     block_mass_prune_mask)
 from test_values import compute_test_values_batch
 
 
@@ -58,7 +59,7 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target,
 
     When use_flat_threshold=True, uses the flat C&S Lemma 3 correction
     (2/m + 1/m^2 → integer correction 2m+1) instead of the W-refined
-    correction (3 + W_int/(2n)).  The flat threshold is what the Lean
+    correction (1 + W_int/(2n)).  The flat threshold is what the Lean
     axiom cascade_all_pruned requires for soundness.
     """
     B = batch_int.shape[0]
@@ -252,7 +253,7 @@ def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False):
     Works in integer convolution space (fine grid: c_i sum to S = 4nm).
 
     When use_flat_threshold=False (default): uses the W-refined correction
-        dyn_it = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+        dyn_it = floor((c_target*m^2 + 1 + W_int/(2n) + eps) * 4n*ell)
     which is tighter (prunes more) but does NOT verify the Lean axiom.
 
     When use_flat_threshold=True: uses the flat C&S Lemma 3 correction
@@ -268,6 +269,545 @@ def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False):
     else:
         return _prune_dynamic_int64(batch_int, n_half, m, c_target,
                                      use_flat_threshold)
+
+
+# =====================================================================
+# Coarse-grid helpers: pair-count prefix sums for second-order box cert
+# =====================================================================
+
+@njit(cache=True)
+def _build_pair_prefix(d):
+    """Build prefix sums for n_k (pair counts) and m_k (self-term indicators).
+
+    n_k = #{(i,j): 0<=i,j<d, i+j=k} = min(k+1, d, 2d-1-k)
+    m_k = 1 if k even and k//2 < d, else 0
+
+    Returns (prefix_nk, prefix_mk) each of length conv_len+1 = 2d.
+    """
+    conv_len = 2 * d - 1
+    prefix_nk = np.zeros(conv_len + 1, dtype=np.int64)
+    prefix_mk = np.zeros(conv_len + 1, dtype=np.int64)
+    for k in range(conv_len):
+        nk = min(k + 1, d, conv_len - k)
+        mk = np.int64(1) if (k % 2 == 0 and k // 2 < d) else np.int64(0)
+        prefix_nk[k + 1] = prefix_nk[k] + np.int64(nk)
+        prefix_mk[k + 1] = prefix_mk[k] + mk
+    return prefix_nk, prefix_mk
+
+
+# =====================================================================
+# Coarse-grid L0 batch pruning (Theorem 1 + sound box cert)
+# =====================================================================
+
+@njit(parallel=True, cache=True)
+def _prune_coarse(batch_int, d, S, c_target):
+    """Prune coarse-grid compositions by Theorem 1 (no correction).
+
+    Prune if exists window (ell, s) with TV_W >= c_target.
+    Integer: ws > floor(c_target * ell * S^2 / (2*d) - eps).
+
+    Returns (survived_mask, min_cert_net).
+    min_cert_net: smallest (margin - cell_var - quad_corr).
+    """
+    B = batch_int.shape[0]
+    conv_len = 2 * d - 1
+    survived = np.ones(B, dtype=numba.boolean)
+
+    S_d = np.float64(S)
+    S_sq = S_d * S_d
+    d_d = np.float64(d)
+    inv_2d = 1.0 / (2.0 * d_d)
+    inv_4S2 = 1.0 / (4.0 * S_sq)
+    eps = 1e-9
+    max_ell = 2 * d
+
+    thr_arr = np.empty(max_ell + 1, dtype=np.int64)
+    for ell in range(2, max_ell + 1):
+        thr_arr[ell] = np.int64(c_target * np.float64(ell) * S_sq * inv_2d
+                                - eps)
+
+    prefix_nk, prefix_mk = _build_pair_prefix(d)
+
+    n_threads = numba.config.NUMBA_NUM_THREADS
+    min_net_arr = np.full(n_threads, 1e30, dtype=np.float64)
+
+    for b in prange(B):
+        tid = numba.get_thread_id()
+
+        conv = np.zeros(conv_len, dtype=np.int32)
+        for i in range(d):
+            ci = np.int32(batch_int[b, i])
+            if ci != 0:
+                conv[2 * i] += ci * ci
+                for j in range(i + 1, d):
+                    cj = np.int32(batch_int[b, j])
+                    if cj != 0:
+                        conv[i + j] += np.int32(2) * ci * cj
+
+        pruned = False
+        best_net = np.float64(-1e30)
+        grad_arr = np.empty(d, dtype=np.float64)
+
+        for ell in range(2, max_ell + 1):
+            n_cv = ell - 1
+            n_windows = conv_len - n_cv + 1
+            ws = np.int64(0)
+            for k in range(n_cv):
+                ws += np.int64(conv[k])
+            dyn_it = thr_arr[ell]
+            ell_f = np.float64(ell)
+            scale_g = 4.0 * d_d / ell_f
+
+            for s_lo in range(n_windows):
+                if s_lo > 0:
+                    ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(
+                        conv[s_lo - 1])
+                if ws > dyn_it:
+                    pruned = True
+                    tv = np.float64(ws) * 2.0 * d_d / (S_sq * ell_f)
+                    margin = tv - c_target
+
+                    for i in range(d):
+                        g = 0.0
+                        for j in range(d):
+                            kk = i + j
+                            if s_lo <= kk <= s_lo + ell - 2:
+                                g += np.float64(batch_int[b, j]) / S_d
+                        grad_arr[i] = g * scale_g
+                    for i in range(1, d):
+                        key = grad_arr[i]
+                        jj = i - 1
+                        while jj >= 0 and grad_arr[jj] > key:
+                            grad_arr[jj + 1] = grad_arr[jj]
+                            jj -= 1
+                        grad_arr[jj + 1] = key
+                    cell_var = 0.0
+                    for k in range(d // 2):
+                        cell_var += grad_arr[d - 1 - k] - grad_arr[k]
+                    cell_var /= (2.0 * S_d)
+
+                    hi_idx = s_lo + ell - 1
+                    N_W = prefix_nk[hi_idx] - prefix_nk[s_lo]
+                    M_W = prefix_mk[hi_idx] - prefix_mk[s_lo]
+                    cross_W = N_W - M_W
+                    d_sq = np.int64(d) * np.int64(d)
+                    compl_bound = d_sq - N_W
+                    pb = min(cross_W, compl_bound)
+                    qc = (2.0 * d_d / ell_f) * np.float64(
+                        max(pb, np.int64(0))) * inv_4S2
+
+                    net = margin - cell_var - qc
+                    if net > best_net:
+                        best_net = net
+
+        if pruned:
+            survived[b] = False
+            if best_net < min_net_arr[tid]:
+                min_net_arr[tid] = best_net
+
+    global_min_net = 1e30
+    for t in range(n_threads):
+        if min_net_arr[t] < global_min_net:
+            global_min_net = min_net_arr[t]
+
+    return survived, global_min_net
+
+
+# =====================================================================
+# L0 Branch-and-Bound kernel (parallelized over first bin)
+# =====================================================================
+#
+# Soundness of partial pruning:
+#   - All c_i >= 0, so all conv cross-terms are non-negative.
+#     Therefore partial_ws (from assigned bins) <= final_ws.
+#   - The flat threshold is W-independent (doesn't grow as more bins
+#     are assigned), so partial_ws > flat_thr implies final_ws > flat_thr.
+#   - At leaves, uses the tighter W-refined threshold for maximum pruning.
+
+@njit(cache=True)
+def _l0_bnb_inner(c0, d, S, n_half_d, cs_base_m2, eps_margin,
+                   flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+                   max_ell, four_n, use_flat_threshold,
+                   out_buf, count_only):
+    """B&B subtree with bins[0]=c0 fixed.
+
+    When count_only=True, counts survivors without writing to buffer.
+    Returns (n_survivors, n_leaves_tested).
+    """
+    conv_len = 2 * d - 1
+    d_m1 = d - 1
+    conv = np.zeros(conv_len, dtype=np.int32)
+    bins = np.zeros(d, dtype=np.int32)
+    rem_arr = np.zeros(d, dtype=np.int32)
+
+    bins[0] = c0
+    if c0 > 0:
+        conv[0] = c0 * c0
+    rem_arr[0] = S
+    rem_arr[1] = S - c0
+
+    n_surv = np.int64(0)
+    n_tested = np.int64(0)
+    buf_cap = np.int64(0)
+    if not count_only:
+        buf_cap = np.int64(out_buf.shape[0])
+
+    # d=1: single bin, only c0=S is valid
+    if d == 1:
+        if c0 == S:
+            n_tested = 1
+            # Leaf check (trivially c0^2 vs threshold)
+            # handled by caller
+        return n_surv, n_tested
+
+    # d=2: bins = (c0, S-c0)
+    if d == 2:
+        forced = S - c0
+        if 0 <= forced <= x_cap:
+            n_tested = 1
+            bins[1] = forced
+            conv[0] = c0 * c0
+            conv[1] = np.int32(2) * c0 * np.int32(forced)
+            conv[2] = forced * forced
+
+            # Asymmetry
+            left_s = np.float64(bins[0])
+            left_frac = left_s / np.float64(S)
+            asym_cov = (left_frac <= 1.0 - asym_thr) or (left_frac >= asym_thr)
+
+            if not asym_cov:
+                pruned_leaf = False
+                if use_flat_threshold:
+                    for ell in range(2, max_ell + 1):
+                        if pruned_leaf:
+                            break
+                        n_cv = ell - 1
+                        nw = conv_len - n_cv + 1
+                        ws = np.int64(0)
+                        for k in range(n_cv):
+                            ws += np.int64(conv[k])
+                        for s_lo in range(nw):
+                            if s_lo > 0:
+                                ws += (np.int64(conv[s_lo + n_cv - 1])
+                                       - np.int64(conv[s_lo - 1]))
+                            if ws > flat_thr[ell]:
+                                pruned_leaf = True
+                                break
+                else:
+                    prefix_c = np.zeros(d + 1, dtype=np.int64)
+                    for i in range(d):
+                        prefix_c[i + 1] = prefix_c[i] + np.int64(bins[i])
+                    for ell in range(2, max_ell + 1):
+                        if pruned_leaf:
+                            break
+                        n_cv = ell - 1
+                        nw = conv_len - n_cv + 1
+                        ws = np.int64(0)
+                        for k in range(n_cv):
+                            ws += np.int64(conv[k])
+                        sc = scale_arr[ell]
+                        for s_lo in range(nw):
+                            if s_lo > 0:
+                                ws += (np.int64(conv[s_lo + n_cv - 1])
+                                       - np.int64(conv[s_lo - 1]))
+                            lo_b = s_lo - d_m1
+                            if lo_b < 0:
+                                lo_b = 0
+                            hi_b = s_lo + ell - 2
+                            if hi_b > d_m1:
+                                hi_b = d_m1
+                            W_int = prefix_c[hi_b + 1] - prefix_c[lo_b]
+                            cw = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
+                            dyn_it = np.int64(
+                                (cs_base_m2 + cw + eps_margin) * sc)
+                            if ws > dyn_it:
+                                pruned_leaf = True
+                                break
+                if not pruned_leaf:
+                    if not count_only and n_surv < buf_cap:
+                        out_buf[n_surv, 0] = c0
+                        out_buf[n_surv, 1] = forced
+                    n_surv += 1
+        return n_surv, n_tested
+
+    # General case: d >= 3, process positions 1..d-1
+    pos = 1
+    bins[1] = 0
+
+    while True:
+        c_val = bins[pos]
+        rem = rem_arr[pos]
+
+        if pos == d_m1:
+            # --- Last bin: forced value ---
+            forced = rem
+            if 0 <= forced <= x_cap:
+                n_tested += 1
+                bins[pos] = forced
+
+                conv[2 * pos] += forced * forced
+                for j in range(pos):
+                    conv[pos + j] += np.int32(2) * forced * bins[j]
+
+                # Asymmetry check
+                left_s = np.float64(0)
+                for i in range(left_bins):
+                    left_s += np.float64(bins[i])
+                left_frac = left_s / np.float64(S)
+                asym_cov = ((left_frac <= 1.0 - asym_thr)
+                            or (left_frac >= asym_thr))
+
+                if not asym_cov:
+                    pruned_leaf = False
+                    if use_flat_threshold:
+                        for ell in range(2, max_ell + 1):
+                            if pruned_leaf:
+                                break
+                            n_cv = ell - 1
+                            nw = conv_len - n_cv + 1
+                            ws = np.int64(0)
+                            for k in range(n_cv):
+                                ws += np.int64(conv[k])
+                            thr_val = flat_thr[ell]
+                            for s_lo in range(nw):
+                                if s_lo > 0:
+                                    ws += (np.int64(conv[s_lo + n_cv - 1])
+                                           - np.int64(conv[s_lo - 1]))
+                                if ws > thr_val:
+                                    pruned_leaf = True
+                                    break
+                    else:
+                        prefix_c = np.zeros(d + 1, dtype=np.int64)
+                        for i in range(d):
+                            prefix_c[i + 1] = (prefix_c[i]
+                                               + np.int64(bins[i]))
+                        for ell in range(2, max_ell + 1):
+                            if pruned_leaf:
+                                break
+                            n_cv = ell - 1
+                            nw = conv_len - n_cv + 1
+                            ws = np.int64(0)
+                            for k in range(n_cv):
+                                ws += np.int64(conv[k])
+                            sc = scale_arr[ell]
+                            for s_lo in range(nw):
+                                if s_lo > 0:
+                                    ws += (
+                                        np.int64(conv[s_lo + n_cv - 1])
+                                        - np.int64(conv[s_lo - 1]))
+                                lo_b = s_lo - d_m1
+                                if lo_b < 0:
+                                    lo_b = 0
+                                hi_b = s_lo + ell - 2
+                                if hi_b > d_m1:
+                                    hi_b = d_m1
+                                W_int = (prefix_c[hi_b + 1]
+                                         - prefix_c[lo_b])
+                                cw = (1.0 + np.float64(W_int)
+                                      / (2.0 * n_half_d))
+                                dyn_it = np.int64(
+                                    (cs_base_m2 + cw + eps_margin) * sc)
+                                if ws > dyn_it:
+                                    pruned_leaf = True
+                                    break
+
+                    if not pruned_leaf:
+                        if not count_only and n_surv < buf_cap:
+                            for i in range(d):
+                                out_buf[n_surv, i] = bins[i]
+                        n_surv += 1
+
+                conv[2 * pos] -= forced * forced
+                for j in range(pos):
+                    conv[pos + j] -= np.int32(2) * forced * bins[j]
+
+            # Backtrack from last position
+            pos -= 1
+            if pos < 1:
+                break
+            c_old = bins[pos]
+            if c_old > 0:
+                conv[2 * pos] -= c_old * c_old
+                for j in range(pos):
+                    conv[pos + j] -= np.int32(2) * c_old * bins[j]
+            bins[pos] += 1
+            continue
+
+        # --- Non-last bin ---
+        max_v = min(rem, x_cap)
+        min_v = rem - (d_m1 - pos) * x_cap
+        if min_v < 0:
+            min_v = 0
+        if c_val < min_v:
+            bins[pos] = min_v
+            c_val = min_v
+
+        if c_val > max_v:
+            if pos <= 1:
+                break
+            pos -= 1
+            c_old = bins[pos]
+            if c_old > 0:
+                conv[2 * pos] -= c_old * c_old
+                for j in range(pos):
+                    conv[pos + j] -= np.int32(2) * c_old * bins[j]
+            bins[pos] += 1
+            continue
+
+        # Add conv contribution
+        if c_val > 0:
+            conv[2 * pos] += c_val * c_val
+            for j in range(pos):
+                conv[pos + j] += np.int32(2) * c_val * bins[j]
+
+        # Partial prune: restricted to windows overlapping [0, 2*pos]
+        pruned_partial = False
+        max_ci = 2 * pos
+        for ell in range(2, max_ell + 1):
+            if pruned_partial:
+                break
+            n_cv = ell - 1
+            max_s = min(max_ci, conv_len - n_cv)
+            if max_s < 0:
+                continue
+            ws = np.int64(0)
+            init_end = n_cv
+            if init_end > max_ci + 1:
+                init_end = max_ci + 1
+            for k in range(init_end):
+                ws += np.int64(conv[k])
+            thr_val = flat_thr[ell]
+            if ws > thr_val:
+                pruned_partial = True
+                break
+            for s_lo in range(1, max_s + 1):
+                new_k = s_lo + n_cv - 1
+                if new_k <= max_ci:
+                    ws += np.int64(conv[new_k])
+                ws -= np.int64(conv[s_lo - 1])
+                if ws > thr_val:
+                    pruned_partial = True
+                    break
+
+        if pruned_partial:
+            if c_val > 0:
+                conv[2 * pos] -= c_val * c_val
+                for j in range(pos):
+                    conv[pos + j] -= np.int32(2) * c_val * bins[j]
+            bins[pos] += 1
+            continue
+
+        # Descend
+        rem_arr[pos + 1] = rem - c_val
+        pos += 1
+        bins[pos] = 0
+
+    return n_surv, n_tested
+
+
+@njit(parallel=True, cache=True)
+def _l0_bnb_count(d, S, n_half_d, cs_base_m2, eps_margin,
+                   flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+                   max_ell, four_n, use_flat_threshold,
+                   min_c0, n_c0, counts, tested_arr):
+    """Pass 1: count survivors per c0 in parallel."""
+    dummy = np.empty((0, d), dtype=np.int32)
+    for idx in prange(n_c0):
+        c0 = np.int32(min_c0 + idx)
+        ns, nt = _l0_bnb_inner(
+            c0, d, S, n_half_d, cs_base_m2, eps_margin,
+            flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+            max_ell, four_n, use_flat_threshold, dummy, True)
+        counts[idx] = ns
+        tested_arr[idx] = nt
+
+
+@njit(parallel=True, cache=True)
+def _l0_bnb_fill(d, S, n_half_d, cs_base_m2, eps_margin,
+                  flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+                  max_ell, four_n, use_flat_threshold,
+                  min_c0, n_c0, counts, offsets, out_buf):
+    """Pass 2: fill output buffer per c0 in parallel."""
+    for idx in prange(n_c0):
+        c0 = np.int32(min_c0 + idx)
+        cnt = counts[idx]
+        if cnt == 0:
+            continue
+        off = offsets[idx]
+        _l0_bnb_inner(
+            c0, d, S, n_half_d, cs_base_m2, eps_margin,
+            flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+            max_ell, four_n, use_flat_threshold,
+            out_buf[off:off + cnt], False)
+
+
+def _l0_bnb_run(d, S, n_half, m, c_target, use_flat_threshold):
+    """Run parallel branch-and-bound L0.
+
+    Returns (survivors_array, n_survivors, n_tested).
+    """
+    m_d = np.float64(m)
+    n_half_d = np.float64(n_half)
+    four_n = 4.0 * n_half_d
+    cs_base_m2 = c_target * m_d * m_d
+    eps_margin = 1e-9 * m_d * m_d
+    max_ell = 2 * d
+    d_m1 = d - 1
+
+    flat_corr = 2.0 * m_d + 1.0
+    flat_thr = np.empty(max_ell + 1, dtype=np.int64)
+    scale_arr = np.empty(max_ell + 1, dtype=np.float64)
+    for ell in range(2, max_ell + 1):
+        scale_arr[ell] = np.float64(ell) * four_n
+        flat_thr[ell] = np.int64(
+            (cs_base_m2 + flat_corr + eps_margin) * scale_arr[ell])
+
+    thresh_xcap = c_target + 2.0 / m_d + 1.0 / (m_d * m_d) + 1e-9
+    x_cap = np.int32(np.floor(
+        m_d * np.sqrt(4.0 * np.float64(d) * thresh_xcap)))
+    asym_thr = np.sqrt(c_target / 2.0)
+    left_bins = d // 2
+
+    min_c0 = max(0, S - d_m1 * int(x_cap))
+    max_c0 = min(S, int(x_cap))
+
+    # Quick prune: c0^2 > flat_thr[2] means entire subtree pruned
+    max_c0_flat = int(np.floor(np.sqrt(float(flat_thr[2]))))
+    if max_c0_flat < max_c0:
+        max_c0 = max_c0_flat
+
+    n_c0 = max_c0 - min_c0 + 1
+    if n_c0 <= 0:
+        return np.empty((0, d), dtype=np.int32), 0, 0
+
+    counts = np.zeros(n_c0, dtype=np.int64)
+    tested_arr = np.zeros(n_c0, dtype=np.int64)
+
+    # Pass 1: count
+    _l0_bnb_count(d, S, n_half_d, cs_base_m2, eps_margin,
+                   flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+                   max_ell, four_n, use_flat_threshold,
+                   min_c0, n_c0, counts, tested_arr)
+
+    # Compute offsets (prefix sum)
+    offsets = np.zeros(n_c0 + 1, dtype=np.int64)
+    for i in range(n_c0):
+        offsets[i + 1] = offsets[i] + counts[i]
+    total_surv = int(offsets[n_c0])
+    total_tested = int(np.sum(tested_arr))
+
+    if total_surv == 0:
+        return np.empty((0, d), dtype=np.int32), 0, total_tested
+
+    out_buf = np.empty((total_surv, d), dtype=np.int32)
+
+    # Pass 2: fill
+    _l0_bnb_fill(d, S, n_half_d, cs_base_m2, eps_margin,
+                  flat_thr, scale_arr, x_cap, asym_thr, left_bins,
+                  max_ell, four_n, use_flat_threshold,
+                  min_c0, n_c0, counts, offsets, out_buf)
+
+    return out_buf, total_surv, total_tested
 
 
 # =====================================================================
@@ -613,7 +1153,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
 
     # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
     # Fine grid (S = 4nm): compositions sum to S, conv values are int32.
-    # threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # threshold = floor((c_target*m^2 + 1 + W_int/(2n) + eps) * 4n*ell)
     # where W_int ranges 0..S (fine-grid mass in overlapping bins).
     four_n = 4.0 * np.float64(n_half_child)
     n_half_d = np.float64(n_half_child)
@@ -656,7 +1196,7 @@ def _fused_generate_and_prune(parent_int, n_half_child, m, c_target,
         child[2 * i + 1] = 2 * parent_int[i] - cursor[i]
 
     # --- Precompute per-ell scale factors (C&S Lemma 3 + W-refinement) ---
-    # Fine grid (S = 4nm): threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # Fine grid (S = 4nm): threshold = floor((c_target*m^2 + 1 + W_int/(2n) + eps) * 4n*ell)
     # where W_int ranges 0..S (fine-grid mass in overlapping bins).
     ell_count = 2 * d_child - 1  # ell ranges 2..2*d_child, count = 2*d_child - 1
     scale_arr = np.empty(ell_count, dtype=np.float64)
@@ -1098,7 +1638,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
 
     # --- Dynamic pruning constants (C&S Lemma 3 + W-refinement) ---
     # Fine grid (S = 4nm): compositions sum to S, conv values are int32.
-    # threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps) * 4n*ell)
+    # threshold = floor((c_target*m^2 + 1 + W_int/(2n) + eps) * 4n*ell)
     # where W_int ranges 0..S (fine-grid mass in overlapping bins).
     four_n = 4.0 * np.float64(n_half_child)
     n_half_d = np.float64(n_half_child)
@@ -1170,7 +1710,7 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     #   floor((c_target*m^2 + corr + eps) * 4n*ell)
     # where corr = 2m+1 (flat C&S) or 3+W_int/(2n) (W-refined).
     ell_count = 2 * d_child - 1
-    S_child_plus_1 = 4 * n_half_child * m + 1
+    S_child_plus_1 = int(4 * n_half_child * m + 1)
     threshold_table = np.empty(ell_count * S_child_plus_1, dtype=np.int64)
     flat_corr = 2.0 * m_d + 1.0
     for ell in range(2, 2 * d_child + 1):
@@ -1465,7 +2005,14 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
                     # Self-terms
                     min_contrib[2 * k1u] += ml * ml
                     min_contrib[2 * k2u] += mh * mh
-                    min_contrib[k1u + k2u] += np.int64(2) * ml * mh
+                    # Mutual term: min of concave 2*c1*(2P-c1) on [lo,hi]
+                    # is at an endpoint, NOT at independent mins ml*mh.
+                    lo_val = np.int64(lo_arr[p_unf])
+                    hi_val = np.int64(hi_arr[p_unf])
+                    two_P = np.int64(2) * np.int64(parent_int[p_unf])
+                    mut_lo = np.int64(2) * lo_val * (two_P - lo_val)
+                    mut_hi = np.int64(2) * hi_val * (two_P - hi_val)
+                    min_contrib[k1u + k2u] += mut_lo if mut_lo < mut_hi else mut_hi
                     # Cross with fixed bins
                     for ii in range(fixed_len):
                         ci64 = np.int64(child[ii])
@@ -1705,6 +2252,564 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     return n_surv, n_subtree_pruned
 
 
+# =====================================================================
+# Coarse-grid Gray code kernel (Theorem 1 + sound box cert)
+# =====================================================================
+
+@njit(cache=True)
+def _fused_coarse_gray(parent_int, d_child, S, c_target,
+                        lo_arr, hi_arr, out_buf,
+                        prefix_nk, prefix_mk):
+    """Coarse-grid Gray code kernel with full optimizations + box cert.
+
+    Theorem 1: no correction at grid points.
+    Child: child[2i]+child[2i+1] = parent[i] (constant S, no factor 2).
+    Threshold: ws > floor(c_target * ell * S^2/(2d) - eps) (1D, no W_int).
+    Box cert: tracks min(margin - cell_var - quad_corr).
+
+    Optimizations: Gray code O(d) steps, incremental conv, quick-check,
+    optimized ell scan, sparse cross-terms, subtree pruning, staging buffer.
+
+    Returns (n_survivors, n_subtree_pruned, min_cert_net).
+    """
+    d_parent = parent_int.shape[0]
+
+    # --- Asymmetry filter ---
+    threshold_asym = math.sqrt(c_target / 2.0)
+    S_d = np.float64(S)
+    left_sum = np.int64(0)
+    for i in range(d_parent // 2):
+        left_sum += np.int64(parent_int[i])
+    left_frac = np.float64(left_sum) / S_d
+    if left_frac >= threshold_asym or left_frac <= 1.0 - threshold_asym:
+        return 0, 0, np.float64(1e30)
+
+    # --- Threshold constants (coarse: 1D, no W_int) ---
+    S_sq = S_d * S_d
+    d_d = np.float64(d_child)
+    inv_2d = 1.0 / (2.0 * d_d)
+    inv_4S2 = 1.0 / (4.0 * S_sq)
+    eps = 1e-9
+    max_ell = 2 * d_child
+    conv_len = 2 * d_child - 1
+    ell_count = conv_len
+
+    thr_arr = np.empty(max_ell + 1, dtype=np.int64)
+    for ell in range(2, max_ell + 1):
+        thr_arr[ell] = np.int64(c_target * np.float64(ell) * S_sq * inv_2d
+                                - eps)
+
+    max_survivors = out_buf.shape[0]
+    n_surv = 0
+    n_subtree_pruned = 0
+    local_min_net = np.float64(1e30)
+
+    # --- Sparse cross-term optimization ---
+    use_sparse = d_child >= 32
+    nz_list = np.empty(d_child, dtype=np.int32)
+    nz_pos = np.full(d_child, -1, dtype=np.int32)
+    nz_count = 0
+
+    # Quick-check state (no W_int for coarse)
+    qc_ell = np.int32(0)
+    qc_s = np.int32(0)
+
+    # --- Allocate arrays ---
+    cursor = np.empty(d_parent, dtype=np.int32)
+    for i in range(d_parent):
+        cursor[i] = lo_arr[i]
+    child = np.empty(d_child, dtype=np.int32)
+    raw_conv = np.empty(conv_len, dtype=np.int32)
+    grad_buf = np.empty(d_child, dtype=np.float64)
+
+    # Subtree pruning arrays
+    J_MIN = 7
+    partial_conv = np.empty(conv_len, dtype=np.int32)
+    min_contrib = np.empty(conv_len, dtype=np.int64)
+    min_contrib_prefix = np.empty(conv_len, dtype=np.int64)
+
+    # L1-resident staging buffer
+    if d_child <= 32:
+        _STAGE_CAP = 256
+    else:
+        _STAGE_CAP = 128
+    stage_buf = np.empty((_STAGE_CAP, d_child), dtype=np.int32)
+    n_staged = 0
+
+    # --- Build initial child (COARSE: no factor 2) ---
+    for i in range(d_parent):
+        child[2 * i] = cursor[i]
+        child[2 * i + 1] = parent_int[i] - cursor[i]
+
+    if use_sparse:
+        for i in range(d_child):
+            if child[i] != 0:
+                nz_list[nz_count] = i
+                nz_pos[i] = nz_count
+                nz_count += 1
+
+    # --- Optimized ell scan order ---
+    ell_order = np.empty(ell_count, dtype=np.int32)
+    ell_used = np.zeros(ell_count, dtype=np.int32)
+    oi = 0
+    if d_child >= 20:
+        hc = d_child // 2
+        for ell in (hc + 1, hc + 2, hc + 3, hc, hc - 1, hc + 4, hc + 5,
+                    hc - 2, hc + 6, hc - 3, hc + 7, hc + 8):
+            if 2 <= ell <= max_ell and ell_used[ell - 2] == 0:
+                ell_order[oi] = np.int32(ell)
+                ell_used[ell - 2] = np.int32(1)
+                oi += 1
+        for ell in (d_child, d_child + 1, d_child - 1, d_child + 2,
+                    d_child - 2, max_ell, d_child + d_child // 2):
+            if 2 <= ell <= max_ell and ell_used[ell - 2] == 0:
+                ell_order[oi] = np.int32(ell)
+                ell_used[ell - 2] = np.int32(1)
+                oi += 1
+    else:
+        phase1_end = min(16, max_ell)
+        for ell in range(2, phase1_end + 1):
+            ell_order[oi] = np.int32(ell)
+            ell_used[ell - 2] = np.int32(1)
+            oi += 1
+        for ell in (d_child, d_child + 1, d_child - 1, d_child + 2,
+                    d_child - 2, max_ell, d_child + d_child // 2,
+                    d_child // 2):
+            if 2 <= ell <= max_ell and ell_used[ell - 2] == 0:
+                ell_order[oi] = np.int32(ell)
+                ell_used[ell - 2] = np.int32(1)
+                oi += 1
+    for ell in range(2, max_ell + 1):
+        if ell_used[ell - 2] == 0:
+            ell_order[oi] = np.int32(ell)
+            oi += 1
+
+    # --- Compute full raw_conv for initial child ---
+    for k in range(conv_len):
+        raw_conv[k] = np.int32(0)
+    for i in range(d_child):
+        ci = np.int32(child[i])
+        if ci != 0:
+            raw_conv[2 * i] += ci * ci
+            for j in range(i + 1, d_child):
+                cj = np.int32(child[j])
+                if cj != 0:
+                    raw_conv[i + j] += np.int32(2) * ci * cj
+
+    # --- Gray code setup ---
+    n_active = 0
+    active_pos = np.empty(d_parent, dtype=np.int32)
+    radix = np.empty(d_parent, dtype=np.int32)
+    for i in range(d_parent - 1, -1, -1):
+        r = hi_arr[i] - lo_arr[i] + 1
+        if r > 1:
+            active_pos[n_active] = i
+            radix[n_active] = r
+            n_active += 1
+
+    gc_a = np.zeros(n_active, dtype=np.int32)
+    gc_dir = np.ones(n_active, dtype=np.int32)
+    gc_focus = np.empty(n_active + 1, dtype=np.int32)
+    for i in range(n_active + 1):
+        gc_focus[i] = i
+
+    # --- Main loop ---
+    while True:
+        # === TEST current child ===
+        quick_killed = False
+        if qc_ell > 0:
+            n_cv_qc = qc_ell - 1
+            ws_qc = np.int64(0)
+            for k in range(qc_s, qc_s + n_cv_qc):
+                ws_qc += np.int64(raw_conv[k])
+            if ws_qc > thr_arr[qc_ell]:
+                quick_killed = True
+
+        if not quick_killed:
+            pruned = False
+            kill_ell = np.int32(0)
+            kill_s = np.int32(0)
+            kill_ws = np.int64(0)
+
+            for ell_oi in range(ell_count):
+                if pruned:
+                    break
+                ell = ell_order[ell_oi]
+                n_cv = ell - 1
+                n_windows = conv_len - n_cv + 1
+                ws = np.int64(0)
+                for k in range(n_cv):
+                    ws += np.int64(raw_conv[k])
+                thr_val = thr_arr[ell]
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += (np.int64(raw_conv[s_lo + n_cv - 1])
+                               - np.int64(raw_conv[s_lo - 1]))
+                    if ws > thr_val:
+                        pruned = True
+                        kill_ell = np.int32(ell)
+                        kill_s = np.int32(s_lo)
+                        kill_ws = ws
+                        qc_ell = kill_ell
+                        qc_s = kill_s
+                        break
+
+            if pruned:
+                # --- Box cert ---
+                ell_f = np.float64(kill_ell)
+                tv = np.float64(kill_ws) * 2.0 * d_d / (S_sq * ell_f)
+                margin = tv - c_target
+
+                scale_g = 4.0 * d_d / ell_f
+                for i in range(d_child):
+                    g = 0.0
+                    for j_g in range(d_child):
+                        kk = i + j_g
+                        if kill_s <= kk <= kill_s + kill_ell - 2:
+                            g += np.float64(child[j_g]) / S_d
+                    grad_buf[i] = g * scale_g
+                for i in range(1, d_child):
+                    key = grad_buf[i]
+                    jj = i - 1
+                    while jj >= 0 and grad_buf[jj] > key:
+                        grad_buf[jj + 1] = grad_buf[jj]
+                        jj -= 1
+                    grad_buf[jj + 1] = key
+                cell_var = 0.0
+                for kk in range(d_child // 2):
+                    cell_var += grad_buf[d_child - 1 - kk] - grad_buf[kk]
+                cell_var /= (2.0 * S_d)
+
+                hi_idx = kill_s + kill_ell - 1
+                N_W = prefix_nk[hi_idx] - prefix_nk[kill_s]
+                M_W = prefix_mk[hi_idx] - prefix_mk[kill_s]
+                cross_W = N_W - M_W
+                d_sq = np.int64(d_child) * np.int64(d_child)
+                compl_bound = d_sq - N_W
+                pb = min(cross_W, compl_bound)
+                if pb > 0:
+                    qc_val = (2.0 * d_d / ell_f) * np.float64(pb) * inv_4S2
+                else:
+                    qc_val = 0.0
+                net = margin - cell_var - qc_val
+                if net < local_min_net:
+                    local_min_net = net
+            else:
+                # --- Survivor: inline canonicalize + store ---
+                use_rev = False
+                half_d = d_child // 2
+                for i in range(half_d):
+                    j_r = d_child - 1 - i
+                    if child[j_r] < child[i]:
+                        use_rev = True
+                        break
+                    elif child[j_r] > child[i]:
+                        break
+                if n_surv < max_survivors:
+                    if use_rev:
+                        for i in range(d_child):
+                            stage_buf[n_staged, i] = child[d_child - 1 - i]
+                    else:
+                        for i in range(d_child):
+                            stage_buf[n_staged, i] = child[i]
+                    n_staged += 1
+                    if n_staged == _STAGE_CAP:
+                        flush_base = n_surv + 1 - _STAGE_CAP
+                        for fi in range(_STAGE_CAP):
+                            for ci_f in range(d_child):
+                                out_buf[flush_base + fi, ci_f] = (
+                                    stage_buf[fi, ci_f])
+                        n_staged = 0
+                n_surv += 1
+
+        # === GRAY CODE ADVANCE ===
+        j = gc_focus[0]
+        if j == n_active:
+            break
+        gc_focus[0] = 0
+
+        pos = active_pos[j]
+        gc_a[j] += gc_dir[j]
+        cursor[pos] = lo_arr[pos] + gc_a[j]
+
+        if gc_a[j] == 0 or gc_a[j] == radix[j] - 1:
+            gc_dir[j] = -gc_dir[j]
+            gc_focus[j] = gc_focus[j + 1]
+            gc_focus[j + 1] = j + 1
+
+        # === INCREMENTAL UPDATE (COARSE: child[2p+1] = parent[p] - cursor[p]) ===
+        k1 = 2 * pos
+        k2 = k1 + 1
+        old1 = np.int32(child[k1])
+        old2 = np.int32(child[k2])
+        child[k1] = cursor[pos]
+        child[k2] = parent_int[pos] - cursor[pos]
+        new1 = np.int32(child[k1])
+        new2 = np.int32(child[k2])
+        delta1 = new1 - old1
+        delta2 = new2 - old2
+
+        raw_conv[2 * k1] += new1 * new1 - old1 * old1
+        raw_conv[2 * k2] += new2 * new2 - old2 * old2
+        raw_conv[k1 + k2] += np.int32(2) * (new1 * new2 - old1 * old2)
+
+        if use_sparse:
+            if old1 != 0 and new1 == 0:
+                p_nz = nz_pos[k1]; nz_count -= 1
+                last = nz_list[nz_count]; nz_list[p_nz] = last
+                nz_pos[last] = p_nz; nz_pos[k1] = -1
+            elif old1 == 0 and new1 != 0:
+                nz_list[nz_count] = k1; nz_pos[k1] = nz_count; nz_count += 1
+            if old2 != 0 and new2 == 0:
+                p_nz = nz_pos[k2]; nz_count -= 1
+                last = nz_list[nz_count]; nz_list[p_nz] = last
+                nz_pos[last] = p_nz; nz_pos[k2] = -1
+            elif old2 == 0 and new2 != 0:
+                nz_list[nz_count] = k2; nz_pos[k2] = nz_count; nz_count += 1
+            for idx_nz in range(nz_count):
+                jj = nz_list[idx_nz]
+                if jj != k1 and jj != k2:
+                    cj = np.int32(child[jj])
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+        else:
+            for jj in range(k1):
+                cj = np.int32(child[jj])
+                if cj != 0:
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+            for jj in range(k2 + 1, d_child):
+                cj = np.int32(child[jj])
+                if cj != 0:
+                    raw_conv[k1 + jj] += np.int32(2) * delta1 * cj
+                    raw_conv[k2 + jj] += np.int32(2) * delta2 * cj
+
+        # === SUBTREE PRUNING (coarse: 1D threshold, no W_int) ===
+        if j == J_MIN and n_active > J_MIN:
+            fixed_parent_boundary = active_pos[J_MIN - 1]
+            fixed_len = 2 * fixed_parent_boundary
+
+            if fixed_len >= 4:
+                partial_conv_len = 2 * fixed_len - 1
+                for kk in range(partial_conv_len):
+                    partial_conv[kk] = np.int32(0)
+                for ii in range(fixed_len):
+                    ci_s = np.int32(child[ii])
+                    if ci_s != 0:
+                        partial_conv[2 * ii] += ci_s * ci_s
+                        for jj2 in range(ii + 1, fixed_len):
+                            cj2 = np.int32(child[jj2])
+                            if cj2 != 0:
+                                partial_conv[ii + jj2] += (
+                                    np.int32(2) * ci_s * cj2)
+                for kk in range(1, partial_conv_len):
+                    partial_conv[kk] += partial_conv[kk - 1]
+
+                for kk in range(conv_len):
+                    min_contrib[kk] = np.int64(0)
+
+                # Inner active positions — COARSE child relationship
+                for kk in range(J_MIN):
+                    p_unf = active_pos[kk]
+                    k1u = 2 * p_unf
+                    k2u = 2 * p_unf + 1
+                    ml = np.int64(lo_arr[p_unf])
+                    P_unf = np.int64(parent_int[p_unf])
+                    mh = P_unf - np.int64(hi_arr[p_unf])
+                    if mh < 0:
+                        mh = np.int64(0)
+                    min_contrib[2 * k1u] += ml * ml
+                    min_contrib[2 * k2u] += mh * mh
+                    lo_val = np.int64(lo_arr[p_unf])
+                    hi_val = np.int64(hi_arr[p_unf])
+                    mut_lo = np.int64(2) * lo_val * (P_unf - lo_val)
+                    mut_hi = np.int64(2) * hi_val * (P_unf - hi_val)
+                    min_contrib[k1u + k2u] += (
+                        mut_lo if mut_lo < mut_hi else mut_hi)
+                    for ii in range(fixed_len):
+                        ci64 = np.int64(child[ii])
+                        if ci64 > 0:
+                            if ml > 0:
+                                min_contrib[ii + k1u] += (
+                                    np.int64(2) * ci64 * ml)
+                            if mh > 0:
+                                min_contrib[ii + k2u] += (
+                                    np.int64(2) * ci64 * mh)
+                    for kk2 in range(kk + 1, J_MIN):
+                        p2 = active_pos[kk2]
+                        k1u2 = 2 * p2
+                        k2u2 = 2 * p2 + 1
+                        ml2 = np.int64(lo_arr[p2])
+                        P2 = np.int64(parent_int[p2])
+                        mh2 = P2 - np.int64(hi_arr[p2])
+                        if mh2 < 0:
+                            mh2 = np.int64(0)
+                        if ml > 0 and ml2 > 0:
+                            min_contrib[k1u + k1u2] += (
+                                np.int64(2) * ml * ml2)
+                        if ml > 0 and mh2 > 0:
+                            min_contrib[k1u + k2u2] += (
+                                np.int64(2) * ml * mh2)
+                        if mh > 0 and ml2 > 0:
+                            min_contrib[k2u + k1u2] += (
+                                np.int64(2) * mh * ml2)
+                        if mh > 0 and mh2 > 0:
+                            min_contrib[k2u + k2u2] += (
+                                np.int64(2) * mh * mh2)
+
+                # Non-active unfixed parents — COARSE
+                first_unfixed_parent = fixed_parent_boundary
+                for pp in range(first_unfixed_parent, d_parent):
+                    is_inner = False
+                    for kk in range(J_MIN):
+                        if active_pos[kk] == pp:
+                            is_inner = True
+                            break
+                    if is_inner:
+                        continue
+                    k1na = 2 * pp
+                    k2na = 2 * pp + 1
+                    cv1 = np.int64(lo_arr[pp])
+                    cv2 = np.int64(parent_int[pp]) - cv1
+                    min_contrib[2 * k1na] += cv1 * cv1
+                    min_contrib[2 * k2na] += cv2 * cv2
+                    min_contrib[k1na + k2na] += np.int64(2) * cv1 * cv2
+                    for ii in range(fixed_len):
+                        ci64 = np.int64(child[ii])
+                        if ci64 > 0:
+                            if cv1 > 0:
+                                min_contrib[ii + k1na] += (
+                                    np.int64(2) * ci64 * cv1)
+                            if cv2 > 0:
+                                min_contrib[ii + k2na] += (
+                                    np.int64(2) * ci64 * cv2)
+                    for kk in range(J_MIN):
+                        p_unf3 = active_pos[kk]
+                        k1u3 = 2 * p_unf3
+                        k2u3 = 2 * p_unf3 + 1
+                        ml3 = np.int64(lo_arr[p_unf3])
+                        P3 = np.int64(parent_int[p_unf3])
+                        mh3 = P3 - np.int64(hi_arr[p_unf3])
+                        if mh3 < 0:
+                            mh3 = np.int64(0)
+                        if cv1 > 0 and ml3 > 0:
+                            min_contrib[k1na + k1u3] += (
+                                np.int64(2) * cv1 * ml3)
+                        if cv1 > 0 and mh3 > 0:
+                            min_contrib[k1na + k2u3] += (
+                                np.int64(2) * cv1 * mh3)
+                        if cv2 > 0 and ml3 > 0:
+                            min_contrib[k2na + k1u3] += (
+                                np.int64(2) * cv2 * ml3)
+                        if cv2 > 0 and mh3 > 0:
+                            min_contrib[k2na + k2u3] += (
+                                np.int64(2) * cv2 * mh3)
+                    for pp2 in range(pp + 1, d_parent):
+                        is_inner2 = False
+                        for kk2b in range(J_MIN):
+                            if active_pos[kk2b] == pp2:
+                                is_inner2 = True
+                                break
+                        if is_inner2:
+                            continue
+                        k1na2 = 2 * pp2
+                        k2na2 = 2 * pp2 + 1
+                        cv12 = np.int64(lo_arr[pp2])
+                        cv22 = np.int64(parent_int[pp2]) - cv12
+                        if cv1 > 0 and cv12 > 0:
+                            min_contrib[k1na + k1na2] += (
+                                np.int64(2) * cv1 * cv12)
+                        if cv1 > 0 and cv22 > 0:
+                            min_contrib[k1na + k2na2] += (
+                                np.int64(2) * cv1 * cv22)
+                        if cv2 > 0 and cv12 > 0:
+                            min_contrib[k2na + k1na2] += (
+                                np.int64(2) * cv2 * cv12)
+                        if cv2 > 0 and cv22 > 0:
+                            min_contrib[k2na + k2na2] += (
+                                np.int64(2) * cv2 * cv22)
+
+                min_contrib_prefix[0] = min_contrib[0]
+                for kk in range(1, conv_len):
+                    min_contrib_prefix[kk] = (min_contrib_prefix[kk - 1]
+                                              + min_contrib[kk])
+
+                subtree_pruned = False
+                for ell_oi in range(ell_count):
+                    if subtree_pruned:
+                        break
+                    ell = ell_order[ell_oi]
+                    n_cv = ell - 1
+                    n_windows_total = conv_len - n_cv + 1
+                    if n_windows_total <= 0:
+                        continue
+                    thr_val = thr_arr[ell]
+                    for s_lo in range(n_windows_total):
+                        s_hi = s_lo + n_cv - 1
+                        ws_st = np.int64(0)
+                        k_end_st = s_hi
+                        if k_end_st >= partial_conv_len:
+                            k_end_st = partial_conv_len - 1
+                        if k_end_st >= s_lo:
+                            ws_st = np.int64(partial_conv[k_end_st])
+                            if s_lo > 0:
+                                ws_st -= np.int64(
+                                    partial_conv[s_lo - 1])
+                        mc_sum = min_contrib_prefix[s_hi]
+                        if s_lo > 0:
+                            mc_sum -= min_contrib_prefix[s_lo - 1]
+                        ws_st += mc_sum
+                        if ws_st > thr_val:
+                            subtree_pruned = True
+                            break
+
+                if subtree_pruned:
+                    n_subtree_pruned += 1
+                    next_focus = gc_focus[J_MIN]
+                    for kk in range(J_MIN):
+                        gc_a[kk] = 0
+                        gc_dir[kk] = 1
+                        gc_focus[kk] = kk
+                    gc_focus[0] = next_focus
+                    gc_focus[J_MIN] = J_MIN
+                    for kk in range(J_MIN):
+                        p_r = active_pos[kk]
+                        cursor[p_r] = lo_arr[p_r]
+                        child[2 * p_r] = lo_arr[p_r]
+                        child[2 * p_r + 1] = (parent_int[p_r]
+                                               - lo_arr[p_r])
+                    for kk in range(conv_len):
+                        raw_conv[kk] = np.int32(0)
+                    for ii in range(d_child):
+                        ci_r = np.int32(child[ii])
+                        if ci_r != 0:
+                            raw_conv[2 * ii] += ci_r * ci_r
+                            for jj2 in range(ii + 1, d_child):
+                                cj2 = np.int32(child[jj2])
+                                if cj2 != 0:
+                                    raw_conv[ii + jj2] += (
+                                        np.int32(2) * ci_r * cj2)
+                    if use_sparse:
+                        nz_count = 0
+                        for ii in range(d_child):
+                            if child[ii] != 0:
+                                nz_list[nz_count] = ii
+                                nz_pos[ii] = nz_count
+                                nz_count += 1
+                            else:
+                                nz_pos[ii] = -1
+                    continue
+
+    # --- Final flush ---
+    if n_staged > 0:
+        flush_base = min(n_surv, max_survivors) - n_staged
+        for fi in range(n_staged):
+            for ci_f in range(d_child):
+                out_buf[flush_base + fi, ci_f] = stage_buf[fi, ci_f]
+
+    return n_surv, n_subtree_pruned, local_min_net
+
+
 def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     """Compute per-bin lo/hi cursor ranges and total children count.
 
@@ -1761,6 +2866,20 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
     min_ws > threshold(W_int_max) >= threshold(actual_W_int), any child with
     cursor[p] = v will be pruned by the kernel.
 
+    Optimization: before building the expensive O(ell_count * S_child)
+    threshold table, a cheap pre-check tests only the extreme values (lo, hi)
+    of each position against the minimum possible threshold (W_int=0).
+    If no extreme exceeds even this easiest-to-exceed threshold, AC cannot
+    tighten any range and we return immediately.  This avoids the table
+    construction cost (dominant at large d_child) for the common case where
+    AC finds nothing.
+
+    Correctness of pre-check: min_threshold(ell) uses W_int=0 (corr=1.0),
+    giving the smallest threshold.  actual_threshold >= min_threshold always.
+    So ws <= min_threshold => ws <= actual_threshold => value is NOT
+    infeasible => AC won't tighten from that end.  If all extremes pass,
+    round 1 changes nothing, so no further rounds are needed.
+
     Modifies lo_arr and hi_arr in place.
     Returns the new total_children (product of range sizes), 0 if any range
     becomes empty.
@@ -1775,11 +2894,145 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
     n_half_d = np.float64(n_half_child)
     eps_margin = 1e-9 * m_d * m_d
     cs_base_m2 = c_target * m_d * m_d
-    S_child_plus_1 = 4 * n_half_child * m + 1
+    S_child_plus_1 = int(4 * n_half_child * m + 1)
     ell_count = conv_len
 
-    # Precompute threshold table (matches _fused_generate_and_prune_gray)
-    # corr = 2m+1 (flat C&S) or 3+W_int/(2n) (W-refined).
+    # =================================================================
+    # PHASE 0: Cheap pre-check — can AC possibly help this parent?
+    #
+    # Uses min-threshold (W_int=0, one value per ell) instead of the
+    # full threshold table (ell_count * S_child_plus_1 entries).
+    # Tests ONLY the two extreme values (lo, hi) per position.
+    # If no extreme of any position exceeds min-threshold for any
+    # window, AC cannot tighten and we skip entirely.
+    # =================================================================
+
+    # Check if any position has range > 1
+    any_free = False
+    for i in range(d_parent):
+        if lo_arr[i] != hi_arr[i]:
+            any_free = True
+            break
+    if not any_free:
+        total = np.int64(1)
+        for i in range(d_parent):
+            total *= np.int64(hi_arr[i] - lo_arr[i] + 1)
+        return total
+
+    # Build child_min: each bin at its independent minimum
+    child_min = np.empty(d_child, dtype=np.int32)
+    for q in range(d_parent):
+        child_min[2 * q] = lo_arr[q]
+        child_min[2 * q + 1] = 2 * parent_int[q] - hi_arr[q]
+
+    # Full autoconvolution of child_min
+    conv_min = np.zeros(conv_len, dtype=np.int64)
+    for i in range(d_child):
+        ci = np.int64(child_min[i])
+        if ci == 0:
+            continue
+        conv_min[2 * i] += ci * ci
+        for j in range(i + 1, d_child):
+            cj = np.int64(child_min[j])
+            if cj != 0:
+                conv_min[i + j] += np.int64(2) * ci * cj
+
+    # Min-threshold per ell: W_int=0 gives smallest (easiest to exceed)
+    # threshold.  For flat mode, threshold is W_int-independent so
+    # min_thresh IS the exact threshold.
+    if use_flat_threshold:
+        corr_pre = 2.0 * m_d + 1.0
+    else:
+        corr_pre = 1.0  # W_int=0 => corr = 1.0
+    min_thresh = np.empty(ell_count, dtype=np.int64)
+    for ell in range(2, 2 * d_child + 1):
+        scale_ell = np.float64(ell) * four_n
+        dyn_x = (cs_base_m2 + corr_pre + eps_margin) * scale_ell
+        min_thresh[ell - 2] = np.int64(dyn_x)
+
+    # Test extreme values of each free position against min-threshold
+    test_conv = np.empty(conv_len, dtype=np.int64)
+    any_might_tighten = False
+
+    for p in range(d_parent):
+        if any_might_tighten:
+            break
+        if lo_arr[p] == hi_arr[p]:
+            continue
+
+        B_p = parent_int[p]
+        k1 = 2 * p
+        k2 = 2 * p + 1
+        old1 = np.int64(child_min[k1])
+        old2 = np.int64(child_min[k2])
+
+        # Test v=lo (lo-end tightening check: child[2p]=lo, child[2p+1]=max)
+        # and v=hi (hi-end tightening check: child[2p]=max, child[2p+1]=min)
+        for vi in range(2):
+            if any_might_tighten:
+                break
+            if vi == 0:
+                v = lo_arr[p]
+            else:
+                v = hi_arr[p]
+            new1 = np.int64(v)
+            new2 = np.int64(2 * B_p - v)
+            delta1 = new1 - old1
+            delta2 = new2 - old2
+
+            # Build test_conv = conv_min + deltas for position p
+            for kk in range(conv_len):
+                test_conv[kk] = conv_min[kk]
+            test_conv[2 * k1] += new1 * new1 - old1 * old1
+            test_conv[2 * k2] += new2 * new2 - old2 * old2
+            test_conv[k1 + k2] += np.int64(2) * (new1 * new2 - old1 * old2)
+            for j in range(d_child):
+                if j == k1 or j == k2:
+                    continue
+                cj = np.int64(child_min[j])
+                if cj != 0:
+                    test_conv[k1 + j] += np.int64(2) * delta1 * cj
+                    test_conv[k2 + j] += np.int64(2) * delta2 * cj
+
+            # Check all windows against min-threshold
+            for ell in range(2, 2 * d_child + 1):
+                if any_might_tighten:
+                    break
+                n_cv = ell - 1
+                n_windows = conv_len - n_cv + 1
+                if n_windows <= 0:
+                    continue
+                thresh_val = min_thresh[ell - 2]
+
+                ws = np.int64(0)
+                for kk in range(n_cv):
+                    ws += test_conv[kk]
+                if ws > thresh_val:
+                    any_might_tighten = True
+                    break
+
+                for s in range(1, n_windows):
+                    ws += test_conv[s + n_cv - 1] - test_conv[s - 1]
+                    if ws > thresh_val:
+                        any_might_tighten = True
+                        break
+
+    if not any_might_tighten:
+        # No extreme value of any position exceeds even the minimum
+        # threshold — AC cannot tighten any range.
+        total = np.int64(1)
+        for i in range(d_parent):
+            r = hi_arr[i] - lo_arr[i] + 1
+            if r <= 0:
+                return 0
+            total *= np.int64(r)
+        return total
+
+    # =================================================================
+    # PHASE 1: Full AC — pre-check found potential, run proper tightening
+    # =================================================================
+
+    # Build full threshold table (W_int-dependent)
     threshold_table = np.empty(ell_count * S_child_plus_1, dtype=np.int64)
     flat_corr = 2.0 * m_d + 1.0
     for ell in range(2, 2 * d_child + 1):
@@ -1796,21 +3049,18 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
                 dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                 threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
 
-    # Working array (reused across all (p, v) checks)
-    test_conv = np.empty(conv_len, dtype=np.int64)
-
     max_rounds = d_parent + 1
     for _round in range(max_rounds):
         any_changed = False
 
-        # Build child_min: each bin at its independent minimum
-        child_min = np.empty(d_child, dtype=np.int32)
+        # Rebuild child_min (ranges may have changed in prior rounds)
         for q in range(d_parent):
             child_min[2 * q] = lo_arr[q]
             child_min[2 * q + 1] = 2 * parent_int[q] - hi_arr[q]
 
-        # Full autoconvolution of child_min → lower bound on each conv index
-        conv_min = np.zeros(conv_len, dtype=np.int64)
+        # Rebuild conv_min
+        for kk in range(conv_len):
+            conv_min[kk] = np.int64(0)
         for i in range(d_child):
             ci = np.int64(child_min[i])
             if ci == 0:
@@ -2371,6 +3621,68 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
     return out_buf[:n_survivors].copy(), total_children
 
 
+# =====================================================================
+# Coarse-grid parent processing
+# =====================================================================
+
+def _compute_bin_ranges_coarse(parent_int, S, c_target, d_child):
+    """Coarse-grid cursor ranges.  child[2i]+child[2i+1] = parent[i]."""
+    d_parent = len(parent_int)
+    x_cap = int(math.floor(S * math.sqrt(c_target / d_child)))
+
+    lo_arr = np.empty(d_parent, dtype=np.int32)
+    hi_arr = np.empty(d_parent, dtype=np.int32)
+    total_children = 1
+    for i in range(d_parent):
+        p = int(parent_int[i])
+        lo = max(0, p - x_cap)
+        hi = min(p, x_cap)
+        if lo > hi:
+            return None
+        lo_arr[i] = lo
+        hi_arr[i] = hi
+        total_children *= (hi - lo + 1)
+    return lo_arr, hi_arr, total_children
+
+
+def process_parent_coarse(parent_int, S, c_target, d_child, buf_cap=None):
+    """Process one parent in coarse-grid mode.
+
+    Returns (survivors, total_children, min_cert_net).
+    """
+    d_parent = len(parent_int)
+
+    result = _compute_bin_ranges_coarse(parent_int, S, c_target, d_child)
+    if result is None:
+        return np.empty((0, d_child), dtype=np.int32), 0, 1e30
+    lo_arr, hi_arr, total_children = result
+
+    if total_children == 0:
+        return np.empty((0, d_child), dtype=np.int32), 0, 1e30
+
+    prefix_nk, prefix_mk = _build_pair_prefix(d_child)
+
+    if buf_cap is None:
+        buf_cap = _default_buf_cap(d_child)
+    max_buf = min(total_children, buf_cap)
+    out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+
+    n_survivors, _, min_net = _fused_coarse_gray(
+        parent_int, d_child, S, c_target, lo_arr, hi_arr, out_buf,
+        prefix_nk, prefix_mk)
+
+    if n_survivors > max_buf:
+        max_buf = n_survivors
+        out_buf = np.empty((max_buf, d_child), dtype=np.int32)
+        n2, _, min_net = _fused_coarse_gray(
+            parent_int, d_child, S, c_target, lo_arr, hi_arr, out_buf,
+            prefix_nk, prefix_mk)
+        assert n2 == n_survivors
+        n_survivors = n2
+
+    return out_buf[:n_survivors].copy(), total_children, min_net
+
+
 def process_parent_verbose(parent_int, m, c_target, n_half_child,
                             parent_idx, n_parents,
                             use_flat_threshold=False):
@@ -2494,7 +3806,7 @@ _warmup_jit()
 # =====================================================================
 
 def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
-               d0=None):
+               d0=None, use_bnb=True, coarse_S=None):
     """Run Level 0: enumerate compositions, prune, collect survivors.
 
     Parameters
@@ -2502,9 +3814,15 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
     n_half : int or float
         Half-dimension.  For even d: integer, d = 2*n_half.
         For odd d: pass d0 instead, n_half is computed as d0/2.
+    coarse_S : int or None
+        When set, use coarse-grid mode (Theorem 1, no correction).
+        S is the constant total mass sum.
     d0 : int, optional
         Starting dimension (number of bins).  Overrides n_half if given.
         Allows odd starting dimensions like d=3 (C&S original).
+    use_bnb : bool
+        When True (default), use branch-and-bound L0 that prunes during
+        composition enumeration.  Falls back to batch generation if d > 8.
 
     Returns
     -------
@@ -2516,10 +3834,137 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
         n_half = d / 2.0  # float for odd d
     else:
         d = 2 * n_half
+
+    # === COARSE-GRID L0 PATH ===
+    if coarse_S is not None:
+        S = coarse_S
+        n_total = count_compositions(d, S)
+        if verbose:
+            x_cap_c = int(math.floor(S * math.sqrt(c_target / d)))
+            _log(f"\n[L0 coarse] d={d}, S={S}, c_target={c_target}")
+            _log(f"     x_cap={x_cap_c}, "
+                 f"compositions={n_total:,}")
+        t0 = time.time()
+        all_survivors = []
+        n_pruned_asym = 0
+        n_pruned_test = 0
+        n_processed = 0
+        global_min_net = 1e30
+        last_report = t0
+
+        gen = generate_canonical_compositions_batched(d, S, batch_size=500_000)
+        for batch in gen:
+            n_processed += len(batch)
+
+            # Asymmetry pruning (coarse)
+            threshold_a = asymmetry_threshold(c_target)
+            left_bins = d // 2
+            left = batch[:, :left_bins].sum(axis=1).astype(np.float64)
+            left_frac = left / float(S)
+            asym_mask = ((left_frac > 1 - threshold_a)
+                         & (left_frac < threshold_a))
+            n_pruned_asym += int(np.sum(~asym_mask))
+            batch = batch[asym_mask]
+            if len(batch) == 0:
+                continue
+
+            survived_mask, min_net = _prune_coarse(
+                batch, d, S, c_target)
+            n_pruned_test += int(np.sum(~survived_mask))
+            if min_net < global_min_net:
+                global_min_net = min_net
+            survivors = batch[survived_mask]
+            if len(survivors) > 0:
+                all_survivors.append(survivors)
+
+            now = time.time()
+            if verbose and (now - last_report >= 2.0):
+                n_surv = sum(len(s) for s in all_survivors)
+                _log(f"     [{n_processed:,} processed] "
+                     f"{n_surv:,} survivors")
+                last_report = now
+
+        elapsed = time.time() - t0
+        if all_survivors:
+            all_survivors = np.vstack(all_survivors)
+        else:
+            all_survivors = np.empty((0, d), dtype=np.int32)
+        n_survivors = len(all_survivors)
+        proven = n_survivors == 0
+        box_ok = global_min_net >= 0.0
+
+        if verbose:
+            _log(f"     {elapsed:.2f}s: pruned asym={n_pruned_asym:,} "
+                 f"test={n_pruned_test:,} survivors={n_survivors:,}")
+            if n_pruned_test > 0:
+                _log(f"     min(margin - cell_var - quad_corr) = "
+                     f"{global_min_net:.6f}")
+                _log(f"     BOX CERT: "
+                     f"{'PASS' if box_ok else 'FAIL (increase S)'}")
+            if proven:
+                _log(f"     PROVEN at L0!")
+
+        return {
+            'survivors': all_survivors,
+            'n_survivors': n_survivors,
+            'n_pruned_asym': n_pruned_asym,
+            'n_pruned_test': n_pruned_test,
+            'n_processed': n_processed,
+            'elapsed': elapsed,
+            'proven': proven,
+            'min_cert_net': global_min_net,
+            'box_certified': box_ok,
+        }
+
     S = int(2 * d * m)  # Fine grid: integer coords sum to 2*d*m
     n_total = count_compositions(d, S)
     corr = correction(m, n_half)
 
+    # --- Branch-and-bound path ---
+    if use_bnb and d <= 8:
+        if verbose:
+            _log(f"\n[L0 B&B] d={d}, m={m}, n_half={n_half}, "
+                 f"compositions={n_total:,}")
+            _log(f"     correction={corr:.6f}, "
+                 f"threshold={c_target+corr:.6f}")
+
+        t0 = time.time()
+
+        survivors, n_surv_raw, n_tested = _l0_bnb_run(
+            d, S, n_half, m, c_target, use_flat_threshold)
+
+        # Canonical filter (keep only c <= rev(c) lexicographically)
+        n_non_canonical = 0
+        if len(survivors) > 0:
+            canon_mask = _canonical_mask(survivors)
+            n_non_canonical = int(np.sum(~canon_mask))
+            survivors = survivors[canon_mask]
+
+        elapsed = time.time() - t0
+        n_survivors = len(survivors)
+        proven = n_survivors == 0
+
+        if verbose:
+            _log(f"     {elapsed:.2f}s: {n_tested:,} leaves tested "
+                 f"(of {n_total:,} total compositions)")
+            _log(f"     B&B pruned: {n_total - n_tested:,} branches, "
+                 f"leaf pruned: {n_tested - n_surv_raw:,}, "
+                 f"non-canonical: {n_non_canonical:,}")
+            _log(f"     survivors: {n_survivors:,}")
+            if proven:
+                _log(f"     PROVEN at L0!")
+
+        return {
+            'survivors': survivors,
+            'n_survivors': n_survivors,
+            'n_pruned_asym': 0,  # asymmetry handled inside B&B kernel
+            'n_pruned_test': n_tested - n_surv_raw,
+            'n_processed': n_tested,
+            'elapsed': elapsed,
+            'proven': proven,
+        }
+
+    # --- Original batch path (fallback for large d) ---
     if verbose:
         _log(f"\n[L0] d={d}, m={m}, n_half={n_half}, compositions={n_total:,}")
         _log(f"     correction={corr:.6f}, threshold={c_target+corr:.6f}")
@@ -2877,6 +4322,37 @@ def _process_parent_shm(idx):
 
 
 # =====================================================================
+# Coarse-grid shared-memory multiprocessing helpers
+# =====================================================================
+
+def _init_worker_coarse(mmap_path, shape, dtype_str, S, c_target,
+                        d_child, numba_threads):
+    """Pool initializer for coarse-grid workers."""
+    numba.set_num_threads(numba_threads)
+    global _shared_parents, _shm_S_coarse, _shm_c_target
+    global _shm_d_child_coarse
+    _shared_parents = np.memmap(mmap_path, dtype=np.dtype(dtype_str),
+                                mode='r', shape=shape)
+    _shm_S_coarse = S
+    _shm_c_target = c_target
+    _shm_d_child_coarse = d_child
+
+
+def _process_parent_coarse_shm(idx):
+    """Worker: process parent at index idx from shared memory (coarse)."""
+    parent = _shared_parents[idx].copy()
+    survivors, total_children, min_net = process_parent_coarse(
+        parent, _shm_S_coarse, _shm_c_target, _shm_d_child_coarse)
+    n_survived = len(survivors)
+    result = survivors if n_survived > 0 else None
+    return result, {
+        'children': total_children,
+        'survived': n_survived,
+        'min_cert_net': min_net,
+    }
+
+
+# =====================================================================
 # Checkpoint helpers
 # =====================================================================
 
@@ -2983,15 +4459,20 @@ def _effective_cpu_count():
 
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                 verbose=True, output_dir='data', resume_dir=None,
-                use_flat_threshold=False, mass_grid=False, d0=None):
+                use_flat_threshold=False, mass_grid=False, d0=None,
+                use_bnb=True, coarse_S=None):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
     ----------
     n_half : int or float
-        Initial n_half (d0 = 2 * n_half).  Can be float for odd d0.
+        Initial n_half (d0 = 2 * n_half).  Default 1 → d0=2.
+        Can be float for odd d0.  Ignored when d0 is given.
     d0 : int, optional
-        Starting dimension (overrides n_half).  Allows odd d like d0=3.
+        Starting dimension (overrides n_half).  Must be >= 2.
+        Default behaviour (d0=None, n_half=1) gives d0=2, which is
+        optimal: d0=2 produces ~2x fewer survivors than d0=4 at the
+        d=8 bottleneck, at the cost of one extra trivial cascade level.
     m : int
         Grid resolution.
     c_target : float
@@ -3009,7 +4490,7 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         Directory to look for checkpoint files.  If None, uses output_dir.
     use_flat_threshold : bool
         When True, uses the flat C&S Lemma 3 correction (2/m + 1/m^2)
-        instead of the W-refined correction (3 + W_int/(2n))/m^2.
+        instead of the W-refined correction (1 + W_int/(2n))/m^2.
         Required for verifying the Lean axiom cascade_all_pruned.
         The flat threshold is higher (harder to prune), so the cascade
         may produce more survivors and take longer.
@@ -3043,14 +4524,34 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         n_half = d0 / 2.0  # float for odd d
     else:
         d0 = 2 * n_half
+    if d0 < 2:
+        raise ValueError(
+            f'd0={d0} is invalid (must be >= 2).  d0=1 has degenerate '
+            'asymmetry pruning: left_bins = d//2 = 0 makes left_frac '
+            'always 0, so ALL compositions are spuriously pruned and '
+            'the cascade falsely claims proof for any c_target < 2.0.')
     corr = correction(m, n_half)
     S0 = int(2 * d0 * m)
-    if mass_grid:
-        n_total = count_compositions(n_half, m)  # palindromic half-domain
+    if coarse_S is not None:
+        # Coarse-grid mode: constant S, Theorem 1 (no correction)
+        n_total = count_compositions(d0, coarse_S)
+        if verbose:
+            _log(f"\n{'='*70}")
+            _log(f"CPU CASCADE PROVER (COARSE — Theorem 1, no correction)")
+            _log(f"  d0={d0}, S={coarse_S}, c_target={c_target}")
+            _log(f"  Grid: integer masses sum to S={coarse_S} (constant)")
+            _log(f"  Threshold: TV >= {c_target} (exact, no correction)")
+            _log(f"  Box cert: margin > cell_var + quad_corr (2nd-order)")
+            _log(f"  L0 compositions: {n_total:,}")
+            _log(f"  workers: {n_workers}")
+            _log(f"  max refinement levels: {max_levels}")
+            _log(f"{'='*70}")
+    elif mass_grid:
+        n_total = count_compositions(n_half, m)
     else:
         n_total = count_compositions(d0, S0)
 
-    if verbose:
+    if coarse_S is None and verbose:
         _log(f"\n{'='*70}")
         _log(f"CPU CASCADE PROVER{' (MASS-GRID)' if mass_grid else ''}")
         _log(f"  n_half={n_half}, m={m}, d0={d0}, c_target={c_target}")
@@ -3097,9 +4598,13 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         # --- Level 0 (fresh run) ---
         if mass_grid:
             l0 = run_level0_mass(n_half, m, c_target, verbose=verbose)
+        elif coarse_S is not None:
+            l0 = run_level0(n_half, m, c_target, verbose=verbose,
+                             d0=d0, coarse_S=coarse_S)
         else:
             l0 = run_level0(n_half, m, c_target, verbose=verbose,
-                             use_flat_threshold=use_flat_threshold)
+                             use_flat_threshold=use_flat_threshold,
+                             d0=d0, use_bnb=use_bnb)
 
         info = {
             'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
@@ -3110,6 +4615,13 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             'l0_pruned_test': l0['n_pruned_test'],
             'levels': [],
         }
+        if coarse_S is not None:
+            info['grid'] = 'coarse'
+            info['S'] = coarse_S
+            info['l0'] = {
+                'min_cert_net': l0.get('min_cert_net', 1e30),
+                'box_certified': l0.get('box_certified', False),
+            }
 
         if l0['proven']:
             info['proven_at'] = 'L0'
@@ -3138,6 +4650,166 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         if n_parents == 0:
             break
 
+        # === COARSE CASCADE PATH ===
+        if coarse_S is not None:
+            x_cap_c = int(math.floor(
+                coarse_S * math.sqrt(c_target / d_child)))
+            d2_over_2S2 = float(d_child ** 2) / (2.0 * coarse_S ** 2)
+
+            if verbose:
+                _log(f"\n[L{level_num}] d={d_parent} -> {d_child}, "
+                     f"parents={n_parents:,}, x_cap={x_cap_c}")
+                _log(f"    quad_corr scale: d^2/(2S^2) = {d2_over_2S2:.6f}")
+
+            # Pre-filter infeasible parents
+            feasible = np.all(current_configs <= x_cap_c, axis=1)
+            n_inf = n_parents - int(feasible.sum())
+            if n_inf > 0:
+                current_configs = np.ascontiguousarray(
+                    current_configs[feasible])
+                n_parents = len(current_configs)
+                if verbose:
+                    _log(f"    Pre-filtered {n_inf:,} infeasible parents")
+
+            if n_parents == 0:
+                if verbose:
+                    _log(f"    All parents infeasible -> 0 survivors")
+                info['levels'].append({
+                    'level': level_num, 'd_child': d_child,
+                    'parents_in': 0, 'total_children': 0,
+                    'survivors_out': 0,
+                })
+                d_parent = d_child
+                n_half_parent = n_half_child
+                continue
+
+            t_level = time.time()
+            all_survivors_c = []
+            total_children_c = 0
+            level_min_net = 1e30
+            n_done = 0
+            last_report_c = time.time()
+
+            if n_workers > 1 and n_parents > n_workers:
+                # Parallel coarse path
+                parents_shape = current_configs.shape
+                parents_dtype_str = current_configs.dtype.str
+                fd, mmap_path = tempfile.mkstemp(
+                    suffix=f'_coarse_L{level_num}.dat', dir=output_dir)
+                os.close(fd)
+                current_configs.tofile(mmap_path)
+
+                ctx = mp.get_context("spawn")
+                try:
+                    with ctx.Pool(
+                            n_workers,
+                            initializer=_init_worker_coarse,
+                            initargs=(mmap_path, parents_shape,
+                                      parents_dtype_str,
+                                      coarse_S, c_target, d_child,
+                                      1)) as pool:
+                        for surv, stats in pool.imap_unordered(
+                                _process_parent_coarse_shm,
+                                range(n_parents), chunksize=1):
+                            total_children_c += stats['children']
+                            mn = stats.get('min_cert_net', 1e30)
+                            if mn < level_min_net:
+                                level_min_net = mn
+                            if surv is not None:
+                                all_survivors_c.append(surv)
+                            n_done += 1
+                            now = time.time()
+                            if verbose and (now - last_report_c >= 5.0):
+                                ns = sum(len(s) for s in all_survivors_c)
+                                pct = n_done / n_parents * 100
+                                _log(f"    [{n_done}/{n_parents}] "
+                                     f"({pct:.1f}%) "
+                                     f"{ns:,} survivors so far")
+                                last_report_c = now
+                finally:
+                    try:
+                        os.remove(mmap_path)
+                    except OSError:
+                        pass
+            else:
+                # Sequential coarse path
+                for p_idx in range(n_parents):
+                    parent = current_configs[p_idx]
+                    surv, n_ch, mn = process_parent_coarse(
+                        parent, coarse_S, c_target, d_child)
+                    total_children_c += n_ch
+                    if mn < level_min_net:
+                        level_min_net = mn
+                    if len(surv) > 0:
+                        all_survivors_c.append(surv)
+                    n_done += 1
+                    now = time.time()
+                    if verbose and (now - last_report_c >= 5.0):
+                        ns = sum(len(s) for s in all_survivors_c)
+                        _log(f"    [{n_done}/{n_parents}] "
+                             f"{ns:,} survivors so far")
+                        last_report_c = now
+
+            elapsed_level = time.time() - t_level
+
+            if all_survivors_c:
+                current_configs = np.vstack(all_survivors_c)
+                current_configs = _fast_dedup(current_configs)
+            else:
+                current_configs = np.empty((0, d_child), dtype=np.int32)
+
+            n_survived = len(current_configs)
+            box_ok = level_min_net >= 0.0
+
+            if verbose:
+                rate = (n_survived / max(1, total_children_c) * 100)
+                _log(f"    {elapsed_level:.1f}s: {total_children_c:,} "
+                     f"children, {n_survived:,} survivors "
+                     f"({rate:.4f}%)")
+                if total_children_c > 0:
+                    _log(f"    min(margin - cell_var - quad_corr) = "
+                         f"{level_min_net:.6f}")
+                    _log(f"    BOX CERT: "
+                         f"{'PASS' if box_ok else 'FAIL'}")
+                if n_survived == 0:
+                    _log(f"    *** ALL PRUNED ***")
+
+            info['levels'].append({
+                'level': level_num,
+                'd_child': d_child,
+                'parents_in': n_parents,
+                'total_children': total_children_c,
+                'survivors_out': n_survived,
+                'elapsed': elapsed_level,
+                'min_cert_net': level_min_net,
+                'box_certified': box_ok,
+            })
+
+            if n_survived == 0:
+                info['proven_at'] = f'L{level_num}'
+                all_cert = info.get('l0', {}).get(
+                    'box_certified', True)
+                if all_cert:
+                    for lv in info['levels']:
+                        if not lv.get('box_certified', True):
+                            all_cert = False
+                            break
+                info['box_certified'] = all_cert
+                break
+
+            _save_checkpoint(output_dir, level_num, current_configs, {
+                'n_half': n_half, 'm': m, 'c_target': c_target,
+                'level_completed': level_num,
+                'd_survivors': d_child,
+                'n_survived': n_survived,
+                'info': info,
+            })
+
+            d_parent = d_child
+            n_half_parent = n_half_child
+            continue
+        # === END COARSE CASCADE PATH ===
+
         # --- Pre-filter: skip parents where any bin produces empty range ---
         # A parent bin b_i has cursor range [max(0, 2*b_i - x_cap), min(2*b_i, x_cap)].
         # Empty when 2*b_i - x_cap > min(2*b_i, x_cap), i.e. b_i > x_cap.
@@ -3158,6 +4830,25 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
             if verbose:
                 _log(f"     Pre-filtered {n_infeasible:,} infeasible parents "
                      f"(bin > {max_bin_val})")
+
+        if n_parents == 0:
+            break
+
+        # --- Pre-filter: block mass invariant pruning ---
+        # For any contiguous block of k parent bins with total mass M,
+        # the child autoconvolution sum over that block's conv range is
+        # >= 4M^2 (invariant under all cursor assignments).  If this
+        # exceeds the threshold, ALL children of this parent are pruned.
+        bm_mask = block_mass_prune_mask(
+            current_configs, n_half_child, m, c_target,
+            use_flat_threshold=use_flat_threshold)
+        n_block_pruned = n_parents - int(np.sum(bm_mask))
+        if n_block_pruned > 0:
+            current_configs = np.ascontiguousarray(current_configs[bm_mask])
+            n_parents = len(current_configs)
+            if verbose:
+                _log(f"     Block-mass pruned {n_block_pruned:,} parents "
+                     f"(contiguous block self-conv exceeds threshold)")
 
         if n_parents == 0:
             break
@@ -3595,7 +5286,9 @@ def print_summary(info):
         print(f"  {'-'*75}")
 
         for lvl in info['levels']:
-            factor = lvl['expansion_factor']
+            factor = lvl.get('expansion_factor', 0)
+            if lvl.get('parents_in', 0) > 0 and 'expansion_factor' not in lvl:
+                factor = lvl.get('survivors_out', 0) / lvl['parents_in']
             if factor == 0:
                 fstr = '0x'
             elif factor < 0.01:
@@ -3603,12 +5296,16 @@ def print_summary(info):
             else:
                 fstr = f'{factor:.4f}x'
 
-            print(f"  L{lvl['level']:>4} | {lvl['parents_in']:>10,} | "
-                  f"{lvl['total_children']:>12,} | "
-                  f"{lvl['children_per_parent']:>8.1f} | "
-                  f"{lvl['survivors_out']:>10,} | "
+            ch_per = lvl.get('children_per_parent', 0)
+            if ch_per == 0 and lvl.get('parents_in', 0) > 0:
+                ch_per = lvl.get('total_children', 0) / lvl['parents_in']
+
+            print(f"  L{lvl['level']:>4} | {lvl.get('parents_in', 0):>10,} | "
+                  f"{lvl.get('total_children', 0):>12,} | "
+                  f"{ch_per:>8.1f} | "
+                  f"{lvl.get('survivors_out', 0):>10,} | "
                   f"{fstr:>10} | "
-                  f"{_fmt_time(lvl['elapsed']):>10}")
+                  f"{_fmt_time(lvl.get('elapsed', 0)):>10}")
 
     proven_at = info.get('proven_at')
     if proven_at:
@@ -3813,11 +5510,13 @@ def verify_relaxed_children(parents, n_half_parent, m, c_target,
 def main():
     parser = argparse.ArgumentParser(
         description='CPU-only cascade prover (no GPU, no dimension limits)')
-    parser.add_argument('--n_half', type=int, default=2,
-                        help='Initial n_half (d0 = 2*n_half, default: 2)')
+    parser.add_argument('--n_half', type=int, default=1,
+                        help='Initial n_half (d0 = 2*n_half, default: 1 → d0=2). '
+                             'Ignored when --d0 is given.')
     parser.add_argument('--d0', type=int, default=None,
-                        help='Starting dimension (overrides n_half, allows odd d). '
-                             'C&S original uses d0=3.')
+                        help='Starting dimension (overrides n_half, must be >= 2). '
+                             'Default is d0=2 (optimal: fewer survivors propagate '
+                             'through the cascade than larger starting dimensions).')
     parser.add_argument('--m', type=int, default=20,
                         help='Grid resolution (default: 20)')
     parser.add_argument('--c_target', type=float, default=1.30,
@@ -3842,12 +5541,38 @@ def main():
                         help='Use MATLAB-style mass-based grid with palindrome '
                              'symmetry.  S=2*m (constant), only d_parent/2 '
                              'free cursors.  Dramatically reduces search space.')
+    parser.add_argument('--no_l0_bnb', action='store_true',
+                        help='Disable L0 branch-and-bound optimization. '
+                             'Use the original batch enumeration path.')
+    parser.add_argument('--coarse', action='store_true',
+                        help='Use coarse-grid mode (Theorem 1, no correction). '
+                             'Constant S grid, exact TV lower bound at grid '
+                             'points, sound box certification with 2nd-order '
+                             'quadratic bound.  Requires --S.')
+    parser.add_argument('--S', type=int, default=None,
+                        help='Grid resolution for coarse mode (total mass sum). '
+                             'Required when --coarse is set.')
     parser.add_argument('--verify_relaxed', action='store_true',
                         help='After cascade completes, verify that +/-1 floor '
                              'rounding variants of children are also pruned. '
                              'Required for soundness of the Lean CascadePruned '
                              'axiom with relaxed is_valid_child.')
     args = parser.parse_args()
+
+    # Validate d0 >= 2.  d0=1 has a degenerate asymmetry prune: left_bins =
+    # d//2 = 0, so left_frac is always 0 and ALL compositions are spuriously
+    # "asymmetry-pruned," falsely claiming proof for any c_target < 2.
+    effective_d0 = args.d0 if args.d0 is not None else 2 * args.n_half
+    if effective_d0 < 2:
+        parser.error(f'--d0 must be >= 2 (got {effective_d0}).  d0=1 has '
+                     'degenerate asymmetry pruning that falsely proves any '
+                     'c_target < 2.0.')
+
+    coarse_S = None
+    if args.coarse:
+        if args.S is None:
+            parser.error('--coarse requires --S (grid resolution)')
+        coarse_S = args.S
 
     info = run_cascade(
         n_half=args.n_half,
@@ -3860,9 +5585,22 @@ def main():
         resume_dir=args.resume,
         use_flat_threshold=args.use_flat_threshold,
         mass_grid=args.mass_grid,
+        d0=args.d0,
+        use_bnb=not args.no_l0_bnb,
+        coarse_S=coarse_S,
     )
 
     print_summary(info)
+
+    # --- Coarse-grid result summary ---
+    if coarse_S is not None and 'proven_at' in info:
+        box_ok = info.get('box_certified', False)
+        if box_ok:
+            _log(f"\nRIGOROUS PROOF: C_{{1a}} >= {args.c_target}")
+            _log(f"  (Sound: Theorem 1 + 2nd-order quadratic bound)")
+        else:
+            _log(f"\nGRID-POINT PROOF: TV >= {args.c_target} at all "
+                 f"compositions (box cert incomplete — increase S)")
 
     # --- Relaxed verification (optional) ---
     if args.verify_relaxed:
@@ -3875,7 +5613,11 @@ def main():
 
         # Load checkpoints for each level and verify relaxed children
         all_relaxed_ok = True
-        n_half_cur = args.n_half
+        # Compute effective n_half accounting for --d0 flag
+        if args.d0 is not None:
+            effective_n_half = args.d0 / 2.0
+        else:
+            effective_n_half = args.n_half
 
         # L0 survivors need relaxed verification at the L1 child level
         for level in range(20):  # up to max levels
@@ -3888,7 +5630,7 @@ def main():
             if len(survivors) == 0:
                 continue
 
-            n_half_parent = args.n_half * (2 ** level)
+            n_half_parent = effective_n_half * (2 ** level)
             print(f"\n[L{level}] Verifying {len(survivors)} survivors "
                   f"(d_parent={2*n_half_parent})")
 
