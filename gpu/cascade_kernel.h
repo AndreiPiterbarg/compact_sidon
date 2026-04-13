@@ -50,7 +50,6 @@ struct CascadeParams {
     const int32_t*  parents;          /* [num_parents x d_parent]         */
     const int32_t*  lo_arrays;        /* [num_parents x d_parent]         */
     const int32_t*  hi_arrays;        /* [num_parents x d_parent]         */
-    const int32_t*  threshold_table;  /* [ell_count x (S_child+1)]        */
     const int32_t*  ell_order;        /* [ell_count]                      */
     int32_t*        survivors;        /* [max_survivors x d_child]        */
     int32_t*        survivor_count;   /* scalar, global atomic            */
@@ -61,7 +60,9 @@ struct CascadeParams {
     int             ell_count;        /* 2*d_child - 1                    */
     int             conv_len;         /* 2*d_child - 1                    */
     double          threshold_asym;   /* sqrt(c_target / 2.0)             */
+    double          c_target;         /* target constant (e.g. 1.4)       */
     int             max_survivors;
+    bool            use_flat_threshold; /* true = Lean axiom mode          */
 };
 
 /* ───────────────────── host API ─────────────────────────────────── */
@@ -77,9 +78,13 @@ extern "C" {
  *   W_int ranges from 0 to S_child (fine-grid mass in overlapping bins).
  *   ell_count = 2*d_child - 1.
  *   ell_idx = ell - 2  (ell ranges from 2 to 2*d_child).
+ *   use_flat_threshold: when true, uses C&S Lemma 3 flat correction (2/m + 1/m²)
+ *     for all W_int values.  Required for Lean axiom verification.
+ *     When false, uses the tighter W-refined correction (1 + W_int/(2n))/m².
  */
 void build_threshold_table(int32_t* table,
-                           int d_child, int m, double c_target);
+                           int d_child, int m, double c_target,
+                           bool use_flat_threshold);
 
 /*
  * Precompute the ell scanning order on the host.

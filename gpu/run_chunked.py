@@ -30,7 +30,9 @@ import numpy as np
 
 def run_chunk(exe: str, parents_path: str, output_path: str,
               d_parent: int, m: int, c_target: float,
-              max_survivors: int) -> np.ndarray:
+              max_survivors: int,
+              use_flat_threshold: bool = False,
+              verify_relaxed: bool = False) -> np.ndarray:
     """Run the GPU kernel on a single chunk and return survivors."""
     cmd = [
         exe, parents_path, output_path,
@@ -39,6 +41,10 @@ def run_chunk(exe: str, parents_path: str, output_path: str,
         "--c_target", str(c_target),
         "--max_survivors", str(max_survivors),
     ]
+    if use_flat_threshold:
+        cmd.append("--use_flat_threshold")
+    if verify_relaxed:
+        cmd.append("--verify_relaxed")
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
@@ -88,6 +94,12 @@ def main():
                         help="Path to the cascade_prover executable")
     parser.add_argument("--dedup_interval", type=int, default=10,
                         help="Deduplicate accumulated survivors every N chunks")
+    parser.add_argument("--use_flat_threshold", action="store_true",
+                        help="Use flat C&S Lemma 3 correction (2/m + 1/m^2) "
+                             "instead of W-refined.  Required for Lean axiom.")
+    parser.add_argument("--verify_relaxed", action="store_true",
+                        help="Verify ±1 floor rounding children are also pruned. "
+                             "Required for Lean CascadePruned axiom soundness.")
     args = parser.parse_args()
 
     parents = np.load(args.parents)
@@ -132,7 +144,9 @@ def main():
             survivors = run_chunk(
                 args.exe, chunk_input, chunk_output,
                 args.d_parent, args.m, args.c_target,
-                args.max_survivors)
+                args.max_survivors,
+                use_flat_threshold=args.use_flat_threshold,
+                verify_relaxed=args.verify_relaxed)
 
             total_raw += len(survivors)
             if len(survivors) > 0:

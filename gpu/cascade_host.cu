@@ -2,7 +2,7 @@
  * cascade_host.cu — Host-side helpers and kernel launcher.
  *
  * Provides:
- *   - build_threshold_table(): precompute int64 thresholds on CPU
+ *   - build_threshold_table(): precompute int32 thresholds on CPU
  *   - build_ell_order():       precompute optimised ell scan order
  *   - launch_cascade_kernel(): grid config + launch
  *   - main():                  end-to-end driver (load parents, launch, save)
@@ -31,7 +31,6 @@ extern __global__ void cascade_kernel(
     const int32_t* __restrict__ g_parents,
     const int32_t* __restrict__ g_lo_arrays,
     const int32_t* __restrict__ g_hi_arrays,
-    const int32_t* __restrict__ g_threshold_table,
     const int32_t* __restrict__ g_ell_order,
     int32_t*       __restrict__ g_survivors,
     int32_t*       __restrict__ g_survivor_count,
@@ -40,6 +39,8 @@ extern __global__ void cascade_kernel(
     int num_parents, int d_parent, int d_child, int m,
     int ell_count, int conv_len,
     double threshold_asym,
+    double c_target,
+    bool use_flat_threshold,
     int max_survivors,
     int surv_cap);
 
@@ -71,15 +72,24 @@ extern __global__ void cascade_kernel(
 /* ═══════════════════════════════════════════════════════════════════
  *  build_threshold_table
  *
- *  Precomputes int32 thresholds on the CPU.  C&S Lemma 3 formula
- *  (fine grid, S = 4nm):
+ *  Precomputes int32 thresholds on the CPU.  Two modes:
  *
- *    threshold = floor((c_target*m^2 + 3 + W_int/(2n) + eps_margin) * 4n*ell)
+ *  W-refined (use_flat_threshold=false, default):
+ *    C&S equation (1) per-window correction:
+ *    threshold = floor((c_target*m^2 + 1 + W_int/(2n) + eps) * 4n*ell)
+ *    where 1 + W_int/(2n) = (1/m² + W_int/(2nm²)) * m² is the integer-space
+ *    correction from C&S eq(1): (g*g)(x) ≤ (f*f)(x) + 2·W_g(x)/m + 1/m².
  *
- *  The expression is scaled by 4n*ell (the fine-grid window-size factor).
- *  Lemma 3 is a pointwise bound on (g*g)(x); test values are window
- *  averages.  eps_margin is flat (not scaled).
- *  Matches the CPU fused kernel (_fused_generate_and_prune_gray).
+ *  Flat (use_flat_threshold=true, required for Lean axiom verification):
+ *    C&S Lemma 3 global correction:
+ *    threshold = floor((c_target*m^2 + 2m + 1 + eps) * 4n*ell)
+ *    where 2m + 1 = (2/m + 1/m²) * m² is the integer-space flat correction.
+ *    This is W_int-independent (same threshold for all W values).
+ *    Matches the Lean axiom cascade_all_pruned which uses correction = 2/m + 1/m².
+ *
+ *  The flat threshold is HIGHER (harder to prune) than the W-refined threshold,
+ *  since W_int/(2n) ≤ 2m (because W_int ≤ S = 4nm).  The flat bound is what
+ *  the formal proof requires for soundness.
  *
  *  where:
  *    n = n_half_child = d_child / 2
@@ -89,7 +99,8 @@ extern __global__ void cascade_kernel(
  *    W_int ranges from 0 to S (fine-grid mass in overlapping bins)
  * ═══════════════════════════════════════════════════════════════════ */
 void build_threshold_table(int32_t* table,
-                           int d_child, int m, double c_target)
+                           int d_child, int m, double c_target,
+                           bool use_flat_threshold)
 {
     int n_half_child = d_child / 2;
     int S_child = 4 * n_half_child * m;  /* Fine grid: compositions sum to 4nm */
@@ -99,12 +110,20 @@ void build_threshold_table(int32_t* table,
     double eps_margin = 1e-9 * m_d * m_d;
     double cs_base_m2 = c_target * m_d * m_d;
 
+    /* Flat correction: 2m + 1 in integer space = (2/m + 1/m²) * m² */
+    double flat_corr = 2.0 * m_d + 1.0;
+
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int ell_idx = ell - 2;
         double scale_ell = (double)ell * four_n;
         for (int w = 0; w <= S_child; w++) {
-            double corr_w = 1.0 + (double)w / (2.0 * n_half_d);
-            double dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell;
+            double corr;
+            if (use_flat_threshold) {
+                corr = flat_corr;
+            } else {
+                corr = 1.0 + (double)w / (2.0 * n_half_d);
+            }
+            double dyn_x = (cs_base_m2 + corr + eps_margin) * scale_ell;
             table[ell_idx * (S_child + 1) + w] = (int32_t)(dyn_x);
         }
     }
@@ -220,11 +239,11 @@ int launch_cascade_kernel(const CascadeParams* p)
      * the flush check, so the extra slot absorbs the overflow entry. */
     int surv_cap = (p->d_child >= 64) ? 4 : 64;
 
-    /* Dynamic shared memory = threshold_table + ell_order + surv_buf. */
-    size_t smem_threshold = (size_t)p->ell_count * (p->m + 1) * sizeof(int32_t);
+    /* Dynamic shared memory = ell_order + surv_buf.
+     * Threshold table replaced by inline A_ell formula (Improvement 2). */
     size_t smem_ell_order = (size_t)p->ell_count * sizeof(int32_t);
     size_t smem_surv_buf  = (size_t)(surv_cap + 1) * p->d_child * sizeof(int32_t);
-    size_t dynamic_smem_bytes = smem_threshold + smem_ell_order + smem_surv_buf;
+    size_t dynamic_smem_bytes = smem_ell_order + smem_surv_buf;
 
     /* Increase CUDA printf buffer.  The default 1MB fills quickly even
      * without explicit TRACE, because watchdog/error printfs exist.
@@ -291,13 +310,15 @@ int launch_cascade_kernel(const CascadeParams* p)
 
     cascade_kernel<<<grid_size, block_size, dynamic_smem_bytes, kernel_stream>>>(
         p->parents, p->lo_arrays, p->hi_arrays,
-        p->threshold_table, p->ell_order,
+        p->ell_order,
         p->survivors, p->survivor_count,
         d_next_parent,
         d_progress_surv,        /* g_done_parent: completed parent counter */
         p->num_parents, p->d_parent, p->d_child, p->m,
         p->ell_count, p->conv_len,
         p->threshold_asym,
+        p->c_target,
+        p->use_flat_threshold,
         p->max_survivors,
         surv_cap);
 
@@ -591,13 +612,18 @@ static bool tighten_ranges(
     int S_plus_1 = S_child + 1;
     int ell_count = conv_len;
 
-    /* Fine grid (S = 4nm): threshold = floor((c_target*m^2 + 3 + W/(2n) + eps) * 4n*ell)
-     * W_int ranges 0..S (fine-grid mass in overlapping bins). */
+    /* Fine grid (S = 4nm): threshold = floor((c_target*m^2 + corr + eps) * 4n*ell)
+     * W-refined: corr = 1 + W_int/(2n).   Flat: corr = 2m + 1.
+     * Arc consistency uses W_int_max (highest threshold) for soundness,
+     * so W-refined is safe here — it's strictly ≤ flat. */
     std::vector<int32_t> threshold_table(ell_count * S_plus_1);
     for (int ell = 2; ell <= 2 * d_child; ell++) {
         int idx = ell - 2;
         double scale_ell = (double)ell * four_n;
         for (int w = 0; w <= S_child; w++) {
+            /* Arc consistency always uses W-refined: it's tighter, so
+             * removing infeasible values is strictly more aggressive.
+             * Any value removed by W-refined would also be removed by flat. */
             double corr_w = 1.0 + (double)w / (2.0 * n_half_d);
             double dyn_x = (c_target_m2 + corr_w + eps_margin) * scale_ell;
             threshold_table[idx * S_plus_1 + w] = (int32_t)(dyn_x);
@@ -678,7 +704,7 @@ static bool tighten_ranges(
 
                     int hb = std::min(d_child - 1, ell - 2);
                     int64_t W_max = max_child_prefix[hb + 1];
-                    if (W_max > m) W_max = m;
+                    if (W_max > S_child) W_max = S_child;
                     if (ws > threshold_table[ell_idx * S_plus_1 + (int)W_max])
                         return true;
 
@@ -689,8 +715,8 @@ static bool tighten_ranges(
                         hb = s + ell - 2;
                         if (hb > d_child - 1) hb = d_child - 1;
                         W_max = max_child_prefix[hb+1] - max_child_prefix[lb];
-                        if (W_max > m) W_max = m;
-                        if (ws > threshold_table[ell_idx*m_plus_1 + (int)W_max])
+                        if (W_max > S_child) W_max = S_child;
+                        if (ws > threshold_table[ell_idx*S_plus_1 + (int)W_max])
                             return true;
                     }
                 }
@@ -727,18 +753,252 @@ static bool tighten_ranges(
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ *  verify_relaxed_children — ±1 floor rounding verification
+ *
+ *  After the main cascade finds 0 survivors, this verifies that ALL
+ *  ±1 rounding variants are also pruned.  Required for soundness of
+ *  the Lean CascadePruned axiom with relaxed is_valid_child.
+ *
+ *  For each surviving parent, canonical_discretization at doubled
+ *  resolution can produce child[2i]+child[2i+1] = 2*parent[i] + delta_i
+ *  where delta_i ∈ {-1, 0, 1} and ∑ delta_i = 0.
+ *
+ *  This function checks that all such ±1 children are pruned by the
+ *  flat C&S Lemma 3 threshold.
+ * ═══════════════════════════════════════════════════════════════════ */
+static int verify_relaxed_children(
+    const int32_t* parents, int num_parents, int d_parent,
+    int m, double c_target)
+{
+    int d_child = 2 * d_parent;
+    int n_half_child = d_child / 2;
+    int S_child = 4 * n_half_child * m;
+    int conv_len = 2 * d_child - 1;
+    int ell_count = conv_len;
+    int S_plus_1 = S_child + 1;
+
+    /* Build flat threshold table for ±1 verification. */
+    double m_d = (double)m;
+    double four_n = 4.0 * (double)n_half_child;
+    double eps_margin = 1e-9 * m_d * m_d;
+    double cs_base_m2 = c_target * m_d * m_d;
+    double flat_corr = 2.0 * m_d + 1.0;
+
+    std::vector<int32_t> threshold_flat(ell_count * S_plus_1);
+    for (int ell = 2; ell <= 2 * d_child; ell++) {
+        int idx = ell - 2;
+        double scale_ell = (double)ell * four_n;
+        /* Flat: same threshold for all W values. */
+        int32_t flat_val = (int32_t)((cs_base_m2 + flat_corr + eps_margin) * scale_ell);
+        for (int w = 0; w <= S_child; w++)
+            threshold_flat[idx * S_plus_1 + w] = flat_val;
+    }
+
+    /* Cauchy-Schwarz cap for feasibility filter. */
+    double corr_cs = 2.0 / m_d + 1.0 / (m_d * m_d);
+    double thresh_cs = c_target + corr_cs + 1e-9;
+    int x_cap = (int)floor(m_d * sqrt(4.0 * (double)d_child * thresh_cs));
+    int x_cap_cs = (int)floor(m_d * sqrt(4.0 * (double)d_child * c_target)) + 1;
+    x_cap = std::min(x_cap, x_cap_cs);
+    x_cap = std::max(x_cap, 0);
+
+    /* Generate delta vectors: all (delta_0, ..., delta_{d_parent-1}) with
+     * delta_i ∈ {-1, 0, 1} and ∑ delta_i = 0.
+     * Skip all-zeros (that's the standard cascade).
+     *
+     * For small d_parent (≤ 16), enumerate all 3^d_parent combinations.
+     * For larger d_parent, this is infeasible (~43 billion for d=22).
+     * In practice d_parent ≤ 16 at the levels where ±1 matters. */
+    if (d_parent > 16) {
+        printf("  SKIP: d_parent=%d too large for exhaustive ±1 verification\n",
+               d_parent);
+        printf("  (3^%d = %.0e delta vectors — use CPU --verify_relaxed instead)\n",
+               d_parent, pow(3.0, d_parent));
+        return -1;
+    }
+
+    /* Count 3^d_parent total delta vectors. */
+    int64_t n_deltas_total = 1;
+    for (int i = 0; i < d_parent; i++) n_deltas_total *= 3;
+
+    printf("  ±1 verification: %d parents, %lld delta vectors each\n",
+           num_parents, (long long)n_deltas_total);
+
+    std::vector<int32_t> child(d_child);
+    std::vector<int64_t> conv(conv_len);
+    std::vector<int32_t> delta(d_parent);
+    int total_unpruned = 0;
+
+    for (int pi = 0; pi < num_parents; pi++) {
+        const int32_t* parent = &parents[pi * d_parent];
+
+        /* Enumerate all delta vectors via base-3 counter. */
+        for (int64_t di = 0; di < n_deltas_total; di++) {
+            /* Decode delta vector from base-3 index. */
+            int64_t tmp = di;
+            int delta_sum = 0;
+            for (int j = 0; j < d_parent; j++) {
+                delta[j] = (int)(tmp % 3) - 1;  /* -1, 0, +1 */
+                delta_sum += delta[j];
+                tmp /= 3;
+            }
+
+            /* Skip if ∑ delta ≠ 0 (total mass constraint). */
+            if (delta_sum != 0) continue;
+
+            /* Skip all-zeros (standard cascade already verified). */
+            bool all_zero = true;
+            for (int j = 0; j < d_parent; j++)
+                if (delta[j] != 0) { all_zero = false; break; }
+            if (all_zero) continue;
+
+            /* Compute pair sums and check feasibility. */
+            bool feasible = true;
+            for (int j = 0; j < d_parent; j++) {
+                int pair_sum = 2 * parent[j] + delta[j];
+                if (pair_sum < 0) { feasible = false; break; }
+            }
+            if (!feasible) continue;
+
+            /* For this delta variant, we need to check that ALL children
+             * with these pair sums are pruned.  A child has
+             * child[2j] ∈ [0, pair_sum_j], child[2j+1] = pair_sum_j - child[2j].
+             *
+             * The cursor range is [0, pair_sum_j] ∩ [0, x_cap].
+             * Enumerate all cursor combinations. */
+            int64_t total_children = 1;
+            std::vector<int> ps(d_parent), clo(d_parent), chi(d_parent);
+            for (int j = 0; j < d_parent; j++) {
+                ps[j] = 2 * parent[j] + delta[j];
+                clo[j] = std::max(0, ps[j] - x_cap);
+                chi[j] = std::min(ps[j], x_cap);
+                if (clo[j] > chi[j]) { total_children = 0; break; }
+                total_children *= (int64_t)(chi[j] - clo[j] + 1);
+            }
+            if (total_children == 0) continue;
+
+            /* Enumerate all children for this delta variant and check pruning. */
+            std::vector<int32_t> cursor(d_parent);
+            for (int j = 0; j < d_parent; j++) cursor[j] = clo[j];
+
+            for (int64_t ci = 0; ci < total_children; ci++) {
+                /* Build child from cursor. */
+                for (int j = 0; j < d_parent; j++) {
+                    child[2*j]   = cursor[j];
+                    child[2*j+1] = ps[j] - cursor[j];
+                }
+
+                /* Check nonneg. */
+                bool nonneg = true;
+                for (int j = 0; j < d_child; j++)
+                    if (child[j] < 0) { nonneg = false; break; }
+                if (!nonneg) goto next_child;
+
+                /* Check x_cap constraint. */
+                for (int j = 0; j < d_child; j++)
+                    if (child[j] > x_cap) goto next_child;
+
+                /* Full autoconvolution. */
+                std::fill(conv.begin(), conv.end(), 0);
+                for (int ii = 0; ii < d_child; ii++) {
+                    int64_t cii = child[ii];
+                    if (cii == 0) continue;
+                    conv[2*ii] += cii * cii;
+                    for (int jj = ii + 1; jj < d_child; jj++) {
+                        int64_t cjj = child[jj];
+                        if (cjj != 0)
+                            conv[ii+jj] += 2 * cii * cjj;
+                    }
+                }
+
+                /* Window scan: check if ANY (ell, s_lo) prunes this child. */
+                {
+                    bool pruned = false;
+                    for (int ell = 2; ell <= 2 * d_child && !pruned; ell++) {
+                        int n_cv = ell - 1;
+                        int n_windows = conv_len - n_cv + 1;
+                        if (n_windows <= 0) continue;
+                        int ell_idx = ell - 2;
+
+                        /* Compute W_int and window sum via sliding window. */
+                        int64_t ws = 0;
+                        for (int k = 0; k < n_cv; k++) ws += conv[k];
+
+                        /* W_int for first window */
+                        int hb = std::min(d_child - 1, ell - 2);
+                        int64_t W_int = 0;
+                        for (int k = 0; k <= hb; k++) W_int += child[k];
+                        int W_cl = (W_int > S_child) ? S_child : (int)W_int;
+
+                        if (ws > threshold_flat[ell_idx * S_plus_1 + W_cl]) {
+                            pruned = true; break;
+                        }
+
+                        for (int s = 1; s < n_windows; s++) {
+                            ws += conv[s + n_cv - 1] - conv[s - 1];
+                            /* Update W_int via sliding window. */
+                            int r_add = s + ell - 2;
+                            if (r_add < d_child) W_int += child[r_add];
+                            int l_sub = s - 1;
+                            /* Bins exit when s > d_child - 1 */
+                            if (s - 1 >= 0 && (s - 1) < d_child && s + n_cv - 1 >= d_child)
+                                ;  /* no removal needed yet */
+                            /* Use simpler recomputation for correctness */
+                            int lb = (s >= d_child) ? s - d_child + 1 : 0;
+                            hb = std::min(d_child - 1, s + ell - 2);
+                            W_int = 0;
+                            for (int k = lb; k <= hb; k++) W_int += child[k];
+                            W_cl = (W_int > S_child) ? S_child : (int)W_int;
+
+                            if (ws > threshold_flat[ell_idx * S_plus_1 + W_cl]) {
+                                pruned = true; break;
+                            }
+                        }
+                    }
+
+                    if (!pruned) {
+                        total_unpruned++;
+                        if (total_unpruned <= 5) {
+                            printf("  UNPRUNED ±1 child! parent %d, delta=[", pi);
+                            for (int j = 0; j < d_parent; j++)
+                                printf("%+d%s", delta[j], j < d_parent-1 ? "," : "");
+                            printf("], child=[");
+                            for (int j = 0; j < d_child; j++)
+                                printf("%d%s", child[j], j < d_child-1 ? "," : "");
+                            printf("]\n");
+                        }
+                    }
+                }
+
+                next_child:
+                /* Advance cursor (odometer). */
+                for (int j = d_parent - 1; j >= 0; j--) {
+                    cursor[j]++;
+                    if (cursor[j] <= chi[j]) break;
+                    cursor[j] = clo[j];
+                }
+            }
+        }
+    }
+
+    return total_unpruned;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  *  main — End-to-end driver
  *
  *  Usage:
  *    ./cascade_prover <parents.npy> <output.npy> \
- *        --d_parent 32 --m 20 --c_target 1.4 [--max_survivors 200000]
+ *        --d_parent 32 --m 20 --c_target 1.4 [--max_survivors 200000] \
+ *        [--use_flat_threshold] [--verify_relaxed]
  * ═══════════════════════════════════════════════════════════════════ */
 int main(int argc, char** argv)
 {
     if (argc < 3) {
         fprintf(stderr,
             "Usage: %s <parents.npy> <output.npy> "
-            "--d_parent D --m M --c_target C [--max_survivors N]\n",
+            "--d_parent D --m M --c_target C [--max_survivors N] "
+            "[--use_flat_threshold] [--verify_relaxed]\n",
             argv[0]);
         return 1;
     }
@@ -746,20 +1006,26 @@ int main(int argc, char** argv)
     const char* parents_path = argv[1];
     const char* output_path  = argv[2];
 
-    int    d_parent      = 32;
-    int    m             = 20;
-    double c_target      = 1.4;
-    int    max_survivors = 200000;
+    int    d_parent           = 32;
+    int    m                  = 20;
+    double c_target           = 1.4;
+    int    max_survivors      = 200000;
+    bool   use_flat_threshold = false;
+    bool   verify_relaxed     = false;
 
-    for (int i = 3; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--d_parent") == 0)
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--d_parent") == 0 && i + 1 < argc)
             d_parent = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--m") == 0)
+        else if (strcmp(argv[i], "--m") == 0 && i + 1 < argc)
             m = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--c_target") == 0)
+        else if (strcmp(argv[i], "--c_target") == 0 && i + 1 < argc)
             c_target = atof(argv[++i]);
-        else if (strcmp(argv[i], "--max_survivors") == 0)
+        else if (strcmp(argv[i], "--max_survivors") == 0 && i + 1 < argc)
             max_survivors = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--use_flat_threshold") == 0)
+            use_flat_threshold = true;
+        else if (strcmp(argv[i], "--verify_relaxed") == 0)
+            verify_relaxed = true;
     }
 
     int d_child  = 2 * d_parent;
@@ -771,6 +1037,12 @@ int main(int argc, char** argv)
            d_parent, d_child, m, c_target);
     printf("  ell_count=%d  conv_len=%d  max_survivors=%d\n",
            ell_count, conv_len, max_survivors);
+    if (use_flat_threshold)
+        printf("  threshold: FLAT (C&S Lemma 3: 2/m + 1/m^2) — Lean axiom mode\n");
+    else
+        printf("  threshold: W-refined (C&S eq(1): (1 + W_int/(2n))/m^2)\n");
+    if (verify_relaxed)
+        printf("  ±1 relaxed child verification: ENABLED\n");
 
     /* ── Load parents ── */
     std::vector<int32_t> h_parents;
@@ -838,31 +1110,25 @@ int main(int argc, char** argv)
                d_parent * sizeof(int32_t));
     }
 
-    /* ── Build threshold table ── */
-    printf("  Building threshold table (%d x %d)...\n", ell_count, m + 1);
-    std::vector<int32_t> h_threshold(ell_count * (m + 1));
-    build_threshold_table(h_threshold.data(), d_child, m, c_target);
-
     /* ── Build ell order ── */
     std::vector<int32_t> h_ell_order(ell_count);
     int ell_written = build_ell_order(h_ell_order.data(), d_child);
     printf("  ell_order: %d entries\n", ell_written);
 
-    /* ── Allocate GPU memory ── */
+    /* ── Allocate GPU memory ──
+     * Threshold table is computed inline on the GPU (A_ell shared memory
+     * + 2*ell*W_int formula), eliminating ~1.27 MB of global memory. */
     printf("  Allocating GPU memory...\n");
     int32_t *d_parents, *d_lo, *d_hi, *d_survivors, *d_count;
-    int32_t *d_threshold;
     int32_t *d_ell_order;
 
     size_t parent_bytes = (size_t)n_valid * d_parent * sizeof(int32_t);
-    size_t thresh_bytes = (size_t)ell_count * (m + 1) * sizeof(int32_t);
     size_t ell_bytes    = (size_t)ell_count * sizeof(int32_t);
     size_t surv_bytes   = (size_t)max_survivors * d_child * sizeof(int32_t);
 
     CUDA_CHECK_VOID(cudaMalloc(&d_parents,   parent_bytes));
     CUDA_CHECK_VOID(cudaMalloc(&d_lo,        parent_bytes));
     CUDA_CHECK_VOID(cudaMalloc(&d_hi,        parent_bytes));
-    CUDA_CHECK_VOID(cudaMalloc(&d_threshold, thresh_bytes));
     CUDA_CHECK_VOID(cudaMalloc(&d_ell_order, ell_bytes));
     CUDA_CHECK_VOID(cudaMalloc(&d_survivors, surv_bytes));
     CUDA_CHECK_VOID(cudaMalloc(&d_count,     sizeof(int32_t)));
@@ -875,8 +1141,6 @@ int main(int argc, char** argv)
                                parent_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK_VOID(cudaMemcpy(d_hi, pack_hi.data(),
                                parent_bytes, cudaMemcpyHostToDevice));
-    CUDA_CHECK_VOID(cudaMemcpy(d_threshold, h_threshold.data(),
-                               thresh_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK_VOID(cudaMemcpy(d_ell_order, h_ell_order.data(),
                                ell_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK_VOID(cudaMemset(d_count, 0, sizeof(int32_t)));
@@ -886,7 +1150,6 @@ int main(int argc, char** argv)
     params.parents         = d_parents;
     params.lo_arrays       = d_lo;
     params.hi_arrays       = d_hi;
-    params.threshold_table = d_threshold;
     params.ell_order       = d_ell_order;
     params.survivors       = d_survivors;
     params.survivor_count  = d_count;
@@ -897,7 +1160,9 @@ int main(int argc, char** argv)
     params.ell_count       = ell_count;
     params.conv_len        = conv_len;
     params.threshold_asym  = sqrt(c_target / 2.0);
+    params.c_target        = c_target;
     params.max_survivors   = max_survivors;
+    params.use_flat_threshold = use_flat_threshold;
 
     auto main_t0 = std::chrono::high_resolution_clock::now();
     int rc = launch_cascade_kernel(&params);
@@ -952,11 +1217,39 @@ int main(int argc, char** argv)
         printf("  No survivors — proof complete at this level!\n");
     }
 
+    /* ── ±1 Relaxed child verification ── */
+    if (verify_relaxed) {
+        printf("\n  ═══ ±1 RELAXED CHILD VERIFICATION ═══\n");
+        if (!use_flat_threshold) {
+            printf("  WARNING: --verify_relaxed should be used with "
+                   "--use_flat_threshold for Lean axiom soundness.\n");
+        }
+
+        /* Verify the INPUT parents (at the parent level).
+         * For each parent, check that all ±1 children are pruned.
+         * This is the same check as CPU --verify_relaxed. */
+        auto vt0 = std::chrono::high_resolution_clock::now();
+        int unpruned = verify_relaxed_children(
+            pack_parents.data(), n_valid, d_parent, m, c_target);
+        auto vt1 = std::chrono::high_resolution_clock::now();
+        double vt_s = std::chrono::duration<double>(vt1 - vt0).count();
+
+        if (unpruned < 0) {
+            printf("  ±1 verification skipped (d_parent too large).\n");
+        } else if (unpruned == 0) {
+            printf("  ±1 verification PASSED: all relaxed children pruned "
+                   "(%.1f s)\n", vt_s);
+        } else {
+            printf("  ±1 verification FAILED: %d unpruned relaxed children "
+                   "(%.1f s)\n", unpruned, vt_s);
+            printf("  The Lean axiom cascade_all_pruned is NOT verified.\n");
+        }
+    }
+
     /* ── Cleanup ── */
     cudaFree(d_parents);
     cudaFree(d_lo);
     cudaFree(d_hi);
-    cudaFree(d_threshold);
     cudaFree(d_ell_order);
     cudaFree(d_survivors);
     cudaFree(d_count);

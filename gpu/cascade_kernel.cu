@@ -172,6 +172,28 @@ __device__ void incremental_conv_update(
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+ *  inline_threshold — compute threshold from A_ell + 2*ell*W_int
+ *
+ *  Replaces the 1.27 MB global-memory threshold table with a shared-
+ *  memory lookup (A_ell) plus one FMA.
+ *
+ *  W-refined:  floor(A_ell + 2 * ell * W_int)
+ *  Flat:       floor(A_ell)   (A_ell already includes flat correction)
+ *
+ *  Requires -fmad=false so the multiply and add are separate IEEE 754
+ *  operations matching the host's build_threshold_table exactly.
+ * ═══════════════════════════════════════════════════════════════════ */
+__device__ __forceinline__ int32_t inline_threshold(
+    const double* A_ell,
+    int ell_idx, int ell, int W_int,
+    bool use_flat)
+{
+    if (use_flat)
+        return (int32_t)(A_ell[ell_idx]);
+    return (int32_t)(A_ell[ell_idx] + 2.0 * (double)ell * (double)W_int);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
  *  warp_cooperative_quick_check — retry previous killing window
  *
  *  Returns true if the child is killed by the cached (ell, s, W_int).
@@ -180,10 +202,11 @@ __device__ void incremental_conv_update(
  * ═══════════════════════════════════════════════════════════════════ */
 __device__ __noinline__ bool warp_cooperative_quick_check(
     const int32_t* conv,
-    const int32_t* threshold_table,
-    int qc_ell, int qc_s, int32_t qc_W_int, int m,
+    const double* A_ell,
+    bool use_flat,
+    int qc_ell, int qc_s, int32_t qc_W_int,
     bool* qc_killed_smem,
-    int32_t* qc_warp_sums)          /* [2] in shared mem for multi-warp */
+    int32_t* qc_warp_sums)          /* [8] in shared mem for multi-warp */
 {
     if (qc_ell == 0) return false;
 
@@ -214,10 +237,9 @@ __device__ __noinline__ bool warp_cooperative_quick_check(
             for (int w = 1; w < (int)blockDim.x / WARP_SIZE; w++)
                 ws += qc_warp_sums[w];
             int ell_idx = qc_ell - 2;
-            int W_int_clamped = (int)qc_W_int;
-            if (W_int_clamped < 0) W_int_clamped = 0;
-            if (W_int_clamped > m) W_int_clamped = m;
-            int32_t thresh = threshold_table[ell_idx * (m + 1) + W_int_clamped];
+            int W_cl = (int)qc_W_int;
+            if (W_cl < 0) W_cl = 0;
+            int32_t thresh = inline_threshold(A_ell, ell_idx, qc_ell, W_cl, use_flat);
             *qc_killed_smem = (ws > thresh);
         }
         __syncthreads();
@@ -226,10 +248,9 @@ __device__ __noinline__ bool warp_cooperative_quick_check(
         if (lane == 0) {
             int32_t ws = partial;
             int ell_idx = qc_ell - 2;
-            int W_int_clamped = (int)qc_W_int;
-            if (W_int_clamped < 0) W_int_clamped = 0;
-            if (W_int_clamped > m) W_int_clamped = m;
-            int32_t thresh = threshold_table[ell_idx * (m + 1) + W_int_clamped];
+            int W_cl = (int)qc_W_int;
+            if (W_cl < 0) W_cl = 0;
+            int32_t thresh = inline_threshold(A_ell, ell_idx, qc_ell, W_cl, use_flat);
             *qc_killed_smem = (ws > thresh);
         }
         __syncthreads();
@@ -265,9 +286,10 @@ __device__ __noinline__ bool warp_cooperative_quick_check(
 __device__ __noinline__ bool thread_private_window_scan(
     const int32_t* conv,
     const int32_t* child,
-    const int32_t* threshold_table,
+    const double* A_ell,
+    bool use_flat,
     const int32_t* ell_order,
-    int ell_count, int conv_len, int d_child, int m,
+    int ell_count, int conv_len, int d_child,
     int* kill_flag,
     /* Quick-check state output: killing (ell, s, W_int) written on prune. */
     int* qc_ell_out,
@@ -301,8 +323,7 @@ __device__ __noinline__ bool thread_private_window_scan(
         {
             int W_cl = (int)W_int;
             if (W_cl < 0) W_cl = 0;
-            if (W_cl > m) W_cl = m;
-            if (ws > threshold_table[ell_idx * (m + 1) + W_cl]) {
+            if (ws > inline_threshold(A_ell, ell_idx, ell, W_cl, use_flat)) {
                 int prev = atomicMin_block(kill_flag, lane);
                 if (prev >= bd) {
                     /* First killer — record the killing window. */
@@ -330,8 +351,7 @@ __device__ __noinline__ bool thread_private_window_scan(
 
             int W_cl = (int)W_int;
             if (W_cl < 0) W_cl = 0;
-            if (W_cl > m) W_cl = m;
-            if (ws > threshold_table[ell_idx * (m + 1) + W_cl]) {
+            if (ws > inline_threshold(A_ell, ell_idx, ell, W_cl, use_flat)) {
                 int prev = atomicMin_block(kill_flag, lane);
                 if (prev >= bd) {
                     /* First killer — record the killing window. */
@@ -367,9 +387,10 @@ __device__ __noinline__ bool thread_private_window_scan(
 __device__ __noinline__ bool parallel_window_scan(
     const int32_t* conv,
     const int32_t* child,
-    const int32_t* threshold_table,
+    const double* A_ell,
+    bool use_flat,
     const int32_t* ell_order,
-    int ell_count, int conv_len, int d_child, int m,
+    int ell_count, int conv_len, int d_child,
     int* qc_ell_out,
     int* qc_s_out,
     int32_t* qc_W_int_out,
@@ -460,7 +481,9 @@ __device__ __noinline__ bool parallel_window_scan(
             int W_int = (int)(prefix_c[hi_bin + 1] - prefix_c[lo_bin]);
 
             int ell_idx = ell - 2;
-            int32_t thresh = threshold_table[ell_idx * (m + 1) + W_int];
+            int W_int_cl = W_int;
+            if (W_int_cl < 0) W_int_cl = 0;
+            int32_t thresh = inline_threshold(A_ell, ell_idx, ell, W_int_cl, use_flat);
             if (ws > thresh) {
                 lane_pruned   = true;
                 lane_killer_s = s_lo;
@@ -594,8 +617,16 @@ __device__ void flush_survivors_to_global(
     int count = *surv_count_smem;
     if (count == 0) return;
 
-    if (lane == 0)
-        *base_smem = atomicAdd(survivor_count_global, count);
+    /* Pre-check: skip atomicAdd if counter already exceeds max_survivors.
+     * Without this, the int32 counter overflows when total survivors >> 2B,
+     * producing negative base values and illegal memory accesses. */
+    if (lane == 0) {
+        int current = *survivor_count_global;  /* relaxed read is fine */
+        if (current >= max_survivors)
+            *base_smem = max_survivors;  /* sentinel: skip write */
+        else
+            *base_smem = atomicAdd(survivor_count_global, count);
+    }
     __syncthreads();
     int base = *base_smem;
 
@@ -633,9 +664,10 @@ __device__ bool partial_window_scan_max_threshold(
     const int32_t* partial_conv_prefix,  /* inclusive prefix sum */
     int partial_conv_len,
     int fixed_len,
-    const int32_t* threshold_table,
+    const double* A_ell,
+    bool use_flat,
     const int32_t* ell_order,
-    int ell_count, int m, int d_child,
+    int ell_count, int d_child,
     const int32_t* prefix_c_fixed,   /* prefix sum of child[0..fixed_len-1] */
     const int32_t* parent_prefix,     /* prefix sum of parent masses */
     int first_unfixed_parent, int d_parent,
@@ -703,15 +735,121 @@ __device__ bool partial_window_scan_max_threshold(
             }
 
             int32_t W_int_max = W_int_fixed + W_int_unfixed;
-            /* Clamp to m to avoid out-of-bounds table access. */
-            if (W_int_max > m) W_int_max = m;
+            if (W_int_max < 0) W_int_max = 0;
             int ell_idx = ell - 2;
-            int32_t thresh = threshold_table[ell_idx * (m + 1) + (int)W_int_max];
+            int32_t thresh = inline_threshold(A_ell, ell_idx, ell, (int)W_int_max, use_flat);
             if (ws > thresh)
                 return true;
         }
     }
     return false;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  thread_private_subtree_scan — parallel subtree pruning window scan
+ *
+ *  Replaces the lane-0-only partial_window_scan_max_threshold with a
+ *  thread-private sliding-window approach mirroring thread_private_
+ *  window_scan.  Each thread independently scans a subset of ell
+ *  values over the combined lower-bound conv array (fixed prefix
+ *  autoconv + guaranteed min contributions, pre-merged by caller).
+ *
+ *  W_int_max is computed per window position via O(1) prefix-sum
+ *  lookups into prefix_c_fixed (child masses) and parent_prefix
+ *  (parent upper bounds for unfixed bins).
+ *
+ *  CORRECTNESS: Checks every (ell, s) pair — identical coverage to
+ *  partial_window_scan_max_threshold.  The sliding window on the
+ *  combined conv produces the same ws as the prefix-sum range query.
+ *  W_int_max computation is identical.  atomicMin_block kill detection
+ *  uses the same protocol as thread_private_window_scan.
+ *
+ *  Caller must init *kill_flag to blockDim.x and __syncthreads BEFORE
+ *  calling.  Caller must __syncthreads AFTER return to read kill flag.
+ * ═══════════════════════════════════════════════════════════════════ */
+__device__ __noinline__ bool thread_private_subtree_scan(
+    const int32_t* combined_conv,      /* min_contrib + partial_conv merged, length full_conv_len */
+    int full_conv_len,                 /* 2*d_child - 1 */
+    const int32_t* prefix_c_fixed,     /* exclusive prefix sum of child[0..fixed_len], length fixed_len+1 */
+    const int32_t* parent_prefix,      /* exclusive prefix sum of parent masses, length d_parent+1 */
+    int fixed_len,
+    int first_unfixed_parent,
+    int d_parent,
+    const double* A_ell,
+    bool use_flat,
+    const int32_t* ell_order,
+    int ell_count, int d_child,
+    int* kill_flag)
+{
+    const int lane = threadIdx.x;
+    const int bd = (int)blockDim.x;
+
+    for (int ell_oi = lane; ell_oi < ell_count; ell_oi += bd) {
+        int ell = ell_order[ell_oi];
+        int n_cv = ell - 1;
+        int n_windows = full_conv_len - n_cv + 1;
+        if (n_windows <= 0) continue;
+
+        /* ── Initial window sum: ws = sum(combined_conv[0..n_cv-1]) ── */
+        int32_t ws = 0;
+        for (int k = 0; k < n_cv; k++)
+            ws += combined_conv[k];
+
+        int ell_idx = ell - 2;
+
+        /* ── Check all window positions ── */
+        for (int s_lo = 0; s_lo < n_windows; s_lo++) {
+            if (s_lo > 0) {
+                ws += combined_conv[s_lo + n_cv - 1];
+                ws -= combined_conv[s_lo - 1];
+            }
+
+            int lo_bin = s_lo - (d_child - 1);
+            if (lo_bin < 0) lo_bin = 0;
+            int hi_bin = s_lo + ell - 2;
+            if (hi_bin > d_child - 1) hi_bin = d_child - 1;
+
+            /* W_int_fixed: actual child masses in fixed prefix bins. */
+            int32_t W_int_fixed = 0;
+            {
+                int fhi = hi_bin;
+                if (fhi > fixed_len - 1) fhi = fixed_len - 1;
+                if (fhi >= lo_bin) {
+                    int flo = (lo_bin < 0) ? 0 : lo_bin;
+                    W_int_fixed = prefix_c_fixed[fhi + 1] - prefix_c_fixed[flo];
+                }
+            }
+
+            /* W_int_unfixed: parent upper bound for bins beyond fixed prefix. */
+            int32_t W_int_unfixed = 0;
+            {
+                int uflo = lo_bin;
+                if (uflo < fixed_len) uflo = fixed_len;
+                if (uflo <= hi_bin) {
+                    int p_lo = uflo / 2;
+                    int p_hi = hi_bin / 2;
+                    if (p_lo < first_unfixed_parent) p_lo = first_unfixed_parent;
+                    if (p_hi >= d_parent) p_hi = d_parent - 1;
+                    if (p_lo <= p_hi)
+                        W_int_unfixed = parent_prefix[p_hi + 1] - parent_prefix[p_lo];
+                }
+            }
+
+            int32_t W_int_max = W_int_fixed + W_int_unfixed;
+            if (W_int_max < 0) W_int_max = 0;
+            int32_t thresh = inline_threshold(A_ell, ell_idx, ell, (int)W_int_max, use_flat);
+            if (ws > thresh) {
+                atomicMin_block(kill_flag, lane);
+                goto done_ell;
+            }
+        }
+
+        done_ell:
+        /* Early exit if any thread already found a kill. */
+        if (*kill_flag < bd) return true;
+    }
+
+    return false;  /* actual result checked via kill_flag after sync */
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -723,7 +861,6 @@ __global__ void cascade_kernel(
     const int32_t* __restrict__ g_parents,
     const int32_t* __restrict__ g_lo_arrays,
     const int32_t* __restrict__ g_hi_arrays,
-    const int32_t* __restrict__ g_threshold_table,
     const int32_t* __restrict__ g_ell_order,
     int32_t*       __restrict__ g_survivors,
     int32_t*       __restrict__ g_survivor_count,
@@ -732,6 +869,8 @@ __global__ void cascade_kernel(
     int num_parents, int d_parent, int d_child, int m,
     int ell_count, int conv_len,
     double threshold_asym,
+    double c_target,
+    bool use_flat_threshold,
     int max_survivors,
     int surv_cap)
 {
@@ -781,20 +920,20 @@ __global__ void cascade_kernel(
     __shared__ int32_t prefix_conv_smem[128];
     __shared__ int32_t prefix_c_smem[MAX_D_CHILD + 1];
 
-    /* Threshold table, ell order, and survivor staging buffer in dynamic
-     * shared memory.  Downsized thresholds from int64 to int32: max = 601
-     * for m=20.  Survivor buffer uses (surv_cap+1) slots to absorb the
+    /* Threshold constants: A_ell[ell_idx] = (base) * ell, where
+     * base = (c_target*m^2 + corr + eps) * 4*n_half.
+     * Replaces the 1.27 MB global-memory threshold table with 127
+     * float64 values (~1 KB) in shared memory.  See Improvement 2. */
+    __shared__ double A_ell_smem[MAX_ELL_COUNT];
+
+    /* Ell order and survivor staging buffer in dynamic shared memory.
+     * Survivor buffer uses (surv_cap+1) slots to absorb the
      * one-past-capacity write that triggers the flush (Idea 3). */
     extern __shared__ char dynamic_smem[];
-    int32_t* threshold_table_smem = (int32_t*)dynamic_smem;
-    int32_t* ell_order_smem = (int32_t*)(dynamic_smem +
-                               ell_count * (m + 1) * sizeof(int32_t));
+    int32_t* ell_order_smem = (int32_t*)dynamic_smem;
     int32_t* surv_buf_smem = (int32_t*)(dynamic_smem +
-                               ell_count * (m + 1) * sizeof(int32_t) +
                                ell_count * sizeof(int32_t));
 
-    /* Survivor staging buffer — in dynamic shared memory (Idea 3).
-     * Pointer set up below after threshold_table + ell_order. */
     __shared__ int     surv_count_smem;
 
     /* Quick-check state (single-window, used as primary cache slot). */
@@ -802,7 +941,9 @@ __global__ void cascade_kernel(
     __shared__ int     qc_s_smem;
     __shared__ int32_t qc_W_int_smem;
 
-    /* (Lazy QC, multi-window cache, and batch QC state removed.) */
+    /* Quick-check shared memory for warp reduction. */
+    __shared__ bool    qc_killed_smem;
+    __shared__ int32_t qc_warp_sums_smem[8];
 
     __shared__ int     cmp_array_smem[MAX_D_CHILD];
     __shared__ bool    use_rev_smem;
@@ -815,13 +956,23 @@ __global__ void cascade_kernel(
     __shared__ bool    skip_parent_smem;
     __shared__ int     parent_idx_smem;
 
-    /* (old1/old2/new1/new2_smem removed — no longer needed with lazy conv) */
+    /* Incremental conv update communication (lane 0 → all threads). */
+    __shared__ int     update_pos_smem;
+    __shared__ int32_t update_old1_smem;
+    __shared__ int32_t update_old2_smem;
+    __shared__ int32_t update_new1_smem;
+    __shared__ int32_t update_new2_smem;
 
     /* Thread-private window scan kill flag. */
     __shared__ int     kill_flag_smem;
 
     /* Subtree pruning. */
     __shared__ bool    subtree_killed_smem;
+    __shared__ bool    subtree_do_check_smem;
+    __shared__ int     subtree_fixed_len_smem;
+    __shared__ int     subtree_pconv_len_smem;
+    __shared__ int     subtree_first_unfixed_smem;
+    __shared__ int     subtree_kill_flag_smem;
 
     /* Guaranteed minimum contributions from unfixed bins (Idea 02).
      * Used during subtree pruning to tighten the lower bound on
@@ -836,13 +987,38 @@ __global__ void cascade_kernel(
      * subtree_size[0]=1.  Used for cost/benefit and skip counting. */
     __shared__ int64_t subtree_size_smem[MAX_D_PARENT + 1];
 
-    /* ────────── Load threshold table + ell_order into shared mem ────────── */
+    /* ────────── Load ell_order into shared mem ────────── */
     {
-        int table_size = ell_count * (m + 1);
-        for (int i = lane; i < table_size; i += blockDim.x)
-            threshold_table_smem[i] = g_threshold_table[i];
         for (int i = lane; i < ell_count; i += blockDim.x)
             ell_order_smem[i] = g_ell_order[i];
+    }
+    __syncthreads();
+
+    /* ────────── Precompute A_ell threshold constants ──────────
+     * A_ell[ell_idx] = base * ell, where base depends on threshold mode.
+     * W-refined: base = (c_target*m^2 + 1.0 + eps) * 4*n_half
+     *   threshold(ell,W) = floor(A_ell + 2*ell*W)
+     * Flat:      base = (c_target*m^2 + 2*m + 1 + eps) * 4*n_half
+     *   threshold(ell,W) = floor(A_ell)  (W-independent)
+     *
+     * Operation order matches host build_threshold_table exactly:
+     *   scale_ell = (double)ell * four_n, then dyn_x = S * scale_ell.
+     * With -fmad=false, IEEE 754 guarantees bitwise-identical rounding. */
+    {
+        double m_d = (double)m;
+        double n_half_d = (double)(d_child / 2);
+        double eps_margin = 1e-9 * m_d * m_d;
+        double cs_base_m2 = c_target * m_d * m_d;
+        double base_corr;
+        if (use_flat_threshold)
+            base_corr = cs_base_m2 + 2.0 * m_d + 1.0 + eps_margin;
+        else
+            base_corr = cs_base_m2 + 1.0 + eps_margin;
+        double four_n = 4.0 * n_half_d;
+        for (int i = lane; i < ell_count; i += blockDim.x) {
+            int ell = i + 2;  /* ell_idx = ell - 2, so ell = ell_idx + 2 */
+            A_ell_smem[i] = base_corr * ((double)ell * four_n);
+        }
     }
     __syncthreads();
 
@@ -889,12 +1065,17 @@ __global__ void cascade_kernel(
 
         /* ── Phase 0b: Asymmetry pre-filter ──
          * Skip parents whose left-mass fraction is outside
-         * [1-thresh, thresh].  Performance optimisation, not soundness. */
+         * [1-thresh, thresh].  Performance optimisation, not soundness.
+         * left_frac = left_sum / S_parent (total mass), matching CPU. */
         if (lane == 0) {
             int left_sum = 0;
-            for (int i = 0; i < d_parent / 2; i++)
-                left_sum += parent_smem[i];
-            double left_frac = (double)left_sum / (double)m;
+            int total_sum = 0;
+            for (int i = 0; i < d_parent; i++) {
+                total_sum += parent_smem[i];
+                if (i < d_parent / 2)
+                    left_sum += parent_smem[i];
+            }
+            double left_frac = (double)left_sum / (double)total_sum;
             skip_parent_smem = (left_frac >= threshold_asym ||
                                 left_frac <= 1.0 - threshold_asym);
         }
@@ -996,8 +1177,9 @@ __global__ void cascade_kernel(
 
             thread_private_window_scan(
                 raw_conv_smem, child_smem,
-                threshold_table_smem, ell_order_smem,
-                ell_count, conv_len, d_child, m,
+                A_ell_smem, use_flat_threshold,
+                ell_order_smem,
+                ell_count, conv_len, d_child,
                 &kill_flag_smem,
                 &qc_ell_smem, &qc_s_smem, &qc_W_int_smem);
             __syncthreads();
@@ -1020,9 +1202,12 @@ __global__ void cascade_kernel(
 
         /* ── Phase 6: Gray code enumeration loop ──
          *
-         * Per-child: GC advance (lane 0) → barrier → full autoconv
-         * → full window scan → collect survivor if not pruned.
+         * Per-child: GC advance (lane 0) → barrier →
+         *   incremental conv update O(d) → QC W_int update →
+         *   quick-check → (if miss) full window scan →
+         *   collect survivor if not pruned.
          * Plus subtree pruning at higher GC levels.
+         * Matches CPU _fused_generate_and_prune_gray exactly.
          */
         int64_t children_tested = 1;
         int64_t n_skipped = 0;
@@ -1035,7 +1220,9 @@ __global__ void cascade_kernel(
         TRACE_PARENT0_VAL("Phase 6: expected_total", expected_total);
 
         while (true) {
-            /* ═══ STEP 1: Gray code advance + child update ═══ */
+            /* ═══ STEP 1: Gray code advance + child update ═══
+             * Lane 0: advance Gray code, save old child values,
+             * update child bins, broadcast via shared memory. */
             if (lane == 0) {
                 int j = gc_focus_smem[0];
                 if (j >= n_active || watchdog > expected_total + 10) {
@@ -1058,10 +1245,18 @@ __global__ void cascade_kernel(
 
                     gc_j_smem = j;
 
-                    /* Update child values. */
+                    /* Save old child values BEFORE update. */
                     int k1 = 2 * pos;
+                    update_pos_smem  = pos;
+                    update_old1_smem = child_smem[k1];
+                    update_old2_smem = child_smem[k1 + 1];
+
+                    /* Update child values. */
                     child_smem[k1]     = cursor_smem[pos];
                     child_smem[k1 + 1] = 2 * parent_smem[pos] - cursor_smem[pos];
+
+                    update_new1_smem = child_smem[k1];
+                    update_new2_smem = child_smem[k1 + 1];
                 }
             }
             __syncthreads();   /* ── BARRIER #1 ── */
@@ -1071,26 +1266,70 @@ __global__ void cascade_kernel(
             children_tested++;
             watchdog++;
 
-            /* ═══ STEP 2: Full autoconv + window scan ═══ */
-            cooperative_full_autoconv(child_smem, raw_conv_smem,
-                                      d_child, conv_len);
-
+            /* ═══ STEP 2a: Incremental conv update O(d) ═══
+             * Single-position change: update conv cross-terms for the
+             * two child bins that changed.  O(d) instead of O(d²).
+             * Matches CPU incremental update (run_cascade.py:1766-1803). */
             {
+                int pos = update_pos_smem;
+                int k1 = 2 * pos;
+                int k2 = k1 + 1;
+                incremental_conv_update(
+                    raw_conv_smem, child_smem,
+                    k1, k2,
+                    update_old1_smem, update_old2_smem,
+                    update_new1_smem, update_new2_smem,
+                    d_child, conv_len);
+            }
+
+            /* ═══ STEP 2b: QC W_int incremental update ═══
+             * Update the cached quick-check W_int for the changed bins.
+             * Matches CPU (run_cascade.py:1806-1816). */
+            if (lane == 0 && qc_ell_smem > 0) {
+                int k1 = 2 * update_pos_smem;
+                int k2 = k1 + 1;
+                int qc_lo = qc_s_smem - (d_child - 1);
+                if (qc_lo < 0) qc_lo = 0;
+                int qc_hi = qc_s_smem + qc_ell_smem - 2;
+                if (qc_hi > d_child - 1) qc_hi = d_child - 1;
+                int32_t delta1 = update_new1_smem - update_old1_smem;
+                int32_t delta2 = update_new2_smem - update_old2_smem;
+                if (qc_lo <= k1 && k1 <= qc_hi)
+                    qc_W_int_smem += delta1;
+                if (qc_lo <= k2 && k2 <= qc_hi)
+                    qc_W_int_smem += delta2;
+            }
+            __syncthreads();
+
+            /* ═══ STEP 2c: Quick-check — retry previous killing window ═══
+             * ~85% hit rate: most adjacent Gray code children share the
+             * same killing window.  Saves full window scan.
+             * Matches CPU quick-check (run_cascade.py:1666-1674). */
+            bool qc_killed = warp_cooperative_quick_check(
+                raw_conv_smem, A_ell_smem, use_flat_threshold,
+                qc_ell_smem, qc_s_smem, qc_W_int_smem,
+                &qc_killed_smem, qc_warp_sums_smem);
+
+            bool pruned = qc_killed;
+
+            /* ═══ STEP 2d: Full window scan (if quick-check missed) ═══ */
+            if (!pruned) {
                 if (lane == 0) kill_flag_smem = (int)blockDim.x;
                 __syncthreads();
 
                 thread_private_window_scan(
                     raw_conv_smem, child_smem,
-                    threshold_table_smem, ell_order_smem,
-                    ell_count, conv_len, d_child, m,
+                    A_ell_smem, use_flat_threshold,
+                    ell_order_smem,
+                    ell_count, conv_len, d_child,
                     &kill_flag_smem,
                     &qc_ell_smem, &qc_s_smem, &qc_W_int_smem);
                 __syncthreads();
+
+                pruned = (kill_flag_smem < (int)blockDim.x);
             }
 
             {
-                bool pruned = (kill_flag_smem < (int)blockDim.x);
-
                 /* ═══ STEP 3: Collect survivor ═══ */
                 if (!pruned) {
                     canonicalize_and_stage(
@@ -1105,8 +1344,10 @@ __global__ void cascade_kernel(
                 }
             }
 
-            /* (Lazy QC, batch QC, and QC cache removed — proved buggy.
-             * The full autoconv + window scan path is correct and sufficient.
+            /* (Incremental conv update + quick-check replaces the old
+             * full autoconv + window scan approach.  The incremental path
+             * is O(d) per child instead of O(d²), and quick-check avoids
+             * the full window scan for ~85% of children.
              * See git history for the removed code.  All references to
              * "Idea 1", "Idea 2", "Idea 4" have been removed.) */
 
@@ -1136,6 +1377,7 @@ __global__ void cascade_kernel(
                 __syncthreads();
 
                 if (gc_j >= 2 && n_active > gc_j) {
+                    /* ── Lane 0 computes parameters, broadcasts via smem ── */
                     if (lane == 0) {
                         int fixed_parent_boundary = active_pos_smem[gc_j - 1];
                         int fixed_len = 2 * fixed_parent_boundary;
@@ -1148,66 +1390,78 @@ __global__ void cascade_kernel(
                             do_check = (st_size > 4 * cost);
                         }
 
-                        if (do_check) {
-                            int pconv_len = 2 * fixed_len - 1;
-                            for (int kk = 0; kk < pconv_len; kk++)
-                                prefix_conv_smem[kk] = 0;
-                            for (int ii = 0; ii < fixed_len; ii++) {
+                        subtree_do_check_smem = do_check;
+                        subtree_fixed_len_smem = fixed_len;
+                        subtree_pconv_len_smem = 2 * fixed_len - 1;
+                        subtree_first_unfixed_smem = fixed_parent_boundary;
+                    }
+                    __syncthreads();
+
+                    if (subtree_do_check_smem) {
+                        int fixed_len = subtree_fixed_len_smem;
+                        int pconv_len = subtree_pconv_len_smem;
+                        int first_unfixed_parent = subtree_first_unfixed_smem;
+
+                        /* ── Sub-task A: cooperative partial autoconv ──
+                         * Same pattern as cooperative_full_autoconv (lines 42-67)
+                         * but on the fixed prefix only. */
+                        for (int k = lane; k < pconv_len; k += blockDim.x)
+                            prefix_conv_smem[k] = 0;
+                        __syncthreads();
+
+                        for (int i = lane; i < fixed_len; i += blockDim.x) {
+                            int ci = child_smem[i];
+                            if (ci == 0) continue;
+                            atomicAdd_block(&prefix_conv_smem[2 * i], ci * ci);
+                            for (int j = i + 1; j < fixed_len; j++) {
+                                int cj = child_smem[j];
+                                if (cj != 0)
+                                    atomicAdd_block(&prefix_conv_smem[i + j], 2 * ci * cj);
+                            }
+                        }
+                        __syncthreads();
+
+                        /* ── Sub-task B: cooperative min-contrib ──
+                         * Guaranteed minimum contributions from unfixed bins.
+                         * All writes via atomicAdd_block (integer — deterministic). */
+                        for (int k = lane; k < conv_len; k += blockDim.x)
+                            min_contrib_smem[k] = 0;
+                        __syncthreads();
+
+                        /* (A) Inner active positions (digits 0..gc_j-1)
+                         * Outer loop sequential (all threads), inner cross-with-
+                         * fixed distributed across threads.  This gives 100% thread
+                         * utilization instead of gc_j/blockDim (3-8%). */
+                        for (int kk = 0; kk < gc_j; kk++) {
+                            int p_unf = active_pos_smem[kk];
+                            int k1u = 2 * p_unf;
+                            int k2u = 2 * p_unf + 1;
+                            int ml = lo_smem[p_unf];
+                            int mh = 2 * parent_smem[p_unf] - hi_smem[p_unf];
+
+                            /* Self-terms: lane 0 (3 writes, unique indices) */
+                            if (lane == 0) {
+                                atomicAdd_block(&min_contrib_smem[2 * k1u], ml * ml);
+                                atomicAdd_block(&min_contrib_smem[2 * k2u], mh * mh);
+                                atomicAdd_block(&min_contrib_smem[k1u + k2u], 2 * ml * mh);
+                            }
+
+                            /* Cross-terms with fixed bins: distributed across threads.
+                             * Each thread handles different ii → writes to different
+                             * min_contrib indices → near-zero contention. */
+                            for (int ii = lane; ii < fixed_len; ii += blockDim.x) {
                                 int ci = child_smem[ii];
-                                if (ci == 0) continue;
-                                prefix_conv_smem[2 * ii] += ci * ci;
-                                for (int jj = ii + 1; jj < fixed_len; jj++) {
-                                    int cj = child_smem[jj];
-                                    if (cj != 0)
-                                        prefix_conv_smem[ii + jj] += 2 * ci * cj;
+                                if (ci > 0) {
+                                    if (ml > 0)
+                                        atomicAdd_block(&min_contrib_smem[ii + k1u], 2 * ci * ml);
+                                    if (mh > 0)
+                                        atomicAdd_block(&min_contrib_smem[ii + k2u], 2 * ci * mh);
                                 }
                             }
 
-                            for (int kk = 1; kk < pconv_len; kk++)
-                                prefix_conv_smem[kk] += prefix_conv_smem[kk - 1];
-
-                            prefix_c_smem[0] = 0;
-                            for (int ii = 0; ii < fixed_len; ii++)
-                                prefix_c_smem[ii + 1] = prefix_c_smem[ii] +
-                                                        child_smem[ii];
-
-                            int first_unfixed_parent = fixed_parent_boundary;
-
-                            /* ── Idea 02: guaranteed minimum contributions ──
-                             *
-                             * Compute lower-bound conv contributions from
-                             * unfixed bins using their guaranteed minimum
-                             * child masses.  Matches CPU min_contrib logic
-                             * in _fused_generate_and_prune_gray.
-                             */
-                            for (int kk = 0; kk < conv_len; kk++)
-                                min_contrib_smem[kk] = 0;
-
-                            /* (A) Inner active positions (digits 0..gc_j-1) */
-                            for (int kk = 0; kk < gc_j; kk++) {
-                                int p_unf = active_pos_smem[kk];
-                                int k1u = 2 * p_unf;
-                                int k2u = 2 * p_unf + 1;
-                                int ml = lo_smem[p_unf];
-                                int mh = 2 * parent_smem[p_unf] - hi_smem[p_unf];
-
-                                /* Self-terms */
-                                min_contrib_smem[2 * k1u] += ml * ml;
-                                min_contrib_smem[2 * k2u] += mh * mh;
-                                min_contrib_smem[k1u + k2u] += 2 * ml * mh;
-
-                                /* Cross-terms with fixed bins */
-                                for (int ii = 0; ii < fixed_len; ii++) {
-                                    int ci = child_smem[ii];
-                                    if (ci > 0) {
-                                        if (ml > 0)
-                                            min_contrib_smem[ii + k1u] += 2 * ci * ml;
-                                        if (mh > 0)
-                                            min_contrib_smem[ii + k2u] += 2 * ci * mh;
-                                    }
-                                }
-
-                                /* Cross-terms with other inner unfixed */
+                            /* Cross-terms with other inner unfixed: lane 0
+                             * (O(gc_j²) total, ≤16 writes — negligible) */
+                            if (lane == 0) {
                                 for (int kk2 = kk + 1; kk2 < gc_j; kk2++) {
                                     int p2 = active_pos_smem[kk2];
                                     int k1u2 = 2 * p2;
@@ -1224,43 +1478,47 @@ __global__ void cascade_kernel(
                                         min_contrib_smem[k2u + k2u2] += 2 * mh * mh2;
                                 }
                             }
+                        }
 
-                            /* (B) Non-active unfixed parents (range==1,
-                             *     beyond fixed prefix).  Their child values
-                             *     are fixed but not in partial_conv. */
-                            for (int pp = first_unfixed_parent; pp < d_parent; pp++) {
-                                /* Skip if this is an inner active position */
-                                bool is_inner = false;
-                                for (int kk = 0; kk < gc_j; kk++) {
-                                    if (active_pos_smem[kk] == pp) {
-                                        is_inner = true;
-                                        break;
-                                    }
+                        /* (B) Non-active unfixed parents (range==1,
+                         *     beyond fixed prefix).  Outer loop sequential
+                         *     (all threads), cross-with-fixed distributed. */
+                        for (int pp = first_unfixed_parent; pp < d_parent; pp++) {
+                            /* Skip if this is an inner active position */
+                            bool is_inner = false;
+                            for (int kk = 0; kk < gc_j; kk++) {
+                                if (active_pos_smem[kk] == pp) {
+                                    is_inner = true;
+                                    break;
                                 }
-                                if (is_inner) continue;
+                            }
+                            if (is_inner) continue;
 
-                                int k1na = 2 * pp;
-                                int k2na = 2 * pp + 1;
-                                int cv1 = lo_smem[pp];
-                                int cv2 = 2 * parent_smem[pp] - cv1;
+                            int k1na = 2 * pp;
+                            int k2na = 2 * pp + 1;
+                            int cv1 = lo_smem[pp];
+                            int cv2 = 2 * parent_smem[pp] - cv1;
 
-                                /* Self-terms */
-                                min_contrib_smem[2 * k1na] += cv1 * cv1;
-                                min_contrib_smem[2 * k2na] += cv2 * cv2;
-                                min_contrib_smem[k1na + k2na] += 2 * cv1 * cv2;
+                            /* Self-terms: lane 0 */
+                            if (lane == 0) {
+                                atomicAdd_block(&min_contrib_smem[2 * k1na], cv1 * cv1);
+                                atomicAdd_block(&min_contrib_smem[2 * k2na], cv2 * cv2);
+                                atomicAdd_block(&min_contrib_smem[k1na + k2na], 2 * cv1 * cv2);
+                            }
 
-                                /* Cross with fixed prefix */
-                                for (int ii = 0; ii < fixed_len; ii++) {
-                                    int ci = child_smem[ii];
-                                    if (ci > 0) {
-                                        if (cv1 > 0)
-                                            min_contrib_smem[ii + k1na] += 2 * ci * cv1;
-                                        if (cv2 > 0)
-                                            min_contrib_smem[ii + k2na] += 2 * ci * cv2;
-                                    }
+                            /* Cross with fixed prefix: distributed across threads */
+                            for (int ii = lane; ii < fixed_len; ii += blockDim.x) {
+                                int ci = child_smem[ii];
+                                if (ci > 0) {
+                                    if (cv1 > 0)
+                                        atomicAdd_block(&min_contrib_smem[ii + k1na], 2 * ci * cv1);
+                                    if (cv2 > 0)
+                                        atomicAdd_block(&min_contrib_smem[ii + k2na], 2 * ci * cv2);
                                 }
+                            }
 
-                                /* Cross with inner active unfixed */
+                            /* Cross with inner active unfixed: lane 0 (O(gc_j), small) */
+                            if (lane == 0) {
                                 for (int kk = 0; kk < gc_j; kk++) {
                                     int p_unf = active_pos_smem[kk];
                                     int k1u = 2 * p_unf;
@@ -1276,8 +1534,10 @@ __global__ void cascade_kernel(
                                     if (cv2 > 0 && mh > 0)
                                         min_contrib_smem[k2na + k2u] += 2 * cv2 * mh;
                                 }
+                            }
 
-                                /* Cross with other non-active unfixed */
+                            /* Cross with other non-active unfixed: lane 0 */
+                            if (lane == 0) {
                                 for (int pp2 = pp + 1; pp2 < d_parent; pp2++) {
                                     bool is_inner2 = false;
                                     for (int kk = 0; kk < gc_j; kk++) {
@@ -1301,22 +1561,49 @@ __global__ void cascade_kernel(
                                         min_contrib_smem[k2na + k2na2] += 2 * cv2 * cv22;
                                 }
                             }
+                        }
+                        __syncthreads();
 
-                            /* Convert min_contrib to inclusive prefix sum */
-                            for (int kk = 1; kk < conv_len; kk++)
-                                min_contrib_smem[kk] += min_contrib_smem[kk - 1];
+                        /* ── Sub-task C: merge partial autoconv into min_contrib ──
+                         * After this, min_contrib_smem holds the combined lower-
+                         * bound conv (fixed prefix autoconv + min contributions).
+                         * No prefix sums needed — thread_private_subtree_scan
+                         * uses a sliding window. */
+                        for (int k = lane; k < pconv_len; k += blockDim.x)
+                            min_contrib_smem[k] += prefix_conv_smem[k];
+                        __syncthreads();
 
-                            bool sub_killed = partial_window_scan_max_threshold(
-                                prefix_conv_smem, pconv_len, fixed_len,
-                                threshold_table_smem, ell_order_smem,
-                                ell_count, m, d_child,
-                                prefix_c_smem, parent_prefix_smem,
-                                first_unfixed_parent, d_parent,
-                                min_contrib_smem, conv_len);
+                        /* Build exclusive prefix sum of fixed child masses
+                         * (small — O(fixed_len), lane 0 is sufficient). */
+                        if (lane == 0) {
+                            prefix_c_smem[0] = 0;
+                            for (int ii = 0; ii < fixed_len; ii++)
+                                prefix_c_smem[ii + 1] = prefix_c_smem[ii] +
+                                                        child_smem[ii];
+                        }
+                        __syncthreads();
 
-                            if (sub_killed) {
-                                subtree_killed_smem = true;
+                        /* ── Sub-task D: thread-private subtree window scan ──
+                         * Each thread scans a subset of ell values with sliding
+                         * windows, same pattern as thread_private_window_scan. */
+                        if (lane == 0) subtree_kill_flag_smem = (int)blockDim.x;
+                        __syncthreads();
 
+                        thread_private_subtree_scan(
+                            min_contrib_smem, conv_len,
+                            prefix_c_smem, parent_prefix_smem,
+                            fixed_len, first_unfixed_parent, d_parent,
+                            A_ell_smem, use_flat_threshold,
+                            ell_order_smem,
+                            ell_count, d_child,
+                            &subtree_kill_flag_smem);
+                        __syncthreads();
+
+                        if (subtree_kill_flag_smem < (int)blockDim.x) {
+                            subtree_killed_smem = true;
+
+                            /* Reset GC state + child bins (lane 0 — O(gc_j), trivial). */
+                            if (lane == 0) {
                                 n_skipped += subtree_size_smem[gc_j] - 1;
 
                                 int next_focus = gc_focus_smem[gc_j];
@@ -1334,6 +1621,19 @@ __global__ void cascade_kernel(
                                     child_smem[2 * p]     = lo_smem[p];
                                     child_smem[2 * p + 1] = 2 * parent_smem[p] -
                                                              lo_smem[p];
+                                }
+
+                                /* Recompute QC W_int after subtree skip.
+                                 * Matches CPU (run_cascade.py:2088-2098). */
+                                if (qc_ell_smem > 0) {
+                                    int qc_lo2 = qc_s_smem - (d_child - 1);
+                                    if (qc_lo2 < 0) qc_lo2 = 0;
+                                    int qc_hi2 = qc_s_smem + qc_ell_smem - 2;
+                                    if (qc_hi2 > d_child - 1) qc_hi2 = d_child - 1;
+                                    int32_t w_sum = 0;
+                                    for (int ii = qc_lo2; ii <= qc_hi2; ii++)
+                                        w_sum += child_smem[ii];
+                                    qc_W_int_smem = w_sum;
                                 }
                             }
                         }
