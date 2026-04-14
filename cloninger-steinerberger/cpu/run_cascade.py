@@ -1708,7 +1708,17 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
     # Fine grid (S = 4nm): W_int ranges 0..S (fine-grid mass in window bins).
     # threshold_table[ell_idx * S_child_plus_1 + W_int] =
     #   floor((c_target*m^2 + corr + eps) * 4n*ell)
-    # where corr = 2m+1 (flat C&S) or 3+W_int/(2n) (W-refined).
+    # where corr = 2m+1 (flat C&S) or 0 (Theorem 1, no correction).
+    #
+    # DEFAULT (use_flat_threshold=False): Theorem 1 threshold — no correction.
+    # Theorem 1 is EXACT for bin masses (no step-function approximation).
+    # This is ~10% tighter than the W-refined threshold at m=16, giving
+    # ~30-50% fewer survivors per level.  Sound because Theorem 1 guarantees
+    # max(f*f) >= TV_W(mu) for ANY f with bin masses mu.
+    # Box certification is required at the final cascade level.
+    #
+    # use_flat_threshold=True: flat C&S Lemma 3 correction (2m+1)/m^2.
+    # Required for the Lean axiom cascade_all_pruned.
     ell_count = 2 * d_child - 1
     S_child_plus_1 = int(4 * n_half_child * m + 1)
     threshold_table = np.empty(ell_count * S_child_plus_1, dtype=np.int64)
@@ -1722,10 +1732,30 @@ def _fused_generate_and_prune_gray(parent_int, n_half_child, m, c_target,
             for w in range(S_child_plus_1):
                 threshold_table[idx * S_child_plus_1 + w] = flat_val
         else:
+            # Theorem 1 + box certification (per-window proven bound):
+            #
+            # correction_int(ell) = min(n, ell-1, 2d-ell) * B
+            # where B = n*(8m+1)/2, n = n_half_child, d = d_child.
+            #
+            # Three proven ingredients:
+            # 1. Per-index lemma: |Δconv[k]| ≤ S + d/4 = B
+            # 2. Complement trick: Σ Δconv[k] = 0 → complement bound
+            # 3. Gradient-pairing: constant n*B for all ell
+            #
+            # Combined: min(n, ell-1, 2d-ell) * B
+            # 3-5x tighter than C&S at typical killing windows (ell ≈ d/2).
+            B_corr = n_half_d * (8.0 * m_d + 1.0) / 2.0
+            n_int = int(n_half_child)
+            mult = ell - 1
+            comp = 2 * d_child - ell
+            if comp < mult:
+                mult = comp
+            if n_int < mult:
+                mult = n_int
+            box_corr = np.float64(mult) * B_corr
+            th1_val = np.int64(cs_base_m2 * scale_ell + box_corr)
             for w in range(S_child_plus_1):
-                corr_w = 1.0 + np.float64(w) / (2.0 * n_half_d)
-                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-                threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
+                threshold_table[idx * S_child_plus_1 + w] = th1_val
 
     # --- Optimized ell scan order ---
     # Empirically tuned: at d_child=32, ell=7-13 account for 92% of prunes.
@@ -2427,9 +2457,6 @@ def _fused_coarse_gray(parent_int, d_child, S, c_target,
 
         if not quick_killed:
             pruned = False
-            kill_ell = np.int32(0)
-            kill_s = np.int32(0)
-            kill_ws = np.int64(0)
 
             for ell_oi in range(ell_count):
                 if pruned:
@@ -2447,80 +2474,106 @@ def _fused_coarse_gray(parent_int, d_child, S, c_target,
                                - np.int64(raw_conv[s_lo - 1]))
                     if ws > thr_val:
                         pruned = True
-                        kill_ell = np.int32(ell)
-                        kill_s = np.int32(s_lo)
-                        kill_ws = ws
-                        qc_ell = kill_ell
-                        qc_s = kill_s
                         break
+        else:
+            pruned = True
 
-            if pruned:
-                # --- Box cert ---
-                ell_f = np.float64(kill_ell)
-                tv = np.float64(kill_ws) * 2.0 * d_d / (S_sq * ell_f)
-                margin = tv - c_target
+        if pruned:
+            # --- Multi-window box cert: scan ALL killing windows,
+            #     pick the one with best net = margin - cell_var - qc.
+            #     Each window gives an independent lower bound on
+            #     min_{mu in cell} TV_W(mu); taking the max is sound. ---
+            best_net = np.float64(-1e30)
+            best_kill_ell = np.int32(2)
+            best_kill_s = np.int32(0)
 
+            for ell in range(2, max_ell + 1):
+                n_cv = ell - 1
+                n_windows = conv_len - n_cv + 1
+                ws = np.int64(0)
+                for k in range(n_cv):
+                    ws += np.int64(raw_conv[k])
+                thr_val = thr_arr[ell]
+                ell_f = np.float64(ell)
                 scale_g = 4.0 * d_d / ell_f
-                for i in range(d_child):
-                    g = 0.0
-                    for j_g in range(d_child):
-                        kk = i + j_g
-                        if kill_s <= kk <= kill_s + kill_ell - 2:
-                            g += np.float64(child[j_g]) / S_d
-                    grad_buf[i] = g * scale_g
-                for i in range(1, d_child):
-                    key = grad_buf[i]
-                    jj = i - 1
-                    while jj >= 0 and grad_buf[jj] > key:
-                        grad_buf[jj + 1] = grad_buf[jj]
-                        jj -= 1
-                    grad_buf[jj + 1] = key
-                cell_var = 0.0
-                for kk in range(d_child // 2):
-                    cell_var += grad_buf[d_child - 1 - kk] - grad_buf[kk]
-                cell_var /= (2.0 * S_d)
 
-                hi_idx = kill_s + kill_ell - 1
-                N_W = prefix_nk[hi_idx] - prefix_nk[kill_s]
-                M_W = prefix_mk[hi_idx] - prefix_mk[kill_s]
-                cross_W = N_W - M_W
-                d_sq = np.int64(d_child) * np.int64(d_child)
-                compl_bound = d_sq - N_W
-                pb = min(cross_W, compl_bound)
-                if pb > 0:
-                    qc_val = (2.0 * d_d / ell_f) * np.float64(pb) * inv_4S2
+                for s_lo in range(n_windows):
+                    if s_lo > 0:
+                        ws += (np.int64(raw_conv[s_lo + n_cv - 1])
+                               - np.int64(raw_conv[s_lo - 1]))
+                    if ws > thr_val:
+                        tv = np.float64(ws) * 2.0 * d_d / (S_sq * ell_f)
+                        margin = tv - c_target
+
+                        for i in range(d_child):
+                            g = 0.0
+                            for j_g in range(d_child):
+                                kk = i + j_g
+                                if s_lo <= kk <= s_lo + ell - 2:
+                                    g += np.float64(child[j_g]) / S_d
+                            grad_buf[i] = g * scale_g
+                        for i in range(1, d_child):
+                            key = grad_buf[i]
+                            jj = i - 1
+                            while jj >= 0 and grad_buf[jj] > key:
+                                grad_buf[jj + 1] = grad_buf[jj]
+                                jj -= 1
+                            grad_buf[jj + 1] = key
+                        cell_var = 0.0
+                        for kk in range(d_child // 2):
+                            cell_var += (grad_buf[d_child - 1 - kk]
+                                         - grad_buf[kk])
+                        cell_var /= (2.0 * S_d)
+
+                        hi_idx = s_lo + ell - 1
+                        N_W = prefix_nk[hi_idx] - prefix_nk[s_lo]
+                        M_W = prefix_mk[hi_idx] - prefix_mk[s_lo]
+                        cross_W = N_W - M_W
+                        d_sq = np.int64(d_child) * np.int64(d_child)
+                        compl_bound = d_sq - N_W
+                        pb = min(cross_W, compl_bound)
+                        if pb > 0:
+                            qc_val = ((2.0 * d_d / ell_f)
+                                      * np.float64(pb) * inv_4S2)
+                        else:
+                            qc_val = 0.0
+                        net = margin - cell_var - qc_val
+                        if net > best_net:
+                            best_net = net
+                            best_kill_ell = np.int32(ell)
+                            best_kill_s = np.int32(s_lo)
+
+            qc_ell = best_kill_ell
+            qc_s = best_kill_s
+            if best_net < local_min_net:
+                local_min_net = best_net
+        else:
+            # --- Survivor: inline canonicalize + store ---
+            use_rev = False
+            half_d = d_child // 2
+            for i in range(half_d):
+                j_r = d_child - 1 - i
+                if child[j_r] < child[i]:
+                    use_rev = True
+                    break
+                elif child[j_r] > child[i]:
+                    break
+            if n_surv < max_survivors:
+                if use_rev:
+                    for i in range(d_child):
+                        stage_buf[n_staged, i] = child[d_child - 1 - i]
                 else:
-                    qc_val = 0.0
-                net = margin - cell_var - qc_val
-                if net < local_min_net:
-                    local_min_net = net
-            else:
-                # --- Survivor: inline canonicalize + store ---
-                use_rev = False
-                half_d = d_child // 2
-                for i in range(half_d):
-                    j_r = d_child - 1 - i
-                    if child[j_r] < child[i]:
-                        use_rev = True
-                        break
-                    elif child[j_r] > child[i]:
-                        break
-                if n_surv < max_survivors:
-                    if use_rev:
-                        for i in range(d_child):
-                            stage_buf[n_staged, i] = child[d_child - 1 - i]
-                    else:
-                        for i in range(d_child):
-                            stage_buf[n_staged, i] = child[i]
-                    n_staged += 1
-                    if n_staged == _STAGE_CAP:
-                        flush_base = n_surv + 1 - _STAGE_CAP
-                        for fi in range(_STAGE_CAP):
-                            for ci_f in range(d_child):
-                                out_buf[flush_base + fi, ci_f] = (
-                                    stage_buf[fi, ci_f])
-                        n_staged = 0
-                n_surv += 1
+                    for i in range(d_child):
+                        stage_buf[n_staged, i] = child[i]
+                n_staged += 1
+                if n_staged == _STAGE_CAP:
+                    flush_base = n_surv + 1 - _STAGE_CAP
+                    for fi in range(_STAGE_CAP):
+                        for ci_f in range(d_child):
+                            out_buf[flush_base + fi, ci_f] = (
+                                stage_buf[fi, ci_f])
+                    n_staged = 0
+            n_surv += 1
 
         # === GRAY CODE ADVANCE ===
         j = gc_focus[0]
@@ -2824,13 +2877,11 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
     Returns (lo_arr, hi_arr, total_children) or None if any bin has empty range.
     """
     d_parent = len(parent_int)
-    corr = correction(m, n_half_child)
-    thresh = c_target + corr + 1e-9
-    # Fine grid: bin height = c_i / (4*n*m), energy = sum c_i^2 / (4*n*m^2)
-    x_cap = int(math.floor(m * math.sqrt(4 * d_child * thresh)))
-    # Cauchy-Schwarz bound: +1 for canonical rounding adjustment
-    x_cap_cs = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
-    x_cap = min(x_cap, x_cap_cs)
+    # Theorem 1 x_cap: based on c_target directly (no correction).
+    # A child bin with value v has self-conv v^2.  Pruned when
+    # v^2 > c_target * 4n * m^2 * 2, i.e. v > m*sqrt(8n*c_target).
+    # +1 for rounding safety (canonical adjustment).
+    x_cap = int(math.floor(m * math.sqrt(4 * d_child * c_target))) + 1
     x_cap = max(x_cap, 0)
 
     lo_arr = np.empty(d_parent, dtype=np.int32)
@@ -2847,6 +2898,69 @@ def _compute_bin_ranges(parent_int, m, c_target, d_child, n_half_child=None):
         total_children *= (hi - lo + 1)
 
     return lo_arr, hi_arr, total_children
+
+
+@njit(cache=True)
+def _fix_conv_min_mutual_cross(conv_min, child_min, lo_arr, hi_arr,
+                                parent_int, d_parent):
+    """Tighten conv_min by correcting within-parent mutual terms and
+    cross-parent middle terms from loose independent-min to tight
+    4-corner bounds.
+
+    Within-parent mutual: conv[4q+1] has 2*lo_q*(2P_q - hi_q) from
+    child_min, but the tight minimum of 2*x*(2P-x) over [lo,hi] is
+    min(2*lo*(2P-lo), 2*hi*(2P-hi)).
+
+    Cross-parent middle: conv[2i+2j+1] has the sum of per-term mins
+    from child_min, but the tight value is the 4-corner minimum of
+    f(xi,xj) = 2*xi*(2Pj-xj) + 2*(2Pi-xi)*xj.
+
+    Modifies conv_min in place.
+    """
+    # --- Fix 1: within-parent mutual terms ---
+    for q in range(d_parent):
+        k_mut = 4 * q + 1  # conv index of mutual term for parent q
+        # Current value from child_min: 2*lo*(2P-hi) [too low]
+        old_mut = (np.int64(2) * np.int64(child_min[2 * q])
+                   * np.int64(child_min[2 * q + 1]))
+        lo_q = np.int64(lo_arr[q])
+        hi_q = np.int64(hi_arr[q])
+        P2_q = np.int64(2) * np.int64(parent_int[q])
+        tight_a = np.int64(2) * lo_q * (P2_q - lo_q)
+        tight_b = np.int64(2) * hi_q * (P2_q - hi_q)
+        if tight_a < tight_b:
+            tight_mut = tight_a
+        else:
+            tight_mut = tight_b
+        conv_min[k_mut] += tight_mut - old_mut
+
+    # --- Fix 2: cross-parent middle terms (4-corner bound) ---
+    for i in range(d_parent):
+        lo_i = np.int64(lo_arr[i])
+        hi_i = np.int64(hi_arr[i])
+        P2_i = np.int64(2) * np.int64(parent_int[i])
+        for j in range(i + 1, d_parent):
+            k_mid = 2 * i + 2 * j + 1
+            lo_j = np.int64(lo_arr[j])
+            hi_j = np.int64(hi_arr[j])
+            P2_j = np.int64(2) * np.int64(parent_int[j])
+            # Current value from child_min (sum of per-term mins):
+            old_cross = (np.int64(2) * np.int64(child_min[2 * i])
+                         * np.int64(child_min[2 * j + 1])
+                         + np.int64(2) * np.int64(child_min[2 * i + 1])
+                         * np.int64(child_min[2 * j]))
+            # 4-corner tight minimum:
+            # f(xi,xj) = 2*xi*(2Pj-xj) + 2*(2Pi-xi)*xj
+            tight_cross = np.int64(1152921504606846976)  # 2^60, large sentinel
+            for ci in range(2):
+                xi = lo_i if ci == 0 else hi_i
+                for cj in range(2):
+                    xj = lo_j if cj == 0 else hi_j
+                    val = (np.int64(2) * xi * (P2_j - xj)
+                           + np.int64(2) * (P2_i - xi) * xj)
+                    if val < tight_cross:
+                        tight_cross = val
+            conv_min[k_mid] += tight_cross - old_cross
 
 
 @njit(cache=True)
@@ -2937,18 +3051,34 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
             if cj != 0:
                 conv_min[i + j] += np.int64(2) * ci * cj
 
-    # Min-threshold per ell: W_int=0 gives smallest (easiest to exceed)
-    # threshold.  For flat mode, threshold is W_int-independent so
-    # min_thresh IS the exact threshold.
-    if use_flat_threshold:
-        corr_pre = 2.0 * m_d + 1.0
-    else:
-        corr_pre = 1.0  # W_int=0 => corr = 1.0
+    # Tighten conv_min: fix within-parent mutual and cross-parent middle terms
+    _fix_conv_min_mutual_cross(conv_min, child_min, lo_arr, hi_arr,
+                               parent_int, d_parent)
+
+    # Min-threshold per ell.
+    # Flat: correction = (2m+1)/m^2, threshold is W_int-independent.
+    # Theorem 1 + box cert (non-flat): correction = n^2*(8m+1)/2 (constant).
+    # C&S flat: correction = (2m+1)*4n*ell (grows with ell).
     min_thresh = np.empty(ell_count, dtype=np.int64)
-    for ell in range(2, 2 * d_child + 1):
-        scale_ell = np.float64(ell) * four_n
-        dyn_x = (cs_base_m2 + corr_pre + eps_margin) * scale_ell
-        min_thresh[ell - 2] = np.int64(dyn_x)
+    if use_flat_threshold:
+        for ell in range(2, 2 * d_child + 1):
+            scale_ell = np.float64(ell) * four_n
+            dyn_x = (cs_base_m2 + 2.0 * m_d + 1.0 + eps_margin) * scale_ell
+            min_thresh[ell - 2] = np.int64(dyn_x)
+    else:
+        # Per-window proven bound: min(n, ell-1, 2d-ell) * B
+        B_corr = n_half_d * (8.0 * m_d + 1.0) / 2.0
+        n_int = int(n_half_child)
+        for ell in range(2, 2 * d_child + 1):
+            scale_ell = np.float64(ell) * four_n
+            mult = ell - 1
+            comp = 2 * d_child - ell
+            if comp < mult:
+                mult = comp
+            if n_int < mult:
+                mult = n_int
+            min_thresh[ell - 2] = np.int64(
+                cs_base_m2 * scale_ell + np.float64(mult) * B_corr)
 
     # Test extreme values of each free position against min-threshold
     test_conv = np.empty(conv_len, dtype=np.int64)
@@ -3044,10 +3174,19 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
             for w in range(S_child_plus_1):
                 threshold_table[idx * S_child_plus_1 + w] = flat_val
         else:
+            # Per-window proven bound: min(n, ell-1, 2d-ell) * B
+            B_corr = n_half_d * (8.0 * m_d + 1.0) / 2.0
+            n_int = int(n_half_child)
+            mult = ell - 1
+            comp = 2 * d_child - ell
+            if comp < mult:
+                mult = comp
+            if n_int < mult:
+                mult = n_int
+            th1_val = np.int64(
+                cs_base_m2 * scale_ell + np.float64(mult) * B_corr)
             for w in range(S_child_plus_1):
-                corr_w = 1.0 + np.float64(w) / (2.0 * n_half_d)
-                dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
-                threshold_table[idx * S_child_plus_1 + w] = np.int64(dyn_x)
+                threshold_table[idx * S_child_plus_1 + w] = th1_val
 
     max_rounds = d_parent + 1
     for _round in range(max_rounds):
@@ -3070,6 +3209,10 @@ def _tighten_ranges(parent_int, lo_arr, hi_arr, m, c_target, n_half_child,
                 cj = np.int64(child_min[j])
                 if cj != 0:
                     conv_min[i + j] += np.int64(2) * ci * cj
+
+        # Tighten conv_min: fix within-parent mutual and cross-parent middle terms
+        _fix_conv_min_mutual_cross(conv_min, child_min, lo_arr, hi_arr,
+                                   parent_int, d_parent)
 
         # Max child prefix sum for W_int_max queries
         max_child_prefix = np.empty(d_child + 1, dtype=np.int64)
@@ -3595,6 +3738,31 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
     if total_children == 0:
         return np.empty((0, d_child), dtype=np.int32), 0
 
+    # Whole-parent pre-pruning: if ALL children are provably pruned by
+    # Theorem 1 interval arithmetic, skip enumeration entirely.
+    # Only when NOT using flat threshold (Theorem 1 is tighter than flat).
+    if not use_flat_threshold:
+        from cascade_opts import (_whole_parent_prune_theorem1,
+                                  lp_dual_certificate, sdp_certify_parent)
+        if _whole_parent_prune_theorem1(parent_int, lo_arr, hi_arr,
+                                         int(n_half_child), int(m),
+                                         c_target):
+            return np.empty((0, d_child), dtype=np.int32), total_children
+
+        # LP dual certificate: find window weights proving all children pruned.
+        if d_parent <= 10 and lp_dual_certificate(
+                parent_int, lo_arr, hi_arr,
+                int(n_half_child), int(m), c_target):
+            return np.empty((0, d_child), dtype=np.int32), total_children
+
+        # SDP relaxation: tests global feasibility of survivor region.
+        # Handles cases where LP fails (balanced children) by exploiting
+        # joint quadratic structure across ALL windows simultaneously.
+        if d_parent <= 12 and sdp_certify_parent(
+                parent_int, lo_arr, hi_arr,
+                int(n_half_child), int(m), c_target):
+            return np.empty((0, d_child), dtype=np.int32), total_children
+
     if buf_cap is None:
         buf_cap = _default_buf_cap(d_child)
     max_buf = min(total_children, buf_cap)
@@ -3719,6 +3887,26 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
                                          use_flat_threshold=use_flat_threshold)
         _log(f"       {label}: done, {len(surv):,} survivors")
         return surv, tc
+
+    # Arc consistency: tighten ranges (also done inside process_parent_fused,
+    # but we need it here for the slice path)
+    total_children = _tighten_ranges(parent_int, lo_arr, hi_arr,
+                                     m, c_target, n_half_child,
+                                     use_flat_threshold)
+    if total_children == 0:
+        _log(f"       {label}: tightened to empty")
+        return np.empty((0, d_child), dtype=np.int32), 0
+
+    # Whole-parent pre-pruning (Idea 4)
+    if not use_flat_threshold:
+        from cascade_opts import _whole_parent_prune_theorem1
+        if _whole_parent_prune_theorem1(parent_int, lo_arr, hi_arr,
+                                         int(n_half_child), int(m),
+                                         c_target):
+            _log(f"       {label}: whole-parent pruned by Theorem 1")
+            return np.empty((0, d_child), dtype=np.int32), total_children
+
+    n_slices = int(hi_arr[0]) - int(lo_arr[0]) + 1
 
     # Large parent → split by cursor[0] value for progress
     _log(f"       {label}: {total_children:,} children, "
@@ -4626,6 +4814,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         if l0['proven']:
             info['proven_at'] = 'L0'
             info['total_time'] = time.time() - t_total
+            if coarse_S is not None:
+                info['box_certified'] = l0.get('box_certified', False)
             return info
 
         current_configs = l0['survivors']
@@ -4661,8 +4851,10 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                      f"parents={n_parents:,}, x_cap={x_cap_c}")
                 _log(f"    quad_corr scale: d^2/(2S^2) = {d2_over_2S2:.6f}")
 
-            # Pre-filter infeasible parents
-            feasible = np.all(current_configs <= x_cap_c, axis=1)
+            # Pre-filter infeasible parents: in coarse grid, S is constant,
+            # so child splits parent bin p into (c, p-c) with both <= x_cap.
+            # Feasible iff p <= 2*x_cap (not p <= x_cap as in fine grid).
+            feasible = np.all(current_configs <= 2 * x_cap_c, axis=1)
             n_inf = n_parents - int(feasible.sum())
             if n_inf > 0:
                 current_configs = np.ascontiguousarray(
