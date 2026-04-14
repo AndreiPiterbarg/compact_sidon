@@ -590,8 +590,9 @@ def run_cascade(d0, S, c_target, max_levels=10, n_workers=None,
             _log(f"\n--- Level {level}: d={d_parent} -> {d_child}, "
                  f"parents={n_parents:,}, x_cap={x_cap} ---")
 
-        # Pre-filter infeasible parents
-        feasible = np.all(current <= x_cap, axis=1)
+        # Pre-filter infeasible parents: parent bin p needs p <= 2*x_cap
+        # (child splits into (c, p-c) with both in [0, x_cap], so p <= 2*x_cap)
+        feasible = np.all(current <= 2 * x_cap, axis=1)
         n_infeasible = n_parents - int(feasible.sum())
         if n_infeasible > 0:
             current = np.ascontiguousarray(current[feasible])
@@ -662,8 +663,15 @@ def run_cascade(d0, S, c_target, max_levels=10, n_workers=None,
 
         if all_survivors:
             current = np.vstack(all_survivors)
+            # Map non-canonical survivors to their canonical form (reverse)
+            # instead of discarding them — they are children of the unexpanded
+            # reverse parent and would otherwise be permanently lost.
             canon = _canonical_mask(current)
-            current = np.ascontiguousarray(current[canon])
+            non_canon = ~canon
+            current[non_canon] = current[non_canon, ::-1]
+            # Deduplicate: a canonical child and a non-canonical child that
+            # maps to the same canonical form can both appear.
+            current = np.unique(current, axis=0)
         else:
             current = np.empty((0, d_child), dtype=np.int32)
 
