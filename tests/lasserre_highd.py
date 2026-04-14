@@ -126,67 +126,56 @@ def _build_reduced_moment_set(d, order, cliques, bases, prime=None, verbose=True
     Returns: (S_arr numpy array, n_y)
     """
     t0 = time.time()
-    hash_to_mono = {}
-    E = np.eye(d, dtype=np.int64)
 
-    def add_monos(arr):
-        """Add rows of arr (shape (n, d)) to hash_to_mono."""
-        hashes = _hash_monos(arr, bases, prime)
-        for k in range(len(arr)):
-            h = int(hashes[k])
-            if h not in hash_to_mono:
-                hash_to_mono[h] = arr[k].copy()
+    # Collect all monomial arrays, then batch-deduplicate via hashing.
+    # This replaces per-element Python dict insertion with numpy operations.
+    all_mono_chunks = []
 
     # S_{≤2k-1}: all degree ≤ 2k-1 monomials (= degree ≤ 3 for k=2)
-    # This ensures FULL equality consistency for degree ≤ 2k-2 parents.
     consist_deg = 2 * order - 1
     mono_global = np.array(enum_monomials(d, consist_deg), dtype=np.int64)
-    add_monos(mono_global)
+    all_mono_chunks.append(mono_global)
     if verbose:
         print(f"    S_le{consist_deg}: {len(mono_global)} monomials", flush=True)
 
-    # Clique moment PSD monomials (vectorized: P4 optimization)
-    n_mom_added = 0
+    # Clique moment PSD monomials
+    n_mom_before = len(mono_global)
     for clique in cliques:
         cb = _build_clique_basis(clique, order, d)
         n_cb = len(cb)
         ai, bi = np.triu_indices(n_cb)
-        all_sums = cb[ai] + cb[bi]
-        all_hashes = _hash_monos(all_sums, bases, prime)
-        for k in range(len(all_sums)):
-            h = int(all_hashes[k])
-            if h not in hash_to_mono:
-                hash_to_mono[h] = all_sums[k].copy()
-                n_mom_added += 1
+        all_mono_chunks.append(cb[ai] + cb[bi])
 
     if verbose:
-        print(f"    S_mom (clique PSD): +{n_mom_added} new", flush=True)
+        n_mom_total = sum(len(c) for c in all_mono_chunks) - n_mom_before
+        print(f"    S_mom (clique PSD): {n_mom_total} candidates", flush=True)
 
-    # Clique localizing monomials (vectorized: P4 optimization)
-    n_loc_added = 0
+    # Clique localizing monomials
     if order >= 2:
+        n_loc_before = sum(len(c) for c in all_mono_chunks)
         for clique in cliques:
             cb_loc = _build_clique_basis(clique, order - 1, d)
             n_cb_loc = len(cb_loc)
             ai, bi = np.triu_indices(n_cb_loc)
             base_sums = cb_loc[ai] + cb_loc[bi]
-            base_hashes = _hash_monos(base_sums, bases, prime)
             for i in clique:
-                shifted_hashes = _hash_add(base_hashes, int(bases[i]), prime)
-                for k in range(len(base_sums)):
-                    h = int(shifted_hashes[k])
-                    if h not in hash_to_mono:
-                        s_plus_ei = base_sums[k].copy()
-                        s_plus_ei[i] += 1
-                        hash_to_mono[h] = s_plus_ei
-                        n_loc_added += 1
+                shifted = base_sums.copy()
+                shifted[:, i] += 1
+                all_mono_chunks.append(shifted)
 
-    if verbose:
-        print(f"    S_loc (clique localizing): +{n_loc_added} new", flush=True)
+        if verbose:
+            n_loc_total = sum(len(c) for c in all_mono_chunks) - n_loc_before
+            print(f"    S_loc (clique localizing): {n_loc_total} candidates",
+                  flush=True)
 
-    # Convert to sorted array
-    n_y = len(hash_to_mono)
-    S_arr = np.array(list(hash_to_mono.values()), dtype=np.int64)
+    # Batch deduplicate: concatenate all, hash, then keep first occurrence
+    all_monos = np.concatenate(all_mono_chunks, axis=0)
+    all_hashes = _hash_monos(all_monos, bases, prime)
+    # np.unique on hashes, keeping first occurrence (stable sort)
+    _, first_idx = np.unique(all_hashes, return_index=True)
+    first_idx.sort()  # preserve original order for determinism
+    S_arr = all_monos[first_idx]
+    n_y = len(S_arr)
     # Sort lexicographically for deterministic ordering
     sort_idx = np.lexsort(S_arr.T[::-1])
     S_arr = S_arr[sort_idx]
