@@ -743,16 +743,22 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
     violations = []
 
     # ---- Clique-restricted PSD check for covered windows ----
+    # Vectorized filtering: find non-active covered windows, group by clique
+    active_arr = np.array(sorted(active_windows), dtype=np.int32) if active_windows else np.array([], dtype=np.int32)
+    is_active = np.zeros(n_win, dtype=bool)
+    if len(active_arr) > 0:
+        is_active[active_arr] = True
+
+    covered_mask = (window_covering >= 0) & ~is_active
+    covered_w = np.where(covered_mask)[0]
+    covered_c = window_covering[covered_w]
+
     clique_windows = {}
-    for w in range(n_win):
-        if w in active_windows:
-            continue
-        c_idx = int(window_covering[w])
-        if c_idx < 0:
-            continue
-        if c_idx not in clique_windows:
-            clique_windows[c_idx] = []
-        clique_windows[c_idx].append(w)
+    for w, c in zip(covered_w, covered_c):
+        c = int(c)
+        if c not in clique_windows:
+            clique_windows[c] = []
+        clique_windows[c].append(int(w))
 
     for c_idx, w_list in clique_windows.items():
         cd = clique_data[c_idx]
@@ -799,14 +805,10 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
     # ---- Scalar-only check for uncovered windows ----
     # No PSD check for uncovered windows — partial-Q PSD is unsound.
     f_vals = P['F_scipy'].dot(y_vals)
-    for w in range(n_win):
-        if w in active_windows:
-            continue
-        if int(window_covering[w]) >= 0:
-            continue  # already checked via PSD above
-        if f_vals[w] > t_val + tol:
-            # Report as violation (negative = more violated)
-            violations.append((w, -(f_vals[w] - t_val)))
+    uncovered_mask = (window_covering < 0) & ~is_active
+    uncovered_violated = uncovered_mask & (f_vals > t_val + tol)
+    for w in np.where(uncovered_violated)[0]:
+        violations.append((int(w), -(f_vals[w] - t_val)))
 
     violations.sort(key=lambda x: x[1])
     return violations
