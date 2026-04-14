@@ -17,7 +17,7 @@ RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY", "")
 #   cpu3c (Compute-Optimized, 2x RAM):  cpu3c-32-64   → 32 vCPU,  64 GB
 #   cpu3g (General Purpose,   4x RAM):  cpu3g-32-128  → 32 vCPU, 128 GB
 #   cpu3m (Memory-Optimized,  8x RAM):  cpu3m-32-256  → 32 vCPU, 256 GB
-INSTANCE_ID = "cpu3c-32-64"
+INSTANCE_ID = "cpu3m-32-256"
 TEMPLATE_ID = "runpod-ubuntu"
 CLOUD_TYPE = "SECURE"  # SECURE = on-demand (not spot)
 CONTAINER_DISK_GB = 320  # GB container disk (RunPod max, ~$0.048/hr)

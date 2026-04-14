@@ -51,7 +51,7 @@ class Session:
             print("No active session. Run 'start' first.")
             sys.exit(1)
 
-    def start(self):
+    def start(self, name=None, force_new=False):
         """Create CPU pod, sync code, install deps, verify CPU."""
         try:
             from .pod_manager import create_pod, get_pod_status
@@ -61,7 +61,7 @@ class Session:
         from .sync import sync_code
         from .remote import install_deps, verify_cpu
 
-        if self.pod_id:
+        if self.pod_id and not force_new:
             status = get_pod_status(self.pod_id)
             if status and status.get("desiredStatus") == "RUNNING":
                 print(f"Session already active: pod {self.pod_id}")
@@ -70,7 +70,10 @@ class Session:
                 return
 
         # Create pod
-        info = create_pod()
+        kwargs = {}
+        if name:
+            kwargs["name"] = name
+        info = create_pod(**kwargs)
         self.pod_id = info["pod_id"]
         self.ssh_host = info["ssh_host"]
         self.ssh_port = info["ssh_port"]

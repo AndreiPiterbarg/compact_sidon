@@ -17,7 +17,7 @@ def _init_sdk():
     runpod_sdk.api_key = RUNPOD_API_KEY
 
 
-def create_pod(name="sidon-cpu"):
+def create_pod(name="sidon-lasserre"):
     """Create a new CPU pod and wait for it to be ready.
 
     Returns dict with pod_id, ssh_host, ssh_port.
