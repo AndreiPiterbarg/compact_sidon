@@ -879,6 +879,108 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
 # Main solver
 # =====================================================================
 
+def _build_consistency_sparse(mdl_obj, y_var, P, d, n_y):
+    """Build consistency constraints for a MOSEK model.
+
+    Shared by both the scalar Round 0 model and the CG model to avoid
+    duplicating the vectorized sparse matrix construction.
+
+    Returns (n_eq, n_iq) counts.
+    """
+    consist_parent_indices = P['consist_parent_indices']
+    children_idx_arr = P['children_idx']
+    full_mask = P['consist_full_mask']
+    partial_mask = P['consist_partial_mask']
+
+    full_rows = np.where(full_mask)[0]
+    n_eq = len(full_rows)
+    if n_eq > 0:
+        pi = consist_parent_indices[full_rows].astype(np.int32)
+        cr = children_idx_arr[full_rows]
+        rfc = np.repeat(np.arange(n_eq, dtype=np.int32), d)
+        cfc = cr.ravel().astype(np.int32)
+        vfc = np.ones(n_eq * d)
+        er = np.concatenate([rfc, np.arange(n_eq, dtype=np.int32)])
+        ec = np.concatenate([cfc, pi])
+        ev = np.concatenate([vfc, np.full(n_eq, -1.0)])
+        A_eq = Matrix.sparse(n_eq, n_y, er.tolist(), ec.tolist(), ev.tolist())
+        mdl_obj.constraint("ceq", Expr.mul(A_eq, y_var), Domain.equalsTo(0.0))
+
+    partial_rows = np.where(partial_mask)[0]
+    n_iq = 0
+    if len(partial_rows) > 0:
+        pi_iq = consist_parent_indices[partial_rows].astype(np.int32)
+        cr_iq = children_idx_arr[partial_rows]
+        vm = cr_iq >= 0
+        hac = vm.any(axis=1)
+        if hac.any():
+            keep = np.where(hac)[0]
+            pi_iq = pi_iq[keep]
+            cr_iq = cr_iq[keep]
+            vm = vm[keep]
+            n_iq = len(keep)
+            rl, cl = np.where(vm)
+            ir = np.concatenate([rl.astype(np.int32), np.arange(n_iq, dtype=np.int32)])
+            ic = np.concatenate([cr_iq[rl, cl].astype(np.int32), pi_iq])
+            iv = np.concatenate([np.full(len(rl), -1.0), np.ones(n_iq)])
+            A_iq = Matrix.sparse(n_iq, n_y, ir.tolist(), ic.tolist(), iv.tolist())
+            mdl_obj.constraint("ciq", Expr.mul(A_iq, y_var), Domain.greaterThan(0.0))
+
+    return n_eq, n_iq
+
+
+def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
+    """Build base PSD constraints (moment, localizing, upper localizing).
+
+    Shared by both the scalar Round 0 model and the CG model.
+    """
+    # Full M_{k-1}
+    if P['m1_valid']:
+        m1_pick = P['m1_pick']
+        m1_size = P['m1_size']
+        M1_expr = Expr.reshape(y_var.pick(m1_pick.tolist()), m1_size, m1_size)
+        mdl_obj.constraint("full_mkm1_psd", M1_expr, Domain.inPSDCone(m1_size))
+
+    # Clique moment PSD
+    for c_idx, cd in enumerate(P['clique_data']):
+        pick = cd['mom_pick']
+        if np.any(pick < 0):
+            continue
+        n_cb = cd['mom_size']
+        M_c = Expr.reshape(y_var.pick(pick.tolist()), n_cb, n_cb)
+        mdl_obj.constraint(f"cm_{c_idx}", M_c, Domain.inPSDCone(n_cb))
+
+    # Clique localizing PSD
+    if order >= 2:
+        for i_var in range(d):
+            c_idx = P['bin_to_clique_map'].get(i_var, 0)
+            cd = P['clique_data'][c_idx]
+            picks = cd['loc_picks'].get(i_var)
+            if picks is None or np.any(picks < 0):
+                continue
+            n_cb = cd['loc_size']
+            Li = Expr.reshape(y_var.pick(picks.tolist()), n_cb, n_cb)
+            mdl_obj.constraint(f"loc_{i_var}", Li, Domain.inPSDCone(n_cb))
+
+    # Upper localizing
+    if add_upper_loc and order >= 2:
+        for i_var in range(d):
+            c_idx = P['bin_to_clique_map'].get(i_var, 0)
+            cd = P['clique_data'][c_idx]
+            t_pick_cd = cd['t_pick']
+            loc_pick = cd['loc_picks'].get(i_var)
+            if t_pick_cd is None or loc_pick is None:
+                continue
+            if np.any(t_pick_cd < 0) or np.any(loc_pick < 0):
+                continue
+            n_cb = cd['loc_size']
+            sub_m = y_var.pick(t_pick_cd.tolist())
+            mu_i_m = y_var.pick(loc_pick.tolist())
+            diff = Expr.sub(sub_m, mu_i_m)
+            L_up = Expr.reshape(diff, n_cb, n_cb)
+            mdl_obj.constraint(f"upper_loc_{i_var}", L_up, Domain.inPSDCone(n_cb))
+
+
 def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
                        add_upper_loc=True, max_cg_rounds=15,
                        max_add_per_round=100, n_bisect=20,
@@ -958,71 +1060,8 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
     y0_idx = P['idx'][zero]
     mdl_sc.constraint("y0", y_sc.index(y0_idx), Domain.equalsTo(1.0))
 
-    # Full M_{k-1} PSD
-    if P['m1_valid']:
-        m1_pick = P['m1_pick']
-        m1_size = P['m1_size']
-        M1_expr = Expr.reshape(y_sc.pick(m1_pick.tolist()), m1_size, m1_size)
-        mdl_sc.constraint("full_mkm1_psd", M1_expr, Domain.inPSDCone(m1_size))
-
-    # Clique moment PSD
-    for c_idx, cd in enumerate(P['clique_data']):
-        pick = cd['mom_pick']
-        if np.any(pick < 0):
-            continue
-        n_cb = cd['mom_size']
-        M_c = Expr.reshape(y_sc.pick(pick.tolist()), n_cb, n_cb)
-        mdl_sc.constraint(f"cm_{c_idx}", M_c, Domain.inPSDCone(n_cb))
-
-    # Clique localizing PSD
-    if order >= 2:
-        for i_var in range(d):
-            c_idx = P['bin_to_clique_map'].get(i_var, 0)
-            cd = P['clique_data'][c_idx]
-            picks = cd['loc_picks'].get(i_var)
-            if picks is None or np.any(picks < 0):
-                continue
-            n_cb = cd['loc_size']
-            Li = Expr.reshape(y_sc.pick(picks.tolist()), n_cb, n_cb)
-            mdl_sc.constraint(f"loc_{i_var}", Li, Domain.inPSDCone(n_cb))
-
-    # Consistency (reuse the same vectorized construction)
-    consist_parent_indices = P['consist_parent_indices']
-    children_idx_arr = P['children_idx']
-    full_mask_sc = P['consist_full_mask']
-    partial_mask_sc = P['consist_partial_mask']
-    full_rows_sc = np.where(full_mask_sc)[0]
-    n_eq_sc = len(full_rows_sc)
-    if n_eq_sc > 0:
-        pi = consist_parent_indices[full_rows_sc].astype(np.int32)
-        cr = children_idx_arr[full_rows_sc]
-        rfc = np.repeat(np.arange(n_eq_sc, dtype=np.int32), d)
-        cfc = cr.ravel().astype(np.int32)
-        vfc = np.ones(n_eq_sc * d)
-        er = np.concatenate([rfc, np.arange(n_eq_sc, dtype=np.int32)])
-        ec = np.concatenate([cfc, pi])
-        ev = np.concatenate([vfc, np.full(n_eq_sc, -1.0)])
-        A_eq_sc = Matrix.sparse(n_eq_sc, n_y, er.tolist(), ec.tolist(), ev.tolist())
-        mdl_sc.constraint("ceq", Expr.mul(A_eq_sc, y_sc), Domain.equalsTo(0.0))
-
-    partial_rows_sc = np.where(partial_mask_sc)[0]
-    if len(partial_rows_sc) > 0:
-        pi_iq = consist_parent_indices[partial_rows_sc].astype(np.int32)
-        cr_iq = children_idx_arr[partial_rows_sc]
-        vm = cr_iq >= 0
-        hac = vm.any(axis=1)
-        if hac.any():
-            keep = np.where(hac)[0]
-            pi_iq = pi_iq[keep]
-            cr_iq = cr_iq[keep]
-            vm = vm[keep]
-            n_iq_sc = len(keep)
-            rl, cl = np.where(vm)
-            ir = np.concatenate([rl.astype(np.int32), np.arange(n_iq_sc, dtype=np.int32)])
-            ic = np.concatenate([cr_iq[rl, cl].astype(np.int32), pi_iq])
-            iv = np.concatenate([np.full(len(rl), -1.0), np.ones(n_iq_sc)])
-            A_iq_sc = Matrix.sparse(n_iq_sc, n_y, ir.tolist(), ic.tolist(), iv.tolist())
-            mdl_sc.constraint("ciq", Expr.mul(A_iq_sc, y_sc), Domain.greaterThan(0.0))
+    _build_base_psd(mdl_sc, y_sc, P, order, d, add_upper_loc)
+    _build_consistency_sparse(mdl_sc, y_sc, P, d, n_y)
 
     # Scalar window constraints: t >= f_W(y)
     F_coo = P['F_scipy'].tocoo()
