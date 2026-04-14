@@ -327,6 +327,7 @@ def _precompute_highd(d, order, cliques, verbose=True):
     FB_hash = _hash_monos(full_basis, bases, prime)
     AB_FB_hash = _hash_add(FB_hash[:, None], FB_hash[None, :], prime)
     m1_pick = _hash_lookup(AB_FB_hash, sorted_h, sort_o).ravel()
+    m1_pick_list = m1_pick.tolist()  # pre-convert for MOSEK y.pick()
     m1_valid = np.all(m1_pick >= 0)
 
     # --- Per-clique precomputed data ---
@@ -343,6 +344,7 @@ def _precompute_highd(d, order, cliques, verbose=True):
         ab_hash = _hash_add(cb_hash[:, None], cb_hash[None, :], prime)
         mom_pick = _hash_lookup(ab_hash, sorted_h, sort_o).ravel()
         cd['mom_pick'] = mom_pick
+        cd['mom_pick_list'] = mom_pick.tolist()
         cd['mom_size'] = len(cb)
 
         # --- Issue 8 deep verification: spot-check that hash lookups ---
@@ -368,14 +370,18 @@ def _precompute_highd(d, order, cliques, verbose=True):
             cd['loc_ab_hash'] = ab_loc_hash
 
             # T-part picks: y_{α_a + α_b} (degree ≤ 2(k-1) ≤ 2, in S)
-            cd['t_pick'] = _hash_lookup(ab_loc_hash, sorted_h, sort_o).ravel()
+            t_pick = _hash_lookup(ab_loc_hash, sorted_h, sort_o).ravel()
+            cd['t_pick'] = t_pick
+            cd['t_pick_list'] = t_pick.tolist()
 
             # Localizing picks per bin: y_{α_a + α_b + e_i}
             cd['loc_picks'] = {}
+            cd['loc_picks_list'] = {}
             for i in clique:
                 h = _hash_add(ab_loc_hash, bases[i], prime)
                 picks = _hash_lookup(h, sorted_h, sort_o).ravel()
                 cd['loc_picks'][i] = picks
+                cd['loc_picks_list'][i] = picks.tolist()
 
             # Precompute violation-checking index arrays (reused every CG round)
             clique_arr = np.array(clique)
@@ -472,7 +478,8 @@ def _precompute_highd(d, order, cliques, verbose=True):
         'bases': bases, 'prime': prime, 'sorted_h': sorted_h, 'sort_o': sort_o,
         'windows': windows, 'n_win': n_win,
         'F_scipy': F_scipy, 'idx_ij': idx_ij,
-        'm1_pick': m1_pick, 'm1_size': m1_size, 'm1_valid': m1_valid,
+        'm1_pick': m1_pick, 'm1_pick_list': m1_pick_list,
+        'm1_size': m1_size, 'm1_valid': m1_valid,
         'cliques': cliques, 'clique_data': clique_data,
         'bin_to_clique_map': bin_to_clique_map,
         'window_covering': window_covering,
@@ -527,9 +534,8 @@ def _build_model_highd(P, add_upper_loc, verbose):
     # semidefiniteness at degree 2(k-1), absent from clique-only PSD.
     n_m1_added = 0
     if P['m1_valid']:
-        m1_pick = P['m1_pick']
         m1_size = P['m1_size']
-        M1_expr = Expr.reshape(y.pick(m1_pick.tolist()), m1_size, m1_size)
+        M1_expr = Expr.reshape(y.pick(P['m1_pick_list']), m1_size, m1_size)
         mdl.constraint("full_m1_psd", M1_expr, Domain.inPSDCone(m1_size))
         n_m1_added = 1
         if verbose:
@@ -542,7 +548,7 @@ def _build_model_highd(P, add_upper_loc, verbose):
         if np.any(pick < 0):
             continue
         n_cb = cd['mom_size']
-        M_c = Expr.reshape(y.pick(pick.tolist()), n_cb, n_cb)
+        M_c = Expr.reshape(y.pick(cd['mom_pick_list']), n_cb, n_cb)
         mdl.constraint(f"clique_mom_{c_idx}", M_c, Domain.inPSDCone(n_cb))
         n_mom_psd += 1
 
@@ -560,7 +566,7 @@ def _build_model_highd(P, add_upper_loc, verbose):
             if picks is None or np.any(picks < 0):
                 continue
             n_cb = cd['loc_size']
-            Li = Expr.reshape(y.pick(picks.tolist()), n_cb, n_cb)
+            Li = Expr.reshape(y.pick(cd['loc_picks_list'][i_var]), n_cb, n_cb)
             mdl.constraint(f"loc_mu_{i_var}", Li, Domain.inPSDCone(n_cb))
             n_loc_psd += 1
 
@@ -580,8 +586,8 @@ def _build_model_highd(P, add_upper_loc, verbose):
             if np.any(t_pick < 0) or np.any(loc_pick < 0):
                 continue
             n_cb = cd['loc_size']
-            sub_m = y.pick(t_pick.tolist())
-            mu_i_m = y.pick(loc_pick.tolist())
+            sub_m = y.pick(cd['t_pick_list'])
+            mu_i_m = y.pick(cd['loc_picks_list'][i_var])
             diff = Expr.sub(sub_m, mu_i_m)
             L_up = Expr.reshape(diff, n_cb, n_cb)
             mdl.constraint(f"upper_loc_{i_var}", L_up, Domain.inPSDCone(n_cb))
@@ -872,7 +878,7 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
     if np.any(t_pick < 0):
         return  # T-part missing — skip
 
-    t_y = Expr.mul(t_param, y.pick(t_pick.tolist()))
+    t_y = Expr.mul(t_param, y.pick(cd['t_pick_list']))
 
     # Vectorized active (i,j) pair computation
     clique_arr = np.array(clique)
@@ -974,9 +980,8 @@ def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
     """
     # Full M_{k-1}
     if P['m1_valid']:
-        m1_pick = P['m1_pick']
         m1_size = P['m1_size']
-        M1_expr = Expr.reshape(y_var.pick(m1_pick.tolist()), m1_size, m1_size)
+        M1_expr = Expr.reshape(y_var.pick(P['m1_pick_list']), m1_size, m1_size)
         mdl_obj.constraint("full_mkm1_psd", M1_expr, Domain.inPSDCone(m1_size))
 
     # Clique moment PSD
@@ -985,7 +990,7 @@ def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
         if np.any(pick < 0):
             continue
         n_cb = cd['mom_size']
-        M_c = Expr.reshape(y_var.pick(pick.tolist()), n_cb, n_cb)
+        M_c = Expr.reshape(y_var.pick(cd['mom_pick_list']), n_cb, n_cb)
         mdl_obj.constraint(f"cm_{c_idx}", M_c, Domain.inPSDCone(n_cb))
 
     # Clique localizing PSD
@@ -997,7 +1002,7 @@ def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
             if picks is None or np.any(picks < 0):
                 continue
             n_cb = cd['loc_size']
-            Li = Expr.reshape(y_var.pick(picks.tolist()), n_cb, n_cb)
+            Li = Expr.reshape(y_var.pick(cd['loc_picks_list'][i_var]), n_cb, n_cb)
             mdl_obj.constraint(f"loc_{i_var}", Li, Domain.inPSDCone(n_cb))
 
     # Upper localizing
@@ -1012,8 +1017,8 @@ def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
             if np.any(t_pick_cd < 0) or np.any(loc_pick < 0):
                 continue
             n_cb = cd['loc_size']
-            sub_m = y_var.pick(t_pick_cd.tolist())
-            mu_i_m = y_var.pick(loc_pick.tolist())
+            sub_m = y_var.pick(cd['t_pick_list'])
+            mu_i_m = y_var.pick(cd['loc_picks_list'][i_var])
             diff = Expr.sub(sub_m, mu_i_m)
             L_up = Expr.reshape(diff, n_cb, n_cb)
             mdl_obj.constraint(f"upper_loc_{i_var}", L_up, Domain.inPSDCone(n_cb))
