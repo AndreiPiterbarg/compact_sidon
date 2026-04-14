@@ -833,21 +833,21 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
 
     t_y = Expr.mul(t_param, y.pick(t_pick.tolist()))
 
-    active_ij = []
-    mw_vals = []
-    for gi in clique:
-        for gj in clique:
-            if s_lo <= gi + gj <= s_lo + ell - 2:
-                active_ij.append((gi, gj))
-                mw_vals.append(coeff)
+    # Vectorized active (i,j) pair computation
+    clique_arr = np.array(clique)
+    gi_grid = clique_arr[:, None] + clique_arr[None, :]
+    active_mask = (gi_grid >= s_lo) & (gi_grid <= s_lo + ell - 2)
+    nz_li, nz_lj = np.nonzero(active_mask)
 
-    if not active_ij:
+    if len(nz_li) == 0:
         Lw = Expr.reshape(t_y, n_cb, n_cb)
         mdl.constraint(f"sw_{w}", Lw, Domain.inPSDCone(n_cb))
         return
 
-    nz = np.array(active_ij)
-    ee_hash = _hash_add(bases[nz[:, 0]], bases[nz[:, 1]], prime)
+    gi_nz = clique_arr[nz_li]
+    gj_nz = clique_arr[nz_lj]
+    mw_vals = np.full(len(nz_li), coeff)
+    ee_hash = _hash_add(bases[gi_nz], bases[gj_nz], prime)
     abij_hash = _hash_add(ab_loc_hash[:, :, None], ee_hash[None, None, :], prime)
     y_idx = _hash_lookup(abij_hash, sorted_h, sort_o)
 
