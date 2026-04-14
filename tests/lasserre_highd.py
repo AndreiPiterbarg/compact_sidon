@@ -261,29 +261,62 @@ def _precompute_highd(d, order, cliques, verbose=True):
     EE_hash = _hash_monos(EE, bases, prime)  # (d, d)
     idx_ij = _hash_lookup(EE_hash, sorted_h, sort_o)  # (d, d)
 
-    # --- Scalar window F_scipy (on-demand from formula, no M_mats) ---
+    # --- Scalar window F_scipy (fully vectorized, no Python loop) ---
     if verbose:
         print("  Building F_scipy (scalar window constraints)...", flush=True)
     t_f = time.time()
     sums_grid = np.arange(d)[:, None] + np.arange(d)[None, :]  # (d,d)
-    f_r, f_c, f_v = [], [], []
-    for w, (ell, s_lo) in enumerate(windows):
-        mask = (sums_grid >= s_lo) & (sums_grid <= s_lo + ell - 2)
-        nz_i, nz_j = np.nonzero(mask)
-        if len(nz_i) == 0:
+    # Flatten idx_ij for vectorized lookup
+    flat_ij = idx_ij.ravel()  # (d*d,)
+    flat_sums = sums_grid.ravel()  # (d*d,)
+    valid_pairs = flat_ij >= 0  # only pairs with moments in S
+
+    # For each valid (i,j) pair, determine which windows it belongs to.
+    # Window w=(ell, s_lo) includes (i,j) iff s_lo <= i+j <= s_lo+ell-2.
+    # Equivalently: s_lo <= s <= s_lo+ell-2, where s = i+j.
+    # For each sum value s, the windows containing it are those where
+    # s_lo <= s and s_lo + ell - 2 >= s, i.e., s_lo <= s <= s_lo + ell - 2.
+    # Instead of looping over windows, we loop over valid (i,j) pairs
+    # and compute their contributions.
+    vp_idx = np.where(valid_pairs)[0]
+    vp_sums = flat_sums[vp_idx]
+    vp_cols = flat_ij[vp_idx]
+
+    f_r_list, f_c_list, f_v_list = [], [], []
+    # Group by sum value for efficiency (all pairs with same sum
+    # contribute to exactly the same set of windows)
+    unique_sums = np.unique(vp_sums)
+    w_arr = np.array(windows)  # (n_win, 2): [ell, s_lo]
+    w_ell = w_arr[:, 0]
+    w_slo = w_arr[:, 1]
+
+    for s_val in unique_sums:
+        # Which windows contain this sum value?
+        w_mask = (w_slo <= s_val) & (s_val <= w_slo + w_ell - 2)
+        w_indices = np.where(w_mask)[0]
+        if len(w_indices) == 0:
             continue
-        mi = idx_ij[nz_i, nz_j]
-        valid = mi >= 0
-        n_valid = int(valid.sum())
-        if n_valid == 0:
-            continue
-        coeff = 2.0 * d / ell
-        f_r.extend([w] * n_valid)
-        f_c.extend(mi[valid].tolist())
-        f_v.extend([coeff] * n_valid)
+        # Which (i,j) pairs have this sum?
+        pair_mask = vp_sums == s_val
+        cols_for_s = vp_cols[pair_mask]
+        # Each (window, pair) combination is a COO entry
+        coeffs = 2.0 * d / w_ell[w_indices]  # (n_w,)
+        for k, w in enumerate(w_indices):
+            f_r_list.append(np.full(len(cols_for_s), w, dtype=np.int32))
+            f_c_list.append(cols_for_s)
+            f_v_list.append(np.full(len(cols_for_s), coeffs[k]))
+
+    if f_r_list:
+        f_r_all = np.concatenate(f_r_list)
+        f_c_all = np.concatenate(f_c_list)
+        f_v_all = np.concatenate(f_v_list)
+    else:
+        f_r_all = np.array([], dtype=np.int32)
+        f_c_all = np.array([], dtype=np.int32)
+        f_v_all = np.array([], dtype=np.float64)
 
     F_scipy = sp.csr_matrix(
-        (f_v, (f_r, f_c)), shape=(n_win, n_y), dtype=np.float64)
+        (f_v_all, (f_r_all, f_c_all)), shape=(n_win, n_y), dtype=np.float64)
     if verbose:
         print(f"    F_scipy: {F_scipy.nnz:,} nnz ({time.time()-t_f:.1f}s)",
               flush=True)
