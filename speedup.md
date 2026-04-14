@@ -2,7 +2,16 @@
 
 > **Target:** Run Lasserre order-2 (L2) at d=128 on CPU with 256 GB RAM.
 >
-> **Critical finding:** MOSEK **CAN** run at d=128 using the `solve_highd_sparse`
+> **MOSEK status:** MOSEK crashes at d=128. The "Schur ~1PB" estimate in
+> `lasserre_scs.py` is for the full 12M-variable precompute, but even the
+> highd solver's 498K variables can overwhelm MOSEK because its memory scales
+> **quadratically** with the number of constraint rows touching PSD blocks.
+> MOSEK has NO out-of-core mode and does NOT auto-exploit chordal structure.
+>
+> **Solution:** Use a solver that avoids the Schur complement entirely.
+> Three proven alternatives exist (see Idea 0 below).
+>
+> **Critical finding (preserved):** MOSEK theoretically **CAN** run at d=128 using the `solve_highd_sparse`
 > solver from `lasserre_highd.py`. The "MOSEK Schur ~1PB" estimate in
 > `lasserre_scs.py` refers to the FULL moment set (12M variables) from
 > `lasserre_scalable.py`. The highd solver uses a **reduced moment set**
@@ -29,6 +38,75 @@
 > - MOSEK solve (single call): ~30-60 min
 > - Violation checking: ~32K windows, ~1-5 min per CG round
 > - **Total (300 calls): 100-300 hours**
+
+---
+
+## Idea 0: Replace MOSEK with a Schur-Free Solver (THE Critical Enabler)
+
+**Impact: Makes d=128 POSSIBLE (currently crashes)**
+**Memory: 256 GB → < 5 GB**
+
+### The Problem
+
+MOSEK's interior-point method builds a Schur complement matrix whose memory
+scales O(n²) with the number of constraint rows touching PSD blocks. At d=128
+with 498K variables, 112 clique PSD cones (171×171), 128 localizing cones,
+and a full M1 (129×129), MOSEK exceeds available RAM and crashes. MOSEK has
+**no out-of-core mode** and does **not** automatically exploit chordal structure.
+
+### Three Proven Alternatives (ranked by effort)
+
+**Option A: Clarabel (lowest effort, Python-native)**
+```bash
+pip install clarabel
+```
+- Interior-point method (same accuracy as MOSEK, ~1e-8)
+- Default CVXPY solver since v1.5
+- Handles sparse SDPs with many small PSD blocks much better than MOSEK
+- Drop-in replacement: change `solver=cp.MOSEK` to `solver=cp.CLARABEL`
+- Or: reformulate the MOSEK Fusion model as a CVXPY problem
+
+**Option B: SCS on the highd reduced moment set (medium effort, highest impact)**
+- `lasserre_scs.py` already exists but uses the FULL 12M-variable `_precompute`
+- **The fix:** wire it to use `_precompute_highd` (498K variables) instead
+- SCS indirect mode: O(nnz) memory, no Schur complement
+- Estimated: ~50 MB memory, ~30-45 min total solve time
+- Implementation: adapt `_precompute_scs_decomposition` to consume clique data
+  from `_precompute_highd` instead of full moment/localizing picks
+
+**Option C: COSMO.jl with automatic chordal decomposition (best theoretical)**
+- Julia solver with Python wrapper (`cosmo-python` via pyjulia)
+- **Automatically** decomposes large PSD cones into clique blocks
+- Smart clique merging reduces projection overhead by up to 60%
+- Feed the full undecomposed SDP — COSMO finds the clique structure itself
+- Same accuracy class as SCS (first-order, ~1e-5)
+
+### Soundness
+
+All three solve the same mathematical SDP program — only the numerical
+algorithm differs. The mathematical formulation (moment constraints, PSD
+cones, window constraints) is unchanged. The feasible set and optimal
+value are identical. **QED.**
+
+### Why This Must Come First
+
+Without solving the MOSEK crash, no other optimization matters. Ideas 1-5
+below assume a working solver. Option B (SCS + highd) is recommended because:
+1. SCS is already integrated (`lasserre_scs.py`)
+2. The highd precompute is already built (`lasserre_highd.py`)
+3. Only the glue code needs to change (adapt SCS COO builder for clique data)
+4. Memory: ~50 MB (vs 256 GB budget = 5000x margin)
+
+### Alternative Solvers (from literature survey)
+
+| Solver | Method | Max Size | Accuracy | Python | Notes |
+|--------|--------|----------|----------|--------|-------|
+| **Clarabel** | Interior-point | Large sparse | 1e-8 | `pip install` | Default CVXPY |
+| **SCS** | ADMM | 250K+ vars | 1e-5 | `pip install` | Already in repo |
+| **COSMO.jl** | ADMM+chordal | Large sparse | 1e-5 | pyjulia | Auto clique decomp |
+| **SDPNAL+** | Aug. Lagrangian | n=9K, m=12M | **1e-8** | MATLAB only | Best accuracy |
+| **TSSOS** | Term sparsity | 6K vars | 1e-8 | Julia only | Lasserre-specific |
+| **LoRADS** | Low-rank ADMM | n=180K | 1e-5 | C (CLI) | Extreme scale |
 
 ---
 
