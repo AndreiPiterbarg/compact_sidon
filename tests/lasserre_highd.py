@@ -725,29 +725,32 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
         y_abij_local = y_vals[safe_idx]
         y_abij_local[ab_eiej_local < 0] = 0.0
 
+        # Vectorized Mw_local construction + batched eigenvalue computation
+        gi_grid = clique_arr[:, None] + clique_arr[None, :]
+
+        Mw_stack = []
+        w_indices = []
         for w in w_list:
             ell, s_lo = windows[w]
             coeff = 2.0 * d / ell
-
-            n_clique = len(clique)
-            Mw_local = np.zeros((n_clique, n_clique))
-            has_nz = False
-            for li, gi in enumerate(clique):
-                for lj, gj in enumerate(clique):
-                    if s_lo <= gi + gj <= s_lo + ell - 2:
-                        Mw_local[li, lj] = coeff
-                        has_nz = True
-
-            if not has_nz:
+            mask = (gi_grid >= s_lo) & (gi_grid <= s_lo + ell - 2)
+            if not np.any(mask):
                 continue
+            Mw_stack.append(coeff * mask.astype(np.float64))
+            w_indices.append(w)
 
-            L_q = np.einsum('abij,ij->ab', y_abij_local, Mw_local)
-            L_w = L_t - L_q
-            L_w = 0.5 * (L_w + L_w.T)
+        if not w_indices:
+            continue
 
-            min_eig = np.linalg.eigvalsh(L_w)[0]
-            if min_eig < -tol:
-                violations.append((w, float(min_eig)))
+        Mw_all = np.stack(Mw_stack)  # (n_windows, n_clique, n_clique)
+        L_q_all = np.einsum('abij,wij->wab', y_abij_local, Mw_all)
+        L_all = L_t[np.newaxis, :, :] - L_q_all
+        L_all = 0.5 * (L_all + np.swapaxes(L_all, -2, -1))
+
+        min_eigs = np.linalg.eigvalsh(L_all)[:, 0]
+        for k, w in enumerate(w_indices):
+            if min_eigs[k] < -tol:
+                violations.append((w, float(min_eigs[k])))
 
     # ---- Scalar-only check for uncovered windows ----
     # No PSD check for uncovered windows — partial-Q PSD is unsound.
