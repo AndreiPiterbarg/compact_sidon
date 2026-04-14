@@ -355,6 +355,16 @@ def _precompute_highd(d, order, cliques, verbose=True):
                 picks = _hash_lookup(h, sorted_h, sort_o).ravel()
                 cd['loc_picks'][i] = picks
 
+            # Precompute violation-checking index arrays (reused every CG round)
+            clique_arr = np.array(clique)
+            ee_hash = _hash_add(bases[clique_arr[:, None]],
+                                bases[clique_arr[None, :]], prime)
+            abij_hash = _hash_add(ab_loc_hash[:, :, None, None],
+                                  ee_hash[None, None, :, :], prime)
+            ab_eiej_local = _hash_lookup(abij_hash, sorted_h, sort_o)
+            cd['viol_ab_eiej'] = ab_eiej_local
+            cd['viol_gi_grid'] = clique_arr[:, None] + clique_arr[None, :]
+
         clique_data.append(cd)
 
     if verbose and n_collision_checks > 0:
@@ -706,27 +716,21 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
 
     for c_idx, w_list in clique_windows.items():
         cd = clique_data[c_idx]
-        clique = cd['clique']
         n_cb = cd['loc_size']
         t_pick = cd['t_pick']
-        ab_loc_hash = cd['loc_ab_hash']
 
         if np.any(t_pick < 0):
             continue
 
         L_t = t_val * y_vals[t_pick].reshape(n_cb, n_cb)
 
-        clique_arr = np.array(clique)
-        ee_hash = _hash_add(bases[clique_arr[:, None]], bases[clique_arr[None, :]], prime)
-        abij_hash = _hash_add(ab_loc_hash[:, :, None, None], ee_hash[None, None, :, :], prime)
-        ab_eiej_local = _hash_lookup(abij_hash, sorted_h, sort_o)
-
+        # Use precomputed violation index arrays (computed once in _precompute_highd)
+        ab_eiej_local = cd['viol_ab_eiej']
         safe_idx = np.clip(ab_eiej_local, 0, len(y_vals) - 1)
         y_abij_local = y_vals[safe_idx]
         y_abij_local[ab_eiej_local < 0] = 0.0
 
-        # Vectorized Mw_local construction + batched eigenvalue computation
-        gi_grid = clique_arr[:, None] + clique_arr[None, :]
+        gi_grid = cd['viol_gi_grid']
 
         Mw_stack = []
         w_indices = []
