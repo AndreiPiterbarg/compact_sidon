@@ -288,37 +288,24 @@ def _precompute_highd(d, order, cliques, verbose=True):
         print(f"    F_scipy: {F_scipy.nnz:,} nnz ({time.time()-t_f:.1f}s)",
               flush=True)
 
-    # --- Full M_1 PSD and M_1-level localizing (for ALL window PSD) ---
-    # basis_1 = {0, e_1, ..., e_d}, the order-1 monomial basis.
-    # M_1(y)[a,b] = y_{basis_1[a] + basis_1[b]}, all degree ≤ 2 → in S.
+    # --- Full M_{k-1}(y) PSD (cross-clique coupling) ---
+    # At order k, the full M_{k-1} moment matrix provides global coupling
+    # between cliques that clique-restricted M_k alone cannot.
     #
-    # For window PSD localizing:
-    #   L_W[a,b] = t·y_{basis_1[a]+basis_1[b]}
-    #              - Σ_{i,j} M_W[i,j]·y_{basis_1[a]+basis_1[b]+e_i+e_j}
+    # Basis: all monomials of degree ≤ k-1 in d variables.
+    #   order=2: degree ≤ 1 → {0, e_1, ..., e_d}, size d+1
+    #   order=3: degree ≤ 2, size C(d+2, 2)
     #
-    # The Q-part entries have degree ≤ 4 and may not be in S. This is OK:
-    # setting missing entries to 0 underestimates Q, making L_W "more PSD",
-    # so the constraint L_W ≽ 0 is WEAKER → valid relaxation.
+    # All M_{k-1} entries have degree ≤ 2(k-1) ≤ 2k-1, so they're in S_{≤2k-1}.
     #
-    # Proof: for true moments y*, Q_true[a,b] ≥ Q_partial[a,b] (missing
-    # terms are ≥ 0). So L_true = t*T - Q_true ≼ t*T - Q_partial = L_partial.
-    # If L_partial ≽ 0, it does NOT imply L_true ≽ 0 — the constraint is
-    # weaker, which is correct for a relaxation (enlarges feasible set).
-    basis_1 = np.zeros((d + 1, d), dtype=np.int64)
-    for i in range(d):
-        basis_1[i + 1, i] = 1  # e_i; row 0 = zero (constant monomial)
-    B1_hash = _hash_monos(basis_1, bases, prime)  # (d+1,)
-    AB1_hash = _hash_add(B1_hash[:, None], B1_hash[None, :], prime)  # (d+1, d+1)
-    m1_pick = _hash_lookup(AB1_hash, sorted_h, sort_o).ravel()  # ((d+1)²,)
+    # Soundness: for true measure μ*, v^T M_{k-1}(y*) v = E[(Σ v_a x^{α_a})²] ≥ 0.
+    # This is a necessary condition, strictly weaker than full M_k PSD.
+    full_basis = np.array(enum_monomials(d, order - 1), dtype=np.int64)
+    m1_size = len(full_basis)
+    FB_hash = _hash_monos(full_basis, bases, prime)
+    AB_FB_hash = _hash_add(FB_hash[:, None], FB_hash[None, :], prime)
+    m1_pick = _hash_lookup(AB_FB_hash, sorted_h, sort_o).ravel()
     m1_valid = np.all(m1_pick >= 0)
-    m1_size = d + 1
-
-    # Precompute the full ab_eiej index for M_1-level localizing.
-    # Shape: (d+1, d+1, d, d) — at d=128 this is 129×129×128×128×8 = 2GB.
-    # Instead, precompute just AB1_hash and EE_hash for on-demand lookup.
-    # (EE_full_hash removed — was only used by unsound partial-Q Tier 2)
-    # Store AB1_hash for on-demand ab_eiej computation per window
-    # (m1_ab_hash removed — was only used by unsound partial-Q Tier 2)
 
     # --- Per-clique precomputed data ---
     if verbose:
@@ -481,7 +468,6 @@ def _build_model_highd(P, add_upper_loc, verbose):
 
     mdl = Model("highd_sparse")
     mdl.setSolverParam("intpntCoTolRelGap", 1e-7)
-    mdl.setSolverParam("intpntHotStart", "primal")
 
     y = mdl.variable("y", n_y, Domain.greaterThan(0.0))
     t_param = mdl.parameter("t")
@@ -491,8 +477,9 @@ def _build_model_highd(P, add_upper_loc, verbose):
     y0_idx = idx[zero]
     mdl.constraint("y0", y.index(y0_idx), Domain.equalsTo(1.0))
 
-    # --- (3) Full M_1(y) ≽ 0 ---
-    # Proof of additional tightening: see _add_full_m1_psd docstring
+    # --- (3) Full M_{k-1}(y) ≽ 0 ---
+    # Cross-clique coupling: the full M_{k-1} PSD ensures global
+    # semidefiniteness at degree 2(k-1), absent from clique-only PSD.
     n_m1_added = 0
     if P['m1_valid']:
         m1_pick = P['m1_pick']
@@ -501,7 +488,7 @@ def _build_model_highd(P, add_upper_loc, verbose):
         mdl.constraint("full_m1_psd", M1_expr, Domain.inPSDCone(m1_size))
         n_m1_added = 1
         if verbose:
-            print(f"  Full M_1 PSD: {m1_size}×{m1_size}", flush=True)
+            print(f"  Full M_{order-1} PSD: {m1_size}×{m1_size}", flush=True)
 
     # --- (4) Clique moment PSD ---
     n_mom_psd = 0
@@ -966,12 +953,12 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
     y0_idx = P['idx'][zero]
     mdl_sc.constraint("y0", y_sc.index(y0_idx), Domain.equalsTo(1.0))
 
-    # Full M_1 PSD
+    # Full M_{k-1} PSD
     if P['m1_valid']:
         m1_pick = P['m1_pick']
         m1_size = P['m1_size']
         M1_expr = Expr.reshape(y_sc.pick(m1_pick.tolist()), m1_size, m1_size)
-        mdl_sc.constraint("full_m1_psd", M1_expr, Domain.inPSDCone(m1_size))
+        mdl_sc.constraint("full_mkm1_psd", M1_expr, Domain.inPSDCone(m1_size))
 
     # Clique moment PSD
     for c_idx, cd in enumerate(P['clique_data']):
