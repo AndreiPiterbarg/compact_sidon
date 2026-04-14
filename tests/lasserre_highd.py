@@ -417,21 +417,33 @@ def _precompute_highd(d, order, cliques, verbose=True):
                     bin_to_clique[i] = (c_idx, abs(i - mid))
     bin_to_clique_map = {i: v[0] for i, v in bin_to_clique.items()}
 
-    # --- Window-to-clique mapping (precompute covering clique per window) ---
+    # --- Window-to-clique mapping (vectorized) ---
     if verbose:
         print("  Mapping windows to covering cliques...", flush=True)
-    window_covering = np.full(n_win, -1, dtype=np.int32)
-    for w, (ell, s_lo) in enumerate(windows):
-        i_min = max(0, s_lo - (d - 1))
-        i_max = min(d - 1, s_lo + ell - 2)
-        if i_min > i_max:
-            continue
-        for c_idx, clique in enumerate(cliques):
-            if clique[0] <= i_min and i_max <= clique[-1]:
-                window_covering[w] = c_idx
-                break
+    w_arr = np.array(windows)  # (n_win, 2): [ell, s_lo]
+    w_ell = w_arr[:, 0]
+    w_slo = w_arr[:, 1]
+    # Active bin range per window: i_min, i_max
+    w_i_min = np.clip(w_slo - (d - 1), 0, d - 1)
+    w_i_max = np.clip(w_slo + w_ell - 2, 0, d - 1)
 
-    n_covered = int((window_covering >= 0).sum())
+    # Clique start/end arrays
+    c_starts = np.array([clique[0] for clique in cliques], dtype=np.int32)
+    c_ends = np.array([clique[-1] for clique in cliques], dtype=np.int32)
+
+    # For each window, find first clique that covers [i_min, i_max]
+    # covers[w, c] = (c_starts[c] <= i_min[w]) & (i_max[w] <= c_ends[c])
+    covers = ((c_starts[None, :] <= w_i_min[:, None]) &
+              (w_i_max[:, None] <= c_ends[None, :]))
+    # Also exclude degenerate windows where i_min > i_max
+    valid_win = w_i_min <= w_i_max
+
+    window_covering = np.full(n_win, -1, dtype=np.int32)
+    has_cover = covers.any(axis=1) & valid_win
+    # argmax on axis=1 gives first True index per row
+    window_covering[has_cover] = covers[has_cover].argmax(axis=1).astype(np.int32)
+
+    n_covered = int(has_cover.sum())
     if verbose:
         print(f"    {n_covered}/{n_win} windows covered by cliques", flush=True)
 
