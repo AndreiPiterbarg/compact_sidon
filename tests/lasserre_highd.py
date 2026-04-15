@@ -858,10 +858,6 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
     if order < 2:
         return
     n_y = P['n_y']
-    bases = P['bases']
-    prime = P.get('prime')
-    sorted_h = P['sorted_h']
-    sort_o = P['sort_o']
 
     ell, s_lo = P['windows'][w]
     coeff = 2.0 * d / ell
@@ -873,18 +869,14 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
 
     cd = P['clique_data'][c_idx]
     n_cb = cd['loc_size']
-    t_pick = cd['t_pick']
-    ab_loc_hash = cd['loc_ab_hash']
-    clique = cd['clique']
 
-    if np.any(t_pick < 0):
+    if np.any(cd['t_pick'] < 0):
         return  # T-part missing — skip
 
     t_y = Expr.mul(t_param, y.pick(cd['t_pick_list']))
 
-    # Vectorized active (i,j) pair computation
-    clique_arr = np.array(clique)
-    gi_grid = clique_arr[:, None] + clique_arr[None, :]
+    # Use precomputed gi_grid from violation data
+    gi_grid = cd['viol_gi_grid']
     active_mask = (gi_grid >= s_lo) & (gi_grid <= s_lo + ell - 2)
     nz_li, nz_lj = np.nonzero(active_mask)
 
@@ -893,12 +885,9 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
         mdl.constraint(f"sw_{w}", Lw, Domain.inPSDCone(n_cb))
         return
 
-    gi_nz = clique_arr[nz_li]
-    gj_nz = clique_arr[nz_lj]
     mw_vals = np.full(len(nz_li), coeff)
-    ee_hash = _hash_add(bases[gi_nz], bases[gj_nz], prime)
-    abij_hash = _hash_add(ab_loc_hash[:, :, None], ee_hash[None, None, :], prime)
-    y_idx = _hash_lookup(abij_hash, sorted_h, sort_o)
+    # Index into precomputed ab_eiej lookup table instead of recomputing hashes
+    y_idx = cd['viol_ab_eiej'][:, :, nz_li, nz_lj]
 
     valid = y_idx >= 0
     if not np.any(valid):
