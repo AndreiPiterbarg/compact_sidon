@@ -1,0 +1,23 @@
+============================================================
+SCS LASSERRE L2 (degree 4)
+Target: val(32) >= 1.28
+Known: val(32) ~ 1.336
+============================================================
+
+  d=32, order=2 (degree 4)
+  windows=2016, basis=561, loc_basis=33, moments=58905
+  Base PSD cones: 33 (1x561^2 + 32x33^2)
+  ab_eiej_idx: (33, 33, 32, 32), 1115136/1115136 valid
+  Precompute: 10.37s
+  SCS backend: indirect (CG)
+  SCS settings: max_iters=5000, eps_abs=1e-04, eps_rel=1e-04
+  Moment PSD svec: 157,641
+  Localizing svec: 17,952
+  Upper-loc svec:  17,952
+
+
+  [Round 0] Seeding initial violations...
+    Scalar boundary ~ 0.968750, 2004 violations found (SCS: 25 iters, tau=-3.51e-08, 11.3s)
+    Added 10 PSD windows (worst eig: -1.968801e-01)
+
+  [CG round 1] 10 PSD window constraints
