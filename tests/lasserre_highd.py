@@ -306,6 +306,9 @@ def _precompute_highd(d, order, cliques, verbose=True):
 
     F_scipy = sp.csr_matrix(
         (f_v_all, (f_r_all, f_c_all)), shape=(n_win, n_y), dtype=np.float64)
+    # Pre-convert COO to lists for MOSEK Matrix.sparse (avoids repeated .tolist())
+    F_coo = F_scipy.tocoo()
+    F_coo_lists = (F_coo.row.tolist(), F_coo.col.tolist(), F_coo.data.tolist())
     if verbose:
         print(f"    F_scipy: {F_scipy.nnz:,} nnz ({time.time()-t_f:.1f}s)",
               flush=True)
@@ -462,6 +465,39 @@ def _precompute_highd(d, order, cliques, verbose=True):
     n_full = int(full_mask.sum())
     n_partial = int(partial_mask.sum())
 
+    # Pre-build consistency sparse matrix COO lists (avoids rebuilding twice)
+    consist_eq_lists = None
+    if n_full > 0:
+        full_rows_arr = np.where(full_mask)[0]
+        pi = consist_parent_indices[full_rows_arr].astype(np.int32)
+        cr = children_idx[full_rows_arr]
+        rfc = np.repeat(np.arange(n_full, dtype=np.int32), d)
+        cfc = cr.ravel().astype(np.int32)
+        vfc = np.ones(n_full * d)
+        er = np.concatenate([rfc, np.arange(n_full, dtype=np.int32)])
+        ec = np.concatenate([cfc, pi])
+        ev = np.concatenate([vfc, np.full(n_full, -1.0)])
+        consist_eq_lists = (n_full, er.tolist(), ec.tolist(), ev.tolist())
+
+    consist_iq_lists = None
+    if n_partial > 0:
+        partial_rows_arr = np.where(partial_mask)[0]
+        pi_iq = consist_parent_indices[partial_rows_arr].astype(np.int32)
+        cr_iq = children_idx[partial_rows_arr]
+        vm = cr_iq >= 0
+        hac = vm.any(axis=1)
+        if hac.any():
+            keep = np.where(hac)[0]
+            pi_iq = pi_iq[keep]
+            cr_iq = cr_iq[keep]
+            vm = vm[keep]
+            n_iq = len(keep)
+            rl, cl = np.where(vm)
+            ir = np.concatenate([rl.astype(np.int32), np.arange(n_iq, dtype=np.int32)])
+            ic = np.concatenate([cr_iq[rl, cl].astype(np.int32), pi_iq])
+            iv = np.concatenate([np.full(len(rl), -1.0), np.ones(n_iq)])
+            consist_iq_lists = (n_iq, ir.tolist(), ic.tolist(), iv.tolist())
+
     if verbose:
         print(f"    Consistency: {n_full} full equality + "
               f"{n_partial} partial inequality rows ({time.time()-t_con:.1f}s)",
@@ -477,17 +513,15 @@ def _precompute_highd(d, order, cliques, verbose=True):
         'S_arr': S_arr, 'mono_list': mono_list, 'idx': idx,
         'bases': bases, 'prime': prime, 'sorted_h': sorted_h, 'sort_o': sort_o,
         'windows': windows, 'n_win': n_win,
-        'F_scipy': F_scipy, 'idx_ij': idx_ij,
+        'F_scipy': F_scipy, 'F_coo_lists': F_coo_lists, 'idx_ij': idx_ij,
         'm1_pick': m1_pick, 'm1_pick_list': m1_pick_list,
         'm1_size': m1_size, 'm1_valid': m1_valid,
         'cliques': cliques, 'clique_data': clique_data,
         'bin_to_clique_map': bin_to_clique_map,
         'window_covering': window_covering,
-        # Consistency data
-        'consist_parent_indices': consist_parent_indices,
-        'children_idx': children_idx,
-        'consist_full_mask': full_mask,
-        'consist_partial_mask': partial_mask,
+        # Consistency data (pre-built COO lists for MOSEK)
+        'consist_eq_lists': consist_eq_lists,
+        'consist_iq_lists': consist_iq_lists,
     }
 
 
@@ -596,96 +630,27 @@ def _build_model_highd(P, add_upper_loc, verbose):
     if verbose:
         print(f"  Upper localizing PSD: {n_upper}/{d} bins", flush=True)
 
-    # --- (7)+(8) Consistency constraints ---
-    # CRITICAL: use EQUALITY for full rows, INEQUALITY for partial rows.
-    #
-    # Proof (partial inequality soundness):
-    #   For true moments: y_α = Σ_{i=0}^{d-1} y_{α+e_i}.
-    #   Since y_{α+e_i} ≥ 0 for all i:
-    #     y_α = Σ_{i∈S'} y_{α+e_i} + Σ_{i∉S'} y_{α+e_i}
-    #         ≥ Σ_{i∈S'} y_{α+e_i}.
-    #   So the inequality y_α ≥ Σ_{i∈S'} y_{α+e_i} is satisfied.  QED.
-    #
-    # Proof (partial EQUALITY is UNSOUND):
-    #   Equality Σ_{i∈S'} y_{α+e_i} = y_α forces Σ_{i∉S'} y_{α+e_i} = 0,
-    #   which forces y_{α+e_i} = 0 for i∉S' (since y ≥ 0). This is an
-    #   extra constraint not in the original Lasserre, shrinking the feasible
-    #   set and potentially giving lb > val(d).  QED.
+    # --- (7)+(8) Consistency constraints from pre-built COO lists ---
+    n_eq, n_iq = 0, 0
+    if P['consist_eq_lists'] is not None:
+        n_eq, er, ec, ev = P['consist_eq_lists']
+        A_eq = Matrix.sparse(n_eq, n_y, er, ec, ev)
+        mdl.constraint("consist_eq", Expr.mul(A_eq, y), Domain.equalsTo(0.0))
 
-    consist_parent_indices = P['consist_parent_indices']
-    children_idx = P['children_idx']
-    full_mask = P['consist_full_mask']
-    partial_mask = P['consist_partial_mask']
-
-    # Build full equality rows (vectorized)
-    full_rows = np.where(full_mask)[0]
-    n_eq = len(full_rows)
-
-    if n_eq > 0:
-        parent_idx_eq = consist_parent_indices[full_rows].astype(np.int32)
-        child_rows_eq = children_idx[full_rows]  # (n_eq, d), all >= 0
-
-        # Each row has d children (coeff +1) + 1 parent (coeff -1)
-        row_for_children = np.repeat(np.arange(n_eq, dtype=np.int32), d)
-        col_for_children = child_rows_eq.ravel().astype(np.int32)
-        val_for_children = np.ones(n_eq * d)
-
-        eq_r = np.concatenate([row_for_children, np.arange(n_eq, dtype=np.int32)])
-        eq_c = np.concatenate([col_for_children, parent_idx_eq])
-        eq_v = np.concatenate([val_for_children, np.full(n_eq, -1.0)])
-
-        A_eq = Matrix.sparse(n_eq, n_y, eq_r.tolist(), eq_c.tolist(), eq_v.tolist())
-        mdl.constraint("consist_eq",
-                        Expr.mul(A_eq, y), Domain.equalsTo(0.0))
-
-    # Build partial inequality rows: parent - Σ children ≥ 0 (vectorized)
-    partial_rows = np.where(partial_mask)[0]
-
-    if len(partial_rows) > 0:
-        parent_idx_iq = consist_parent_indices[partial_rows].astype(np.int32)
-        child_rows_iq = children_idx[partial_rows]  # (n_partial, d)
-        valid_mask = child_rows_iq >= 0
-
-        # Filter out rows with no valid children
-        has_any_child = valid_mask.any(axis=1)
-        if has_any_child.any():
-            keep = np.where(has_any_child)[0]
-            parent_idx_iq = parent_idx_iq[keep]
-            child_rows_iq = child_rows_iq[keep]
-            valid_mask = valid_mask[keep]
-            n_iq = len(keep)
-
-            # Children entries: (row_local, col_within_d) of valid entries
-            row_local, col_local = np.where(valid_mask)
-            iq_r_children = row_local.astype(np.int32)
-            iq_c_children = child_rows_iq[row_local, col_local].astype(np.int32)
-
-            # Combine children (coeff -1) + parents (coeff +1)
-            iq_r = np.concatenate([iq_r_children, np.arange(n_iq, dtype=np.int32)])
-            iq_c = np.concatenate([iq_c_children, parent_idx_iq])
-            iq_v = np.concatenate([np.full(len(iq_r_children), -1.0),
-                                   np.ones(n_iq)])
-
-            A_iq = Matrix.sparse(n_iq, n_y, iq_r.tolist(), iq_c.tolist(), iq_v.tolist())
-            mdl.constraint("consist_ineq",
-                            Expr.mul(A_iq, y), Domain.greaterThan(0.0))
-        else:
-            n_iq = 0
-    else:
-        n_iq = 0
+    if P['consist_iq_lists'] is not None:
+        n_iq, ir, ic, iv = P['consist_iq_lists']
+        A_iq = Matrix.sparse(n_iq, n_y, ir, ic, iv)
+        mdl.constraint("consist_ineq", Expr.mul(A_iq, y), Domain.greaterThan(0.0))
 
     if verbose:
         print(f"  Consistency: {n_eq} equality + {n_iq} inequality rows",
               flush=True)
 
     # --- (9) Scalar window constraints: t ≥ f_W(y) ---
-    F_coo = P['F_scipy'].tocoo()
+    f_rows, f_cols, f_data = P['F_coo_lists']
     n_win = P['n_win']
-    if F_coo.nnz > 0:
-        F_mosek = Matrix.sparse(n_win, n_y,
-                                F_coo.row.tolist(),
-                                F_coo.col.tolist(),
-                                F_coo.data.tolist())
+    if len(f_rows) > 0:
+        F_mosek = Matrix.sparse(n_win, n_y, f_rows, f_cols, f_data)
         f_all = Expr.mul(F_mosek, y)
         ones_col = Matrix.dense(n_win, 1, [1.0] * n_win)
         t_rep = Expr.flatten(Expr.mul(ones_col,
@@ -915,51 +880,22 @@ def _add_window_psd_highd(mdl, y, t_param, w, P):
 # =====================================================================
 
 def _build_consistency_sparse(mdl_obj, y_var, P, d, n_y):
-    """Build consistency constraints for a MOSEK model.
+    """Build consistency constraints from pre-built COO lists.
 
-    Shared by both the scalar Round 0 model and the CG model to avoid
-    duplicating the vectorized sparse matrix construction.
-
-    Returns (n_eq, n_iq) counts.
+    Uses consist_eq_lists and consist_iq_lists from precompute,
+    avoiding repeated sparse matrix construction and .tolist() calls.
     """
-    consist_parent_indices = P['consist_parent_indices']
-    children_idx_arr = P['children_idx']
-    full_mask = P['consist_full_mask']
-    partial_mask = P['consist_partial_mask']
-
-    full_rows = np.where(full_mask)[0]
-    n_eq = len(full_rows)
-    if n_eq > 0:
-        pi = consist_parent_indices[full_rows].astype(np.int32)
-        cr = children_idx_arr[full_rows]
-        rfc = np.repeat(np.arange(n_eq, dtype=np.int32), d)
-        cfc = cr.ravel().astype(np.int32)
-        vfc = np.ones(n_eq * d)
-        er = np.concatenate([rfc, np.arange(n_eq, dtype=np.int32)])
-        ec = np.concatenate([cfc, pi])
-        ev = np.concatenate([vfc, np.full(n_eq, -1.0)])
-        A_eq = Matrix.sparse(n_eq, n_y, er.tolist(), ec.tolist(), ev.tolist())
+    n_eq = 0
+    if P['consist_eq_lists'] is not None:
+        n_eq, er, ec, ev = P['consist_eq_lists']
+        A_eq = Matrix.sparse(n_eq, n_y, er, ec, ev)
         mdl_obj.constraint("ceq", Expr.mul(A_eq, y_var), Domain.equalsTo(0.0))
 
-    partial_rows = np.where(partial_mask)[0]
     n_iq = 0
-    if len(partial_rows) > 0:
-        pi_iq = consist_parent_indices[partial_rows].astype(np.int32)
-        cr_iq = children_idx_arr[partial_rows]
-        vm = cr_iq >= 0
-        hac = vm.any(axis=1)
-        if hac.any():
-            keep = np.where(hac)[0]
-            pi_iq = pi_iq[keep]
-            cr_iq = cr_iq[keep]
-            vm = vm[keep]
-            n_iq = len(keep)
-            rl, cl = np.where(vm)
-            ir = np.concatenate([rl.astype(np.int32), np.arange(n_iq, dtype=np.int32)])
-            ic = np.concatenate([cr_iq[rl, cl].astype(np.int32), pi_iq])
-            iv = np.concatenate([np.full(len(rl), -1.0), np.ones(n_iq)])
-            A_iq = Matrix.sparse(n_iq, n_y, ir.tolist(), ic.tolist(), iv.tolist())
-            mdl_obj.constraint("ciq", Expr.mul(A_iq, y_var), Domain.greaterThan(0.0))
+    if P['consist_iq_lists'] is not None:
+        n_iq, ir, ic, iv = P['consist_iq_lists']
+        A_iq = Matrix.sparse(n_iq, n_y, ir, ic, iv)
+        mdl_obj.constraint("ciq", Expr.mul(A_iq, y_var), Domain.greaterThan(0.0))
 
     return n_eq, n_iq
 
@@ -1098,13 +1034,10 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
     _build_consistency_sparse(mdl_sc, y_sc, P, d, n_y)
 
     # Scalar window constraints: t >= f_W(y)
-    F_coo = P['F_scipy'].tocoo()
+    f_rows, f_cols, f_data = P['F_coo_lists']
     n_win = P['n_win']
-    if F_coo.nnz > 0:
-        F_mosek = Matrix.sparse(n_win, n_y,
-                                F_coo.row.tolist(),
-                                F_coo.col.tolist(),
-                                F_coo.data.tolist())
+    if len(f_rows) > 0:
+        F_mosek = Matrix.sparse(n_win, n_y, f_rows, f_cols, f_data)
         f_all = Expr.mul(F_mosek, y_sc)
         ones_col = Matrix.dense(n_win, 1, [1.0] * n_win)
         t_rep = Expr.flatten(Expr.mul(ones_col,
