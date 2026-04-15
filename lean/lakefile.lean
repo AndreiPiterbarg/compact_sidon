@@ -17,5 +17,10 @@ lean_lib SidonMonolithic where
   srcDir := "."
   roots := #[`complete_proof]
 
+-- Lasserre SDP proof inventory (stub-only audit of proof obligations)
+lean_lib LasserreAudit where
+  srcDir := "."
+  roots := #[`lasserre]
+
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4" @ "f897ebcf72cd16f89ab4577d0c826cd14afaafc7"
