@@ -567,19 +567,42 @@ __device__ void canonicalize_and_stage(
         int first_gt = gt_mask ? __ffs((int)gt_mask) : 33;
         use_rev = (first_lt < first_gt);
     } else {
-        /* Two warps: comparison via shared memory. */
+        /* Multi-warp: parallel lexicographic comparison.
+         * Each thread computes cmp for its position.  Use warp ballot
+         * to find the first non-zero cmp across all threads in parallel,
+         * avoiding the O(d_child) sequential scan. */
         int fwd = (lane < d_child) ? child[lane] : 0;
         int rev = (lane < d_child) ? child[d_child - 1 - lane] : 0;
-        int cmp = (rev < fwd) ? -1 : (rev > fwd) ? 1 : 0;
+        int cmp = (lane < d_child) ? ((rev < fwd) ? -1 : (rev > fwd) ? 1 : 0) : 0;
+
+        /* Find earliest position with cmp != 0 using parallel reduction.
+         * Each warp finds its first nonzero via ballot, then lane 0
+         * picks the global first across warps via shared memory. */
+        int my_nonzero_pos = (cmp != 0 && lane < d_child) ? lane : d_child;
         cmp_array[lane] = cmp;
+
+        /* Intra-warp min of nonzero positions. */
+        unsigned mask = 0xFFFFFFFF;
+        for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1) {
+            int other = __shfl_down_sync(mask, my_nonzero_pos, offset);
+            if (other < my_nonzero_pos) my_nonzero_pos = other;
+        }
+        /* Warp leaders write to shared memory for cross-warp reduction. */
+        int warp_id = lane / WARP_SIZE;
+        int warp_lane = lane % WARP_SIZE;
+        /* Reuse first few slots of cmp_array for warp mins (max 8 warps). */
+        __syncthreads();
+        if (warp_lane == 0)
+            cmp_array[d_child + warp_id] = my_nonzero_pos;
         __syncthreads();
         if (lane == 0) {
-            use_rev = false;
-            for (int i = 0; i < d_child; i++) {
-                if (cmp_array[i] < 0) { use_rev = true; break; }
-                if (cmp_array[i] > 0) { break; }
+            int n_warps = ((int)blockDim.x + WARP_SIZE - 1) / WARP_SIZE;
+            int global_first = d_child;
+            for (int w = 0; w < n_warps; w++) {
+                int wp = cmp_array[d_child + w];
+                if (wp < global_first) global_first = wp;
             }
-            *use_rev_smem = use_rev;
+            *use_rev_smem = (global_first < d_child && cmp_array[global_first] < 0);
         }
         __syncthreads();
         use_rev = *use_rev_smem;
@@ -973,6 +996,10 @@ __global__ void cascade_kernel(
     __shared__ int     subtree_pconv_len_smem;
     __shared__ int     subtree_first_unfixed_smem;
     __shared__ int     subtree_kill_flag_smem;
+
+    /* Bitmask of inner-active parent positions (for O(1) is_inner check).
+     * 128 bits = 4 uint32 words covers MAX_D_PARENT=128. */
+    __shared__ uint32_t inner_active_mask_smem[4];
 
     /* Guaranteed minimum contributions from unfixed bins (Idea 02).
      * Used during subtree pruning to tighten the lower bound on
@@ -1402,6 +1429,22 @@ __global__ void cascade_kernel(
                         int pconv_len = subtree_pconv_len_smem;
                         int first_unfixed_parent = subtree_first_unfixed_smem;
 
+                        /* ── Build inner-active bitmask for O(1) is_inner check ──
+                         * Replaces O(gc_j) linear scan per parent position. */
+                        if (lane < 4)
+                            inner_active_mask_smem[lane] = 0;
+                        __syncthreads();
+                        if (lane == 0) {
+                            for (int kk = 0; kk < gc_j; kk++) {
+                                int p = active_pos_smem[kk];
+                                inner_active_mask_smem[p / 32] |= (1u << (p % 32));
+                            }
+                        }
+                        __syncthreads();
+
+                        /* Macro for O(1) inner-active check. */
+                        #define IS_INNER(p) ((inner_active_mask_smem[(p) / 32] >> ((p) % 32)) & 1u)
+
                         /* ── Sub-task A: cooperative partial autoconv ──
                          * Same pattern as cooperative_full_autoconv (lines 42-67)
                          * but on the fixed prefix only. */
@@ -1482,17 +1525,10 @@ __global__ void cascade_kernel(
 
                         /* (B) Non-active unfixed parents (range==1,
                          *     beyond fixed prefix).  Outer loop sequential
-                         *     (all threads), cross-with-fixed distributed. */
+                         *     (all threads), cross-with-fixed distributed.
+                         *     Uses bitmask for O(1) is_inner check. */
                         for (int pp = first_unfixed_parent; pp < d_parent; pp++) {
-                            /* Skip if this is an inner active position */
-                            bool is_inner = false;
-                            for (int kk = 0; kk < gc_j; kk++) {
-                                if (active_pos_smem[kk] == pp) {
-                                    is_inner = true;
-                                    break;
-                                }
-                            }
-                            if (is_inner) continue;
+                            if (IS_INNER(pp)) continue;
 
                             int k1na = 2 * pp;
                             int k2na = 2 * pp + 1;
@@ -1536,33 +1572,28 @@ __global__ void cascade_kernel(
                                 }
                             }
 
-                            /* Cross with other non-active unfixed: lane 0 */
-                            if (lane == 0) {
-                                for (int pp2 = pp + 1; pp2 < d_parent; pp2++) {
-                                    bool is_inner2 = false;
-                                    for (int kk = 0; kk < gc_j; kk++) {
-                                        if (active_pos_smem[kk] == pp2) {
-                                            is_inner2 = true;
-                                            break;
-                                        }
-                                    }
-                                    if (is_inner2) continue;
-                                    int k1na2 = 2 * pp2;
-                                    int k2na2 = 2 * pp2 + 1;
-                                    int cv12 = lo_smem[pp2];
-                                    int cv22 = 2 * parent_smem[pp2] - cv12;
-                                    if (cv1 > 0 && cv12 > 0)
-                                        min_contrib_smem[k1na + k1na2] += 2 * cv1 * cv12;
-                                    if (cv1 > 0 && cv22 > 0)
-                                        min_contrib_smem[k1na + k2na2] += 2 * cv1 * cv22;
-                                    if (cv2 > 0 && cv12 > 0)
-                                        min_contrib_smem[k2na + k1na2] += 2 * cv2 * cv12;
-                                    if (cv2 > 0 && cv22 > 0)
-                                        min_contrib_smem[k2na + k2na2] += 2 * cv2 * cv22;
-                                }
+                            /* Cross with other non-active unfixed: distributed
+                             * across threads for parallelism (was lane-0 only).
+                             * Each thread handles a subset of pp2 values. */
+                            for (int pp2 = pp + 1 + lane; pp2 < d_parent; pp2 += blockDim.x) {
+                                if (IS_INNER(pp2)) continue;
+                                int k1na2 = 2 * pp2;
+                                int k2na2 = 2 * pp2 + 1;
+                                int cv12 = lo_smem[pp2];
+                                int cv22 = 2 * parent_smem[pp2] - cv12;
+                                if (cv1 > 0 && cv12 > 0)
+                                    atomicAdd_block(&min_contrib_smem[k1na + k1na2], 2 * cv1 * cv12);
+                                if (cv1 > 0 && cv22 > 0)
+                                    atomicAdd_block(&min_contrib_smem[k1na + k2na2], 2 * cv1 * cv22);
+                                if (cv2 > 0 && cv12 > 0)
+                                    atomicAdd_block(&min_contrib_smem[k2na + k1na2], 2 * cv2 * cv12);
+                                if (cv2 > 0 && cv22 > 0)
+                                    atomicAdd_block(&min_contrib_smem[k2na + k2na2], 2 * cv2 * cv22);
                             }
                         }
                         __syncthreads();
+
+                        #undef IS_INNER
 
                         /* ── Sub-task C: merge partial autoconv into min_contrib ──
                          * After this, min_contrib_smem holds the combined lower-
