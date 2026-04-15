@@ -94,84 +94,76 @@ def _get_svec_arrays(n):
 
 
 def _build_psd_block(n, pick_list, row_offset, sign=-1.0):
-    """Build COO entries for a PSD cone (vectorized)."""
+    """Build COO entries for a PSD cone (vectorized). Returns numpy arrays."""
     a_rows, b_cols, k_svec, sc, flat = _get_svec_arrays(n)
     pick = np.asarray(pick_list)
     y_idx = pick[flat]
     mask = y_idx >= 0
-    rows = (row_offset + k_svec[mask]).tolist()
-    cols = y_idx[mask].tolist()
-    vals = (sign * sc[mask]).tolist()
+    rows = (row_offset + k_svec[mask]).astype(np.intp)
+    cols = y_idx[mask].astype(np.intp)
+    vals = sign * sc[mask]
     return rows, cols, vals
 
 
 def _build_psd_block_diff(n, pick_plus, pick_minus, row_offset):
-    """Build COO for PSD cone: svec(Y+ - Y-) (vectorized)."""
+    """Build COO for PSD cone: svec(Y+ - Y-) (vectorized). Returns numpy arrays."""
     a_rows, b_cols, k_svec, sc, flat = _get_svec_arrays(n)
     pp = np.asarray(pick_plus)
     pm = np.asarray(pick_minus)
     y_plus = pp[flat]
     y_minus = pm[flat]
 
-    rows, cols, vals = [], [], []
+    r_parts, c_parts, v_parts = [], [], []
     mask_p = y_plus >= 0
     if mask_p.any():
-        rows.extend((row_offset + k_svec[mask_p]).tolist())
-        cols.extend(y_plus[mask_p].tolist())
-        vals.extend((-sc[mask_p]).tolist())
+        r_parts.append((row_offset + k_svec[mask_p]).astype(np.intp))
+        c_parts.append(y_plus[mask_p].astype(np.intp))
+        v_parts.append(-sc[mask_p])
     mask_m = y_minus >= 0
     if mask_m.any():
-        rows.extend((row_offset + k_svec[mask_m]).tolist())
-        cols.extend(y_minus[mask_m].tolist())
-        vals.extend(sc[mask_m].tolist())
-    return rows, cols, vals
+        r_parts.append((row_offset + k_svec[mask_m]).astype(np.intp))
+        c_parts.append(y_minus[mask_m].astype(np.intp))
+        v_parts.append(sc[mask_m].copy())
+    if r_parts:
+        return np.concatenate(r_parts), np.concatenate(c_parts), np.concatenate(v_parts)
+    return np.array([], dtype=np.intp), np.array([], dtype=np.intp), np.array([], dtype=np.float64)
 
 
 def _build_window_psd_block(n_loc, t_val, t_pick, ab_eiej_idx, Mw,
                             row_offset, n_y):
-    """Build COO for window PSD cone (vectorized).
-
-    L_W[a,b] = t * y[t_pick[ab]] - sum_ij M_W[ij] * y[abij[ab,ij]]
-    """
+    """Build COO for window PSD cone (vectorized). Returns numpy arrays."""
     a_rows, b_cols, k_svec, sc, flat = _get_svec_arrays(n_loc)
-    n_tri = len(a_rows)
 
-    rows, cols, vals = [], [], []
+    r_parts, c_parts, v_parts = [], [], []
 
     # t * y[t_pick[ab]] term  => A contribution: -t * sc
     tp = np.asarray(t_pick)
     t_idx = tp[flat]
     mask_t = (t_idx >= 0) & (t_val != 0)
     if mask_t.any():
-        rows.extend((row_offset + k_svec[mask_t]).tolist())
-        cols.extend(t_idx[mask_t].tolist())
-        vals.extend((-t_val * sc[mask_t]).tolist())
+        r_parts.append((row_offset + k_svec[mask_t]).astype(np.intp))
+        c_parts.append(t_idx[mask_t].astype(np.intp))
+        v_parts.append(-t_val * sc[mask_t])
 
     # - sum_ij M_W[i,j] * y[abij[a,b,i,j]]  => A contribution: +sc * M_W[i,j]
     if ab_eiej_idx is not None:
         nz_i, nz_j = np.nonzero(Mw)
         if len(nz_i) > 0:
             nz_coeffs = Mw[nz_i, nz_j]
-            # ab_eiej_idx shape: (n_loc, n_loc, d, d)
-            # Gather all (a_row, b_col, nz_i, nz_j) at once
-            y_cols = ab_eiej_idx[a_rows, b_cols][:, nz_i, nz_j]  # (n_tri, n_nz)
-            mask_valid = y_cols >= 0  # (n_tri, n_nz)
+            y_cols = ab_eiej_idx[a_rows, b_cols][:, nz_i, nz_j]
+            mask_valid = y_cols >= 0
 
-            # Broadcast: row_offsets (n_tri,1), k_svec (n_tri,1), sc (n_tri,1)
-            r_base = (row_offset + k_svec)[:, None]  # (n_tri, 1)
-            sc_2d = sc[:, None]                       # (n_tri, 1)
-            coeff_2d = nz_coeffs[None, :]             # (1, n_nz)
+            r_base = (row_offset + k_svec)[:, None]
+            sc_2d = sc[:, None]
+            coeff_2d = nz_coeffs[None, :]
 
-            # Extract valid entries
-            r_flat = np.broadcast_to(r_base, mask_valid.shape)[mask_valid]
-            c_flat = y_cols[mask_valid]
-            v_flat = (sc_2d * coeff_2d)[mask_valid]
+            r_parts.append(np.broadcast_to(r_base, mask_valid.shape)[mask_valid].astype(np.intp))
+            c_parts.append(y_cols[mask_valid].astype(np.intp))
+            v_parts.append((sc_2d * coeff_2d)[mask_valid])
 
-            rows.extend(r_flat.astype(np.intp).tolist())
-            cols.extend(c_flat.astype(np.intp).tolist())
-            vals.extend(v_flat.tolist())
-
-    return rows, cols, vals
+    if r_parts:
+        return np.concatenate(r_parts), np.concatenate(c_parts), np.concatenate(v_parts)
+    return np.array([], dtype=np.intp), np.array([], dtype=np.intp), np.array([], dtype=np.float64)
 
 
 def _build_window_psd_block_split(n_loc, t_pick, ab_eiej_idx, Mw,
@@ -179,22 +171,22 @@ def _build_window_psd_block_split(n_loc, t_pick, ab_eiej_idx, Mw,
     """Build COO for window PSD cone, split into t-dependent and t-independent.
 
     Returns (base_rows, base_cols, base_vals,
-             t_rows, t_cols, t_vals)
+             t_rows, t_cols, t_vals) — all numpy arrays.
     where: full A entries = base + t_val * t_part.
     """
     a_rows, b_cols, k_svec, sc, flat = _get_svec_arrays(n_loc)
 
-    base_rows, base_cols, base_vals = [], [], []
-    t_rows, t_cols, t_vals = [], [], []
+    base_r_parts, base_c_parts, base_v_parts = [], [], []
+    t_r_parts, t_c_parts, t_v_parts = [], [], []
 
     # t * y[t_pick[ab]] => t-dependent part: coefficient is -sc (multiply by t later)
     tp = np.asarray(t_pick)
     t_idx = tp[flat]
     mask_t = t_idx >= 0
     if mask_t.any():
-        t_rows.extend((row_offset + k_svec[mask_t]).tolist())
-        t_cols.extend(t_idx[mask_t].tolist())
-        t_vals.extend((-sc[mask_t]).tolist())
+        t_r_parts.append((row_offset + k_svec[mask_t]).astype(np.intp))
+        t_c_parts.append(t_idx[mask_t].astype(np.intp))
+        t_v_parts.append(-sc[mask_t])
 
     # M_W terms => t-independent (base)
     if ab_eiej_idx is not None:
@@ -208,16 +200,20 @@ def _build_window_psd_block_split(n_loc, t_pick, ab_eiej_idx, Mw,
             sc_2d = sc[:, None]
             coeff_2d = nz_coeffs[None, :]
 
-            r_flat = np.broadcast_to(r_base, mask_valid.shape)[mask_valid]
-            c_flat = y_cols[mask_valid]
-            v_flat = (sc_2d * coeff_2d)[mask_valid]
+            base_r_parts.append(np.broadcast_to(r_base, mask_valid.shape)[mask_valid].astype(np.intp))
+            base_c_parts.append(y_cols[mask_valid].astype(np.intp))
+            base_v_parts.append((sc_2d * coeff_2d)[mask_valid])
 
-            base_rows.extend(r_flat.astype(np.intp).tolist())
-            base_cols.extend(c_flat.astype(np.intp).tolist())
-            base_vals.extend(v_flat.tolist())
-
-    return (base_rows, base_cols, base_vals,
-            t_rows, t_cols, t_vals)
+    _cat = np.concatenate
+    _empty_i = np.array([], dtype=np.intp)
+    _empty_f = np.array([], dtype=np.float64)
+    br = _cat(base_r_parts) if base_r_parts else _empty_i
+    bc = _cat(base_c_parts) if base_c_parts else _empty_i
+    bv = _cat(base_v_parts) if base_v_parts else _empty_f
+    tr = _cat(t_r_parts) if t_r_parts else _empty_i
+    tc = _cat(t_c_parts) if t_c_parts else _empty_i
+    tv = _cat(t_v_parts) if t_v_parts else _empty_f
+    return (br, bc, bv, tr, tc, tv)
 
 
 # =====================================================================
@@ -283,74 +279,73 @@ def _precompute_scs_decomposition(P, add_upper_loc, active_windows):
     psd_svec_total = sum(_svec_dim(s) for s in psd_sizes)
     m = n_z + n_l + psd_svec_total
 
-    # ── Build base and t-coeff COO arrays ──
-    base_rows, base_cols, base_vals = [], [], []
-    t_rows, t_cols, t_vals = [], [], []
+    # ── Build base and t-coeff COO arrays (numpy accumulation) ──
+    base_r_parts, base_c_parts, base_v_parts = [], [], []
+    t_r_parts, t_c_parts, t_v_parts = [], [], []
     b_base = np.zeros(m)
 
     row = 0
 
     # --- Zero cone: y_0 = 1 ---
-    base_rows.append(row)
-    base_cols.append(zero_idx)
-    base_vals.append(1.0)
+    base_r_parts.append(np.array([row], dtype=np.intp))
+    base_c_parts.append(np.array([zero_idx], dtype=np.intp))
+    base_v_parts.append(np.array([1.0]))
     b_base[row] = 1.0
     row += 1
 
-    # --- Zero cone: consistency ---
+    # --- Zero cone: consistency (small, Python loop is fine) ---
+    consist_r, consist_c, consist_v = [], [], []
     for c_cols, c_vals in consist_rows_data:
         for c, v in zip(c_cols, c_vals):
-            base_rows.append(row)
-            base_cols.append(c)
-            base_vals.append(v)
+            consist_r.append(row)
+            consist_c.append(c)
+            consist_v.append(v)
         row += 1
+    if consist_r:
+        base_r_parts.append(np.array(consist_r, dtype=np.intp))
+        base_c_parts.append(np.array(consist_c, dtype=np.intp))
+        base_v_parts.append(np.array(consist_v))
     assert row == n_z
 
     # --- Nonneg cone: y >= 0 ---
-    y_range = np.arange(n_y)
-    base_rows.extend((row + y_range).tolist())
-    base_cols.extend(y_range.tolist())
-    base_vals.extend([-1.0] * n_y)
+    y_range = np.arange(n_y, dtype=np.intp)
+    base_r_parts.append(row + y_range)
+    base_c_parts.append(y_range)
+    base_v_parts.append(np.full(n_y, -1.0))
     row += n_y
 
     # --- Nonneg cone: scalar windows (b = t_val, A is fixed) ---
     scalar_win_start = row
     F_coo = P['F_scipy'].tocoo()
-    base_rows.extend((row + F_coo.row).tolist())
-    base_cols.extend(F_coo.col.tolist())
-    base_vals.extend(F_coo.data.tolist())
+    base_r_parts.append((row + F_coo.row).astype(np.intp))
+    base_c_parts.append(F_coo.col.astype(np.intp))
+    base_v_parts.append(F_coo.data.astype(np.float64))
     row += n_win
 
     # --- Nonneg cone: tau >= 0 ---
-    base_rows.append(row)
-    base_cols.append(TAU)
-    base_vals.append(-1.0)
+    base_r_parts.append(np.array([row], dtype=np.intp))
+    base_c_parts.append(np.array([TAU], dtype=np.intp))
+    base_v_parts.append(np.array([-1.0]))
     row += 1
     assert row == n_z + n_l
 
     # --- PSD cone: moment matrix ---
     r2, c2, v2 = _build_psd_block(n_basis, P['moment_pick'], row)
-    base_rows.extend(r2)
-    base_cols.extend(c2)
-    base_vals.extend(v2)
+    base_r_parts.append(r2); base_c_parts.append(c2); base_v_parts.append(v2)
     row += _svec_dim(n_basis)
 
     # --- PSD cones: mu_i localizing ---
     if order >= 2:
         for i_var in range(d):
             r2, c2, v2 = _build_psd_block(n_loc, P['loc_picks'][i_var], row)
-            base_rows.extend(r2)
-            base_cols.extend(c2)
-            base_vals.extend(v2)
+            base_r_parts.append(r2); base_c_parts.append(c2); base_v_parts.append(v2)
             row += _svec_dim(n_loc)
 
         if add_upper_loc:
             for i_var in range(d):
                 r2, c2, v2 = _build_psd_block_diff(
                     n_loc, P['t_pick'], P['loc_picks'][i_var], row)
-                base_rows.extend(r2)
-                base_cols.extend(c2)
-                base_vals.extend(v2)
+                base_r_parts.append(r2); base_c_parts.append(c2); base_v_parts.append(v2)
                 row += _svec_dim(n_loc)
 
     # --- PSD cones: window localizing (split into base + t-coeff) ---
@@ -360,27 +355,30 @@ def _precompute_scs_decomposition(P, add_upper_loc, active_windows):
         br, bc, bv, tr, tc, tv = _build_window_psd_block_split(
             n_loc, P['t_pick'], P['ab_eiej_idx'],
             P['M_mats'][w], row)
-        base_rows.extend(br)
-        base_cols.extend(bc)
-        base_vals.extend(bv)
-        t_rows.extend(tr)
-        t_cols.extend(tc)
-        t_vals.extend(tv)
+        base_r_parts.append(br); base_c_parts.append(bc); base_v_parts.append(bv)
+        if len(tr) > 0:
+            t_r_parts.append(tr); t_c_parts.append(tc); t_v_parts.append(tv)
 
         # tau*I contribution (base, not t-dependent)
-        base_rows.extend((row + diag_k).tolist())
-        base_cols.extend([TAU] * n_loc)
-        base_vals.extend([-1.0] * n_loc)
+        base_r_parts.append((row + diag_k).astype(np.intp))
+        base_c_parts.append(np.full(n_loc, TAU, dtype=np.intp))
+        base_v_parts.append(np.full(n_loc, -1.0))
         row += _svec_dim(n_loc)
 
     assert row == m, f"row mismatch: {row} != {m}"
 
-    # ── Assemble sparse matrices ──
+    # ── Assemble sparse matrices (single concatenation) ──
+    base_rows = np.concatenate(base_r_parts)
+    base_cols = np.concatenate(base_c_parts)
+    base_vals = np.concatenate(base_v_parts)
     A_base_csc = sp.csc_matrix(
         (base_vals, (base_rows, base_cols)), shape=(m, n_x), dtype=np.float64)
 
-    has_t = bool(t_vals)
+    has_t = bool(t_r_parts)
     if has_t:
+        t_rows = np.concatenate(t_r_parts)
+        t_cols = np.concatenate(t_c_parts)
+        t_vals = np.concatenate(t_v_parts)
         A_t_csc = sp.csc_matrix(
             (t_vals, (t_rows, t_cols)), shape=(m, n_x), dtype=np.float64)
     else:

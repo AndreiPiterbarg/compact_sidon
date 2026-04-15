@@ -451,11 +451,18 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         scs_kwargs['use_indirect'] = True
 
     # Round 0: minimize t
-    print("  [Round 0] SCS minimize t...", flush=True)
+    print("  [Round 0] Minimize t...", flush=True)
     t0 = time.time()
-    data = {'A': A_base, 'b': b_base, 'c': c_obj}
-    solver = scs.SCS(data, cone_base, **scs_kwargs)
-    sol = solver.solve()
+
+    if use_gpu:
+        from admm_gpu_solver import admm_solve
+        sol = admm_solve(A_base, b_base, c_obj, cone_base,
+                         max_iters=scs_max_iters, eps_abs=scs_eps,
+                         eps_rel=scs_eps, device='cuda', verbose=verbose)
+    else:
+        data = {'A': A_base, 'b': b_base, 'c': c_obj}
+        solver = scs.SCS(data, cone_base, **scs_kwargs)
+        sol = solver.solve()
 
     scalar_lb = 0.5
     y_vals = np.zeros(n_y)
@@ -557,6 +564,10 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                     ws_s[n:] = 0
             has_warm[0] = True
 
+        # GPU: persistent solver — reuse factorization + CSR pattern cache
+        gpu_solver = [None]  # mutable ref for closure
+        gpu_tau_col = [None]
+
         def check_feasible(t_val, max_iters_override=None,
                            eps_override=None):
             t_b = time.time()
@@ -571,7 +582,47 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             cur_iters = max_iters_override or scs_max_iters
             cur_eps = eps_override or scs_eps
 
-            # Always create fresh SCS solver (A data changed in-place)
+            if use_gpu:
+                from admm_gpu_solver import ADMMSolver, augment_phase1
+
+                # Phase-1: add tau slack to PSD diagonals, minimize tau.
+                A_p1, b_p1, c_p1, cone_p1, tau_col = augment_phase1(
+                    A_full_t1, b_full_base, cone_full)
+                gpu_tau_col[0] = tau_col
+
+                if gpu_solver[0] is None:
+                    # First call — create persistent solver
+                    gpu_solver[0] = ADMMSolver(
+                        A_p1, b_p1, c_p1, cone_p1,
+                        device='cuda', verbose=False)
+                else:
+                    # Subsequent calls — only update A values + refactor
+                    gpu_solver[0]._update_A(A_p1)
+
+                sol_t = gpu_solver[0].solve(
+                    max_iters=cur_iters, eps_abs=cur_eps, eps_rel=cur_eps)
+
+                # Extract tau and original x (without tau variable)
+                tau_val = sol_t['x'][tau_col] if sol_t['x'] is not None \
+                    else float('inf')
+
+                # Feasibility: tau* <= threshold means PSD constraints are
+                # satisfiable without slack
+                tau_tol = max(cur_eps * 10, 1e-4)
+                feasible = (sol_t['info']['status'] in
+                            ('solved', 'solved_inaccurate')
+                            and tau_val <= tau_tol)
+
+                # Strip tau from x for warm-start compatibility with outer
+                # loop (which uses ws_x of original dimension)
+                sol_orig = dict(sol_t)
+                sol_orig['x'] = sol_t['x'][:meta['n_x']].copy() \
+                    if sol_t['x'] is not None else None
+                _prepare_warm(sol_orig)
+
+                return feasible, sol_orig, build_time
+
+            # CPU SCS path (unchanged)
             kw = dict(max_iters=cur_iters, eps_abs=cur_eps,
                       eps_rel=cur_eps, verbose=False)
             if scs_scale is not None:
