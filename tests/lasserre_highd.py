@@ -66,8 +66,11 @@ Usage:
 """
 import numpy as np
 from scipy import sparse as sp
-from mosek.fusion import (Model, Domain, Expr, Matrix,
-                          ObjectiveSense, SolutionStatus)
+try:
+    from mosek.fusion import (Model, Domain, Expr, Matrix,
+                              ObjectiveSense, SolutionStatus)
+except ImportError:
+    Model = Domain = Expr = Matrix = ObjectiveSense = SolutionStatus = None
 import time
 import sys
 import os
@@ -477,7 +480,7 @@ def _precompute_highd(d, order, cliques, verbose=True):
         er = np.concatenate([rfc, np.arange(n_full, dtype=np.int32)])
         ec = np.concatenate([cfc, pi])
         ev = np.concatenate([vfc, np.full(n_full, -1.0)])
-        consist_eq_lists = (n_full, er.tolist(), ec.tolist(), ev.tolist())
+        consist_eq_lists = (n_full, er, ec, ev)
 
     consist_iq_lists = None
     if n_partial > 0:
@@ -496,7 +499,7 @@ def _precompute_highd(d, order, cliques, verbose=True):
             ir = np.concatenate([rl.astype(np.int32), np.arange(n_iq, dtype=np.int32)])
             ic = np.concatenate([cr_iq[rl, cl].astype(np.int32), pi_iq])
             iv = np.concatenate([np.full(len(rl), -1.0), np.ones(n_iq)])
-            consist_iq_lists = (n_iq, ir.tolist(), ic.tolist(), iv.tolist())
+            consist_iq_lists = (n_iq, ir, ic, iv)
 
     if verbose:
         print(f"    Consistency: {n_full} full equality + "
@@ -725,6 +728,8 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
             clique_windows[c] = []
         clique_windows[c].append(int(w))
 
+    w_arr_np = np.array(windows)  # (n_win, 2): [ell, s_lo]
+
     for c_idx, w_list in clique_windows.items():
         cd = clique_data[c_idx]
         n_cb = cd['loc_size']
@@ -741,31 +746,37 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
         y_abij_local = y_vals[safe_idx]
         y_abij_local[ab_eiej_local < 0] = 0.0
 
-        gi_grid = cd['viol_gi_grid']
+        gi_grid = cd['viol_gi_grid']  # (n_clique, n_clique)
 
-        Mw_stack = []
-        w_indices = []
-        for w in w_list:
-            ell, s_lo = windows[w]
-            coeff = 2.0 * d / ell
-            mask = (gi_grid >= s_lo) & (gi_grid <= s_lo + ell - 2)
-            if not np.any(mask):
-                continue
-            Mw_stack.append(coeff * mask.astype(np.float64))
-            w_indices.append(w)
+        # Vectorized Mw construction: build all window masks at once
+        w_idx_arr = np.array(w_list, dtype=np.int32)
+        w_ells = w_arr_np[w_idx_arr, 0]   # (n_w,)
+        w_slos = w_arr_np[w_idx_arr, 1]   # (n_w,)
+        coeffs = 2.0 * d / w_ells          # (n_w,)
 
-        if not w_indices:
+        # mask[w, i, j] = (gi_grid[i,j] >= s_lo[w]) & (gi_grid[i,j] <= s_lo[w]+ell[w]-2)
+        gi_exp = gi_grid[np.newaxis, :, :]       # (1, nc, nc)
+        lo_exp = w_slos[:, np.newaxis, np.newaxis]  # (n_w, 1, 1)
+        hi_exp = (w_slos + w_ells - 2)[:, np.newaxis, np.newaxis]
+        masks = (gi_exp >= lo_exp) & (gi_exp <= hi_exp)  # (n_w, nc, nc)
+
+        # Filter windows with no active entries
+        has_nonzero = masks.any(axis=(1, 2))
+        if not has_nonzero.any():
             continue
 
-        Mw_all = np.stack(Mw_stack)  # (n_windows, n_clique, n_clique)
+        valid_local = np.where(has_nonzero)[0]
+        w_indices = w_idx_arr[valid_local].tolist()
+        Mw_all = coeffs[valid_local, np.newaxis, np.newaxis] * masks[valid_local].astype(np.float64)
+
         L_q_all = np.einsum('abij,wij->wab', y_abij_local, Mw_all)
         L_all = L_t[np.newaxis, :, :] - L_q_all
         L_all = 0.5 * (L_all + np.swapaxes(L_all, -2, -1))
 
         min_eigs = np.linalg.eigvalsh(L_all)[:, 0]
-        for k, w in enumerate(w_indices):
-            if min_eigs[k] < -tol:
-                violations.append((w, float(min_eigs[k])))
+        violated = min_eigs < -tol
+        for k in np.where(violated)[0]:
+            violations.append((w_indices[k], float(min_eigs[k])))
 
     # ---- Scalar-only check for uncovered windows ----
     # No PSD check for uncovered windows — partial-Q PSD is unsound.
