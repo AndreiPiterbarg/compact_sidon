@@ -989,32 +989,15 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
     P = _precompute_highd(d, order, cliques, verbose)
     n_y = P['n_y']
 
-    # Step 3: Build MOSEK model
-    print("Step 3: Building MOSEK model...", flush=True)
-    t_build = time.time()
-    mdl, y, t_param = _build_model_highd(P, add_upper_loc, verbose)
-    print(f"  Model built in {time.time()-t_build:.1f}s\n", flush=True)
-
-    # Step 4: CG loop
-    print("Step 4: Constraint generation...\n", flush=True)
-
-    def check_feasible(t_val):
-        t_param.setValue(t_val)
-        try:
-            mdl.solve()
-            ps = mdl.getPrimalSolutionStatus()
-            return ps in [SolutionStatus.Optimal, SolutionStatus.Feasible]
-        except Exception as e:
-            if verbose:
-                print(f"    [solver error] t={t_val:.6f}: {e}", flush=True)
-            return False
+    # Step 3+4: Round 0 scalar optimization, then build CG model.
+    # MEMORY CRITICAL: build the scalar model FIRST, dispose it, THEN
+    # build the CG model. Both models hold O(n_y^2 * PSD_dim) internal
+    # memory. Having both alive simultaneously doubles peak memory and
+    # OOMs at n_y > ~40K on 1TB machines.
 
     active_windows = set()
     best_lb = 0.0
 
-    # Round 0: direct optimization (no bisection needed)
-    # All constraints are linear in (t, y) when no PSD windows exist,
-    # so we minimize t directly in a single MOSEK solve.
     print("  [Round 0] Direct scalar optimization...", flush=True)
     t0_r0 = time.time()
 
@@ -1056,6 +1039,8 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
         scalar_lb = 0.5
         y_vals = np.zeros(n_y)
     mdl_sc.dispose()
+    del mdl_sc, y_sc, t_sc  # free references
+    gc_mod.collect()         # force GC before building CG model
 
     best_lb = scalar_lb
 
@@ -1067,10 +1052,27 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
           flush=True)
 
     if len(violations) == 0:
-        mdl.dispose()
         elapsed = time.time() - t_total
         print(f"\n  No violations — scalar bound is exact: {best_lb:.10f}")
-        return {'lb': best_lb, 'd': d, 'order': order, 'elapsed': elapsed}
+        return {'lb': best_lb, 'd': d, 'order': order, 'elapsed': elapsed,
+                'n_y': n_y, 'n_active_windows': 0}
+
+    # NOW build the CG model (after scalar model is fully disposed)
+    print("\n  Building CG model...", flush=True)
+    t_build = time.time()
+    mdl, y, t_param = _build_model_highd(P, add_upper_loc, verbose)
+    print(f"  CG model built in {time.time()-t_build:.1f}s\n", flush=True)
+
+    def check_feasible(t_val):
+        t_param.setValue(t_val)
+        try:
+            mdl.solve()
+            ps = mdl.getPrimalSolutionStatus()
+            return ps in [SolutionStatus.Optimal, SolutionStatus.Feasible]
+        except Exception as e:
+            if verbose:
+                print(f"    [solver error] t={t_val:.6f}: {e}", flush=True)
+            return False
 
     # Add initial violated windows
     n_add = min(max_add_per_round, len(violations))
