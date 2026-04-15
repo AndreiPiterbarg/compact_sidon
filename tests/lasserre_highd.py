@@ -553,7 +553,7 @@ def _build_model_highd(P, add_upper_loc, verbose):
 
     mdl = Model("highd_sparse")
     mdl.setSolverParam("intpntCoTolRelGap", 1e-7)
-    mdl.setSolverParam("numThreads", 0)
+    mdl.setSolverParam("numThreads", 4)
 
     y = mdl.variable("y", n_y, Domain.greaterThan(0.0))
     t_param = mdl.parameter("t")
@@ -1004,7 +1004,7 @@ def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
     # Build a lightweight model with t as a variable
     mdl_sc = Model("scalar_opt")
     mdl_sc.setSolverParam("intpntCoTolRelGap", 1e-7)
-    mdl_sc.setSolverParam("numThreads", 0)
+    mdl_sc.setSolverParam("numThreads", 4)
     y_sc = mdl_sc.variable("y", n_y, Domain.greaterThan(0.0))
     t_sc = mdl_sc.variable("t", 1, Domain.greaterThan(0.0))
 

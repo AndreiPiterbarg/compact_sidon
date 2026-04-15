@@ -39,6 +39,34 @@ def main():
         print(f"MOSEK: {mosek.Env.getversion()}")
     except Exception as e:
         print(f"MOSEK: {e}")
+
+    # Memory monitoring
+    import threading
+    def mem_monitor():
+        import subprocess as _sp
+        while True:
+            try:
+                r = _sp.run(['free', '-g'], capture_output=True, text=True, timeout=5)
+                for line in r.stdout.strip().split('\n'):
+                    if 'Mem' in line:
+                        parts = line.split()
+                        used = int(parts[2])
+                        total = int(parts[1])
+                        print(f"  [MEM] {used}/{total} GB used ({100*used/total:.0f}%)",
+                              flush=True)
+            except Exception:
+                pass
+            time.sleep(30)
+    t_mon = threading.Thread(target=mem_monitor, daemon=True)
+    t_mon.start()
+
+    # System info
+    try:
+        import subprocess as _sp
+        r = _sp.run(['free', '-g'], capture_output=True, text=True, timeout=5)
+        print(f"System RAM: {r.stdout.strip().split(chr(10))[1]}")
+    except Exception:
+        pass
     print(flush=True)
 
     t0 = time.time()
