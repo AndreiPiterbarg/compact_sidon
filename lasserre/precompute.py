@@ -4,7 +4,10 @@ Shared infrastructure used by all Lasserre solvers (CG, enhanced, high-d).
 """
 import numpy as np
 from scipy import sparse as sp
-from mosek.fusion import Model, Domain, Expr, Matrix
+try:
+    from mosek.fusion import Model, Domain, Expr, Matrix
+except ImportError:
+    Model = Domain = Expr = Matrix = None
 import time
 
 from lasserre.core import (
@@ -43,10 +46,12 @@ def _precompute(d, order, verbose=True):
 
     B_hash = _hash_monos(B_arr, bases, prime)
     AB_hash = _hash_add(B_hash[:, None], B_hash[None, :], prime)
-    moment_pick = _hash_lookup(AB_hash, sorted_h, sort_o).ravel().tolist()
+    moment_pick = _hash_lookup(AB_hash, sorted_h, sort_o).ravel()
+    moment_pick_list = moment_pick.tolist()  # for MOSEK y.pick()
 
     loc_picks = []
     t_pick = None
+    t_pick_list = None
     AB_loc_hash = None
     ab_eiej_idx = None
     ab_flat = None
@@ -54,13 +59,14 @@ def _precompute(d, order, verbose=True):
         LB_arr = np.array(loc_basis, dtype=np.int64)
         AB_loc = LB_arr[:, None, :] + LB_arr[None, :, :]
         AB_loc_hash = _hash_monos(AB_loc, bases, prime)
-        t_pick = _hash_lookup(AB_loc_hash, sorted_h, sort_o).ravel().tolist()
+        t_pick = _hash_lookup(AB_loc_hash, sorted_h, sort_o).ravel()
+        t_pick_list = t_pick.tolist()
 
         for i_var in range(d):
             h = _hash_add(AB_loc_hash, bases[i_var], prime)
             picks = _hash_lookup(h, sorted_h, sort_o)
             assert np.all(picks >= 0), f"Missing moments in mu_{i_var} loc"
-            loc_picks.append(picks.ravel().tolist())
+            loc_picks.append(picks.ravel())
 
         EE_hash = _hash_add(bases[:, None], bases[None, :], prime)
         ABIJ_hash = _hash_add(AB_loc_hash[:, :, None, None],
@@ -80,7 +86,8 @@ def _precompute(d, order, verbose=True):
     consist_ei_hash = _hash_add(consist_hash[:, None], bases[None, :], prime)
     consist_ei_idx = _hash_lookup(consist_ei_hash, sorted_h, sort_o)
 
-    f_r, f_c, f_v = [], [], []
+    # Vectorized F_scipy construction (eliminates per-window Python loop)
+    f_r_parts, f_c_parts, f_v_parts = [], [], []
     for w in range(n_win):
         Mw = M_mats[w]
         nz_i, nz_j = np.nonzero(Mw)
@@ -88,15 +95,23 @@ def _precompute(d, order, verbose=True):
             continue
         mi = idx_ij[nz_i, nz_j]
         valid = mi >= 0
-        n_valid = int(valid.sum())
-        if n_valid == 0:
+        if not valid.any():
             continue
-        f_r.extend([w] * n_valid)
-        f_c.extend(mi[valid].tolist())
-        f_v.extend(Mw[nz_i[valid], nz_j[valid]].tolist())
+        f_r_parts.append(np.full(int(valid.sum()), w, dtype=np.int32))
+        f_c_parts.append(mi[valid].astype(np.int32))
+        f_v_parts.append(Mw[nz_i[valid], nz_j[valid]])
+
+    if f_r_parts:
+        f_r_all = np.concatenate(f_r_parts)
+        f_c_all = np.concatenate(f_c_parts)
+        f_v_all = np.concatenate(f_v_parts)
+    else:
+        f_r_all = np.array([], dtype=np.int32)
+        f_c_all = np.array([], dtype=np.int32)
+        f_v_all = np.array([], dtype=np.float64)
 
     F_scipy = sp.csr_matrix(
-        (f_v, (f_r, f_c)), shape=(n_win, n_y), dtype=np.float64)
+        (f_v_all, (f_r_all, f_c_all)), shape=(n_win, n_y), dtype=np.float64)
 
     nontrivial_windows = [w for w in range(n_win)
                           if np.any(M_mats[w] != 0)]
@@ -123,8 +138,12 @@ def _precompute(d, order, verbose=True):
         'mono_list': mono_list, 'idx': idx, 'n_y': n_y,
         'bases': bases, 'prime': prime,
         'sorted_h': sorted_h, 'sort_o': sort_o,
-        'moment_pick': moment_pick,
-        'loc_picks': loc_picks, 't_pick': t_pick,
+        'moment_pick': moment_pick_list,
+        'moment_pick_np': moment_pick,
+        'loc_picks': [lp.tolist() if isinstance(lp, np.ndarray) else lp for lp in loc_picks],
+        'loc_picks_np': loc_picks,
+        't_pick': t_pick_list if t_pick is not None else t_pick,
+        't_pick_np': t_pick,
         'AB_loc_hash': AB_loc_hash, 'ab_eiej_idx': ab_eiej_idx,
         'ab_flat': ab_flat,
         'idx_ij': idx_ij,

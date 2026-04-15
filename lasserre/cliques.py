@@ -5,7 +5,10 @@ and sparse PSD constraint builders for moment, localizing, and window
 localizing matrices.
 """
 import numpy as np
-from mosek.fusion import Domain, Expr, Matrix
+try:
+    from mosek.fusion import Domain, Expr, Matrix
+except ImportError:
+    Domain = Expr = Matrix = None
 
 from lasserre.core import (
     enum_monomials, _hash_monos, _hash_add, _hash_lookup,
@@ -39,14 +42,16 @@ def _build_clique_basis(clique, order, d):
     """Enumerate monomials of degree <= order supported on a clique.
 
     Returns np.ndarray of shape (n_cb, d) with d-dimensional multi-indices.
+    Vectorized: no Python loops in the embedding step.
     """
     s = len(clique)
     local_monos = enum_monomials(s, order)
-    n_cb = len(local_monos)
+    local_arr = np.array(local_monos, dtype=np.int64)  # (n_cb, s)
+    n_cb = len(local_arr)
     embedded = np.zeros((n_cb, d), dtype=np.int64)
-    for j_local, j_global in enumerate(clique):
-        for m_idx, m in enumerate(local_monos):
-            embedded[m_idx, j_global] = m[j_local]
+    clique_arr = np.array(clique)  # (s,)
+    # Vectorized scatter: embedded[:, clique[j]] = local_arr[:, j] for all j
+    embedded[:, clique_arr] = local_arr
     return embedded
 
 
