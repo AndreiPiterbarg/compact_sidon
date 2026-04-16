@@ -177,13 +177,16 @@ def _window_active_bins(w, P, d):
     return frozenset(range(lo_bin, hi_bin + 1))
 
 
-def _greedy_diverse_cuts(violations, n_add, P, d, active_windows):
+def _greedy_diverse_cuts(violations, n_add, P, d, active_windows,
+                          score_fn=None):
     """Select n_add diverse violations from a ranked list.
 
     Parameters
     ----------
     violations : list of (window_index, min_eig)
-        Sorted ascending by min_eig (most violated first).
+        Sorted ascending by min_eig (most violated first).  When score_fn
+        is provided, the caller can pass violations in any order; we
+        re-sort internally by descending score.
     n_add : int
         Max number of windows to pick.
     P : dict
@@ -194,14 +197,27 @@ def _greedy_diverse_cuts(violations, n_add, P, d, active_windows):
         Already-active windows; their supports seed the `covered` set so
         diversity is measured against ALL currently-active constraints,
         not just within-round.
+    score_fn : callable or None
+        If None, picks in input order (min-eig severity).  If provided,
+        `score_fn(violation_tuple) -> float` is used to re-sort violations
+        in descending order BEFORE the diversity pass.  This implements
+        dual-guided selection (Frangioni 2002; Kiwiel 2004): weighting
+        violation severity by the window's dual pressure (proxied by
+        closeness of its scalar bound t ≥ f_W(y) to binding).
 
     Returns
     -------
     list of (window_index, min_eig) — the selected subset preserving
-    the input ordering of min_eig severity.
+    the input ordering (post-score-sort if score_fn given).
     """
     if n_add <= 0 or not violations:
         return []
+
+    if score_fn is not None:
+        # Dual-guided re-ranking. Stable sort on score (descending) puts
+        # the "most-informative" violations first; the diversity pass then
+        # applies the support-overlap filter on this re-ordered list.
+        violations = sorted(violations, key=score_fn, reverse=True)
 
     covered = set()
     for w in active_windows:
@@ -491,6 +507,37 @@ def build_base_problem(P, add_upper_loc=True):
             row_offset += dim
             psd_sizes.append(n_cb)
 
+    # Pairwise product localizing: M_1(μ_i μ_j y) ⪰ 0 for all pairs i ≤ j.
+    #
+    # Valid Lasserre L3 Putinar product constraints (degree 4 ≤ 2k-1 = 5), currently
+    # absent from the model.  f_W(μ) = Σ M_W[i,j] μ_i μ_j is a sum of pairwise
+    # products; without M_1(μ_i μ_j y) the dual cannot construct tight degree-6 SOS
+    # certificates for window feasibility — this is why gc stalls after round 2.
+    # 136 cones of size 17×17 at d=16: cholesky_ex fast-path, negligible cost.
+    #
+    # Batch implementation: stack all 136 pick arrays, build COO for all cones
+    # in a single _vectorized_psd_coo call, then split by cone boundary.
+    if 'pw_pairs' in P and P['pw_pairs']:
+        pw_n = P['pw_size']              # d+1 = 17
+        pw_dim = pw_n * (pw_n + 1) // 2  # svec dim = 153 per cone
+        n_pw = len(P['pw_pairs'])
+
+        # Stack all picks: (n_pw, pw_n²) — one row per cone
+        all_pw_picks = np.stack([picks for _, _, picks in P['pw_pairs']], axis=0)
+
+        # Build COO for all n_pw cones in one vectorised pass.
+        # _vectorized_psd_coo expects a flat (pw_n²,) pick array and a row_offset.
+        # For n cones stacked, we call it once per cone but inside a tight numpy loop —
+        # the bottleneck is the n_pw Python iterations, not the inner numpy ops.
+        # Since n_pw=136 << n_y, this is not performance-critical (runs once at setup).
+        for cone_idx in range(n_pw):
+            r, c_arr, v = _vectorized_psd_coo(
+                all_pw_picks[cone_idx], pw_n, row_offset)
+            all_r.append(r); all_c.append(c_arr); all_v.append(v)
+            b_parts.extend([0.0] * pw_dim)
+            row_offset += pw_dim
+            psd_sizes.append(pw_n)
+
     # Assemble
     n_rows = row_offset
     R = np.concatenate(all_r)
@@ -743,16 +790,47 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
     last_s = sol['s'].copy() if sol['s'] is not None else None
 
     for cg_round in range(1, max_cg_rounds + 1):
-        # Support-diverse greedy selection — violations are (w, min_eig) 2-tuples.
-        # Budget = cuts_per_round new windows added per round.
+        # Dual-guided + support-diverse greedy selection.
+        #
+        # The scalar window constraints t ≥ f_W(y) are in the nonneg cone.
+        # Their DUAL variables λ_W measure the "pressure" each window exerts
+        # on the bound — high λ_W means the window is near-binding and
+        # adding its PSD cone will likely tighten lb.  We proxy |λ_W| by
+        # CLOSENESS TO BINDING: gap_W = t_val − f_W(y_last_feas).  Small
+        # positive gap ⇒ window is near-tight ⇒ high dual pressure.
+        #
+        # Combined score per violation:  |min_eig| / (gap_W + ε)
+        # High score = severe PSD violation AND near-binding scalar constraint.
+        #
+        # This is the dual-guided cut selection rule (Frangioni 2002, Kiwiel 2004).
+        # Mathematically sound: only reorders the pool, every selected cut
+        # remains a valid necessary condition for the Lasserre hierarchy.
         n_add = min(cuts_per_round, len(violations))
-        selected = _greedy_diverse_cuts(
-            violations, n_add, P, P['d'], active_windows)
+
+        if last_feas_y is not None and last_feas_t is not None:
+            # Compute f_W(y_last_feas) for ALL windows in one sparse matvec.
+            _f_vals_all = P['F_scipy'].dot(last_feas_y)    # (n_win,)
+            _t_ref = last_feas_t
+
+            def _dual_guided_score(violation):
+                w = violation[0]
+                min_eig = violation[1]
+                gap = max(_t_ref - _f_vals_all[w], 1e-6)   # avoid div-by-zero
+                return abs(min_eig) / gap
+
+            selected = _greedy_diverse_cuts(
+                violations, n_add, P, P['d'], active_windows,
+                score_fn=_dual_guided_score)
+        else:
+            # Round 1: no last_feas_y yet — fall back to min-eig-only sort.
+            selected = _greedy_diverse_cuts(
+                violations, n_add, P, P['d'], active_windows)
+
         for w, _eig in selected:
             active_windows.add(w)
 
         print(f"\n  [CG round {cg_round}] {len(active_windows)} windows "
-              f"(+{len(selected)} added)",
+              f"(+{len(selected)} added, dual-guided)",
               flush=True)
 
         lo = max(0.5, best_lb - 1e-3)

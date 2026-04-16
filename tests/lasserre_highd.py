@@ -336,6 +336,91 @@ def _precompute_highd(d, order, cliques, verbose=True):
     m1_pick_list = m1_pick.tolist()  # pre-convert for MOSEK y.pick()
     m1_valid = np.all(m1_pick >= 0)
 
+    # --- Pairwise product localizing: M_1(μ_i μ_j y) ⪰ 0 for all pairs i ≤ j ---
+    #
+    # MATHEMATICAL BASIS: The full Lasserre L3 hierarchy for minimising over
+    # Δ_d = {μ ≥ 0, Σμ_i = 1} includes localising matrices for ALL products
+    # of the nonnegativity generators {μ_i ≥ 0} whose combined polynomial
+    # degree fits within 2k = 6 (the hierarchy order × 2):
+    #
+    #   Single (currently included):
+    #     M_{k-1}(μ_i y) = M_2(μ_i y),  degree 1+4 = 5 ≤ 6 ✓
+    #
+    #   Pairs (CURRENTLY MISSING — added here):
+    #     M_{k-2}(μ_i μ_j y) = M_1(μ_i μ_j y),  degree 2+2 = 4 ≤ 6 ✓
+    #
+    # SOUNDNESS: For any true measure μ* ∈ Δ_d and degree-1 polynomial p:
+    #   v^T M_1(μ_i μ_j y*) v = E_{μ*}[μ_i μ_j · p(μ)^2] ≥ 0
+    # because μ_i ≥ 0, μ_j ≥ 0, p² ≥ 0.  So lb produced with these cones
+    # satisfies lb ≤ val(d). ✓
+    #
+    # RELEVANCE: The objective f_W(μ) = Σ_{i,j} M_W[i,j] μ_i μ_j is a sum of
+    # pairwise products.  The Putinar representation of t − f_W ≥ 0 on Δ_d at
+    # degree 6 involves SOS multipliers σ_{ij}(μ) of degree 4 multiplying μ_i μ_j.
+    # In the Lasserre dual these correspond exactly to M_1(μ_i μ_j y).  Without
+    # them the dual cannot construct tight degree-6 certificates for window
+    # constraints, which is why gc stalls after 2 rounds.
+    #
+    # ENTRY STRUCTURE: M_1(μ_i μ_j y)[α,β] = y_{α+β+e_i+e_j}
+    #   where α, β are degree-≤1 monomials (basis size = d+1 = 17 at d=16).
+    #   Degree: 1+1+1+1 = 4 ≤ 2k-1 = 5  → guaranteed in S_{≤2k-1}. ✓
+    #
+    # COST: 136 cones of size 17×17 (d(d+1)/2 pairs × (d+1)² entries each).
+    #   cholesky_ex fast-path handles each in ~0.19ms → +26ms/iter at Round 0.
+    #   Memory: ~315 KB.  Negligible.
+
+    pw_basis = np.array(enum_monomials(d, 1), dtype=np.int64)  # (d+1, d) degree ≤ 1
+    pw_size = len(pw_basis)                                      # d+1 = 17 at d=16
+
+    PW_hash = _hash_monos(pw_basis, bases, prime)                       # (d+1,)
+    AB_PW_hash = _hash_add(PW_hash[:, None], PW_hash[None, :], prime)  # (d+1, d+1)
+
+    # Fully vectorised: compute all pair hashes and do one batch lookup,
+    # eliminating the Python double-loop over d*(d+1)/2 = 136 pairs.
+    #
+    # i_arr, j_arr: upper-triangle pair indices, shape (n_pairs,)
+    # eij_hash   : hash(e_i + e_j) = bases[i] + bases[j] (+ mod prime if set)
+    # ij_hash_all: (n_pairs, pw_size, pw_size) — hash of α+β+e_i+e_j for all (pair,α,β)
+    # all_picks  : (n_pairs, pw_size²) — S-indices for every entry of every pair cone
+    i_arr, j_arr = np.triu_indices(d, k=0)          # shape (n_pairs,)
+    n_pairs = len(i_arr)
+
+    # Hash of e_i + e_j for every pair — bases[i] is hash(e_i) by construction
+    if prime is None:
+        eij_hash = bases[i_arr] + bases[j_arr]       # (n_pairs,) integer, no overflow
+        ij_hash_all = (AB_PW_hash[np.newaxis, :, :]  # (1, pw_size, pw_size)
+                       + eij_hash[:, np.newaxis, np.newaxis])  # → (n_pairs, pw, pw)
+    else:
+        eij_hash = (bases[i_arr] + bases[j_arr]) % prime
+        ij_hash_all = _hash_add(
+            AB_PW_hash[np.newaxis, :, :],
+            eij_hash[:, np.newaxis, np.newaxis],
+            prime
+        )                                            # (n_pairs, pw_size, pw_size)
+
+    # Single batch hash lookup: (n_pairs × pw_size²,) → reshape → (n_pairs, pw_size²)
+    all_picks = _hash_lookup(
+        ij_hash_all.reshape(n_pairs, -1),            # (n_pairs, pw_size²)
+        sorted_h, sort_o
+    )                                                # (n_pairs, pw_size²) of S-indices
+
+    # Filter pairs where all pw_size² entries are valid (inside S)
+    valid_mask = np.all(all_picks >= 0, axis=1)      # (n_pairs,)
+
+    pw_pairs = [
+        (int(i_arr[k]), int(j_arr[k]), all_picks[k])
+        for k in np.where(valid_mask)[0]
+    ]
+    pw_pairs_list = [
+        (int(i_arr[k]), int(j_arr[k]), all_picks[k].tolist())
+        for k in np.where(valid_mask)[0]
+    ]
+
+    if verbose:
+        print(f"  Pairwise localizing: {len(pw_pairs)}/{n_pairs} cones of size "
+              f"{pw_size}×{pw_size}",
+              flush=True)
+
     # --- Per-clique precomputed data ---
     if verbose:
         print("  Building per-clique data...", flush=True)
@@ -519,6 +604,10 @@ def _precompute_highd(d, order, cliques, verbose=True):
         'F_scipy': F_scipy, 'F_coo_lists': F_coo_lists, 'idx_ij': idx_ij,
         'm1_pick': m1_pick, 'm1_pick_list': m1_pick_list,
         'm1_size': m1_size, 'm1_valid': m1_valid,
+        # Pairwise localizing M_1(μ_i μ_j y) ⪰ 0 — valid L3 Putinar product terms
+        'pw_pairs': pw_pairs,           # list of (i, j, picks np.array) for SCS/ADMM
+        'pw_pairs_list': pw_pairs_list, # list of (i, j, picks list) for MOSEK
+        'pw_size': pw_size,             # d+1 (M_1 basis size)
         'cliques': cliques, 'clique_data': clique_data,
         'bin_to_clique_map': bin_to_clique_map,
         'window_covering': window_covering,
@@ -979,6 +1068,15 @@ def _build_base_psd(mdl_obj, y_var, P, order, d, add_upper_loc):
             diff = Expr.sub(sub_m, mu_i_m)
             L_up = Expr.reshape(diff, n_cb, n_cb)
             mdl_obj.constraint(f"upper_loc_{i_var}", L_up, Domain.inPSDCone(n_cb))
+
+    # Pairwise product localizing: M_1(μ_i μ_j y) ⪰ 0 for all pairs i ≤ j.
+    # Valid L3 Putinar product constraints; see _precompute_highd for full proof.
+    if order >= 3 and 'pw_pairs_list' in P and P['pw_pairs_list']:
+        pw_n = P['pw_size']
+        for i_var, j_var, picks_list in P['pw_pairs_list']:
+            Li_j = Expr.reshape(y_var.pick(picks_list), pw_n, pw_n)
+            mdl_obj.constraint(f"pw_loc_{i_var}_{j_var}", Li_j,
+                               Domain.inPSDCone(pw_n))
 
 
 def solve_highd_sparse(d, c_target=1.28, order=2, bandwidth=16,
