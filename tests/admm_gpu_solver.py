@@ -243,8 +243,9 @@ class ConeInfo:
 
         # Precompute batched gather/scatter index tensors per size group
         # This eliminates Python loops in _project_cones_gpu
-        self.batch_gather = {}  # mat_dim -> gather_idx (flat)
-        self.batch_workspace = {}  # mat_dim -> pre-allocated batch matrix
+        self.batch_gather = {}      # mat_dim -> gather_idx (flat)
+        self.batch_gather_2d = {}   # mat_dim -> gather_idx (n_cones, svec_dim)
+        self.batch_workspace = {}   # mat_dim -> pre-allocated batch matrix
         for mat_dim, group in self.size_groups.items():
             idx = self.svec_indices[mat_dim]
             svec_dim = idx['dim']
@@ -253,9 +254,10 @@ class ConeInfo:
             offsets = torch.tensor([s_off for _, s_off, _ in group],
                                    dtype=torch.long, device=device)
             # gather_idx[i] = s_offset[cone_i // svec_dim] + (i % svec_dim)
-            gather_idx = (offsets.unsqueeze(1) +
-                          torch.arange(svec_dim, device=device).unsqueeze(0))
-            self.batch_gather[mat_dim] = gather_idx.reshape(-1)  # flat
+            gather_idx_2d = (offsets.unsqueeze(1) +
+                             torch.arange(svec_dim, device=device).unsqueeze(0))
+            self.batch_gather_2d[mat_dim] = gather_idx_2d  # (n_cones, svec_dim)
+            self.batch_gather[mat_dim] = gather_idx_2d.reshape(-1)  # flat
             # Pre-allocate workspace to avoid per-call allocation
             self.batch_workspace[mat_dim] = torch.zeros(
                 n_cones, mat_dim, mat_dim,
@@ -321,12 +323,14 @@ def _project_cones_gpu(s, cone_info):
             projected = (eigenvectors * eigenvalues.unsqueeze(-2)) @ \
                 eigenvectors.transpose(-1, -2)
 
-            # Write back only the projected (non-PSD) matrices
-            batch[non_psd_idx] = projected
-
-        # Batched scatter: write all svec blocks back at once
-        packed = batch[:, rows, cols] * pack_scale.unsqueeze(0)
-        s[gather_idx] = packed.reshape(-1)
+            # Scatter ONLY modified (non-PSD) cones back — PSD cones
+            # are identity-projected so s already has correct values.
+            packed = projected[:, rows, cols] * pack_scale.unsqueeze(0)
+            # Slice precomputed 2D gather table on GPU — no CPU sync.
+            # batch_gather_2d[mat_dim][i] is the flat s-index row for cone i.
+            gather_2d = cone_info.batch_gather_2d[mat_dim]
+            sub_gather = gather_2d.index_select(0, non_psd_idx).reshape(-1)
+            s[sub_gather] = packed.reshape(-1)
 
 
 # =====================================================================
@@ -391,10 +395,14 @@ class AndersonAccelerator:
         if dF.shape[0] == 0:
             return g_new
 
-        # Gram matrix
+        # Gram matrix with Type-I regularization.
+        # SCS 2.0 (Zhang & O'Donoghue 2020) uses λ=1e-8 to prevent
+        # ill-conditioning of the least-squares solve for PSD cones.
+        # 1e-10 was too small for the 969×969 moment cone in L3 problems,
+        # causing the Gram matrix to approach singularity as iterates
+        # cluster near feasibility, and degrading gamma estimates.
         G = dF @ dF.T  # (active-1, active-1)
-        # Regularize for stability
-        G += 1e-10 * torch.eye(G.shape[0], dtype=self.dtype, device=self.device)
+        G += 1e-8 * torch.eye(G.shape[0], dtype=self.dtype, device=self.device)
 
         rhs = dF @ f_new  # (active-1,)
 
@@ -415,29 +423,49 @@ class AndersonAccelerator:
 # CG solver for large problems (all GPU)
 # =====================================================================
 
-def _torch_cg(matvec_fn, b, x0, maxiter=100, tol=1e-10):
-    """Conjugate gradient on GPU."""
+def _torch_cg(matvec_fn, b, x0, maxiter=100, tol=1e-10, precond_inv=None):
+    """Preconditioned conjugate gradient on GPU.
+
+    precond_inv: 1/diag(M) for diagonal Jacobi preconditioner.
+    If None, standard CG (no preconditioning).
+
+    Optimized: in-place operations to avoid per-iteration tensor allocation,
+    convergence check every 5 iters to reduce GPU→CPU sync points.
+    """
     x = x0.clone()
     r = b - matvec_fn(x)
-    p = r.clone()
-    rs_old = torch.dot(r, r)
 
-    if rs_old.sqrt() < tol:
+    if precond_inv is not None:
+        z = r * precond_inv
+    else:
+        z = r.clone()
+    p = z.clone()
+    rz_old = torch.dot(r, z)
+    tol_sq = tol * tol  # compare squared norms to avoid sqrt
+
+    if torch.dot(r, r).item() < tol_sq:
         return x
 
-    for _ in range(maxiter):
+    for i in range(maxiter):
         Ap = matvec_fn(p)
         pAp = torch.dot(p, Ap)
         if pAp.abs() < 1e-30:
             break
-        alpha = rs_old / pAp
-        x = x + alpha * p
-        r = r - alpha * Ap
-        rs_new = torch.dot(r, r)
-        if rs_new.sqrt() < tol:
-            break
-        p = r + (rs_new / rs_old) * p
-        rs_old = rs_new
+        alpha = rz_old / pAp
+        x.add_(p, alpha=alpha)       # x += alpha * p (in-place)
+        r.sub_(Ap, alpha=alpha)       # r -= alpha * Ap (in-place)
+        # Check convergence every 5 iters (avoid GPU→CPU sync every iter)
+        if (i + 1) % 5 == 0:
+            if torch.dot(r, r).item() < tol_sq:
+                break
+        if precond_inv is not None:
+            z = r * precond_inv
+        else:
+            z = r
+        rz_new = torch.dot(r, z)
+        beta = rz_new / rz_old
+        p.mul_(beta).add_(z)          # p = z + beta * p (in-place)
+        rz_old = rz_new
     return x
 
 
@@ -461,6 +489,9 @@ class _CSRPatternCache:
     The indptr and indices arrays are identical across bisection steps
     (only A.data changes). This avoids 4 redundant H2D transfers per step
     (2 for A, 2 for A^T).
+
+    On first call, also caches the CSC→CSR data permutation so subsequent
+    calls skip .tocsr() and transpose entirely — just permute + transfer.
     """
 
     def __init__(self, device):
@@ -471,34 +502,73 @@ class _CSRPatternCache:
         self._col_T = None
         self._shape = None
         self._shape_T = None
+        # Cached permutations: CSC data -> CSR data ordering
+        self._csc_to_csr_perm = None
+        self._csc_to_csr_T_perm = None
 
     def to_gpu(self, A_csc):
         """Convert A to GPU CSR, caching pattern on first call."""
-        A_csr = A_csc.tocsr()
         if self._crow is None:
-            # First call — transfer everything
+            # First call — full conversion, cache everything
+            A_csr = A_csc.tocsr()
             self._crow = torch.tensor(A_csr.indptr, dtype=torch.int64,
                                       device=self.device)
             self._col = torch.tensor(A_csr.indices, dtype=torch.int64,
                                      device=self.device)
             self._shape = A_csr.shape
-            # Also cache A^T pattern
-            A_T_csr = A_csc.T.tocsc().tocsr()
+
+            # Cache CSC→CSR data permutation
+            # CSC stores column-major, CSR stores row-major. The permutation
+            # maps CSC.data indices to CSR.data indices so we can skip tocsr().
+            A_csc_sorted = A_csc.copy()
+            A_csc_sorted.sort_indices()
+            # Assign unique tags to CSC data entries, convert to CSR, read back order
+            A_tagged = A_csc_sorted.copy()
+            A_tagged.data = np.arange(len(A_tagged.data), dtype=np.float64)
+            A_tagged_csr = A_tagged.tocsr()
+            self._csc_to_csr_perm = A_tagged_csr.data.astype(np.int64)
+
+            # Same for transpose: A^T as CSC → CSR
+            A_T_csc = A_csc.T.tocsc()
+            A_T_csc.sort_indices()
+            A_T_csr = A_T_csc.tocsr()
             self._crow_T = torch.tensor(A_T_csr.indptr, dtype=torch.int64,
                                         device=self.device)
             self._col_T = torch.tensor(A_T_csr.indices, dtype=torch.int64,
                                        device=self.device)
             self._shape_T = A_T_csr.shape
+
+            A_T_tagged = A_T_csc.copy()
+            A_T_tagged.data = np.arange(len(A_T_tagged.data), dtype=np.float64)
+            A_T_tagged_csr = A_T_tagged.tocsr()
+            self._csc_to_csr_T_perm = A_T_tagged_csr.data.astype(np.int64)
+
+            # Also cache the CSC→transpose-CSC data permutation
+            # A_T_csc has its own data ordering different from A_csc
+            # We need: given A_csc.data, produce A_T_csr.data
+            # Use tag tracking: A_csc → tag each entry → transpose → CSC → CSR
+            A_for_T = A_csc_sorted.copy()
+            A_for_T.data = np.arange(len(A_for_T.data), dtype=np.float64)
+            A_T_for_T = A_for_T.T.tocsc()
+            A_T_for_T.sort_indices()
+            A_T_for_T_csr = A_T_for_T.tocsr()
+            # This gives us: A_T_csr.data[i] = A_csc.data[perm[i]]
+            self._csc_to_T_csr_perm = A_T_for_T_csr.data.astype(np.int64)
+
             vals = torch.tensor(A_csr.data, dtype=torch.float64,
                                 device=self.device)
             vals_T = torch.tensor(A_T_csr.data, dtype=torch.float64,
                                   device=self.device)
         else:
-            # Subsequent calls — only transfer values
-            vals = torch.tensor(A_csr.data, dtype=torch.float64,
+            # Subsequent calls — only permute data + transfer (skip tocsr/transpose)
+            # Input must have sorted indices (caller's responsibility)
+            csc_data = A_csc.data
+            csr_data = csc_data[self._csc_to_csr_perm]
+            csr_T_data = csc_data[self._csc_to_T_csr_perm]
+
+            vals = torch.tensor(csr_data, dtype=torch.float64,
                                 device=self.device)
-            A_T_csr = A_csc.T.tocsc().tocsr()
-            vals_T = torch.tensor(A_T_csr.data, dtype=torch.float64,
+            vals_T = torch.tensor(csr_T_data, dtype=torch.float64,
                                   device=self.device)
 
         A_gpu = torch.sparse_csr_tensor(self._crow, self._col, vals,
@@ -592,37 +662,44 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
         cone_groups.append((offset, offset + svec_dim))
         offset += svec_dim
 
-    A_work = A_csc.tocsc().copy()
+    A_work = A_csc.tocsr().copy()
     D = np.ones(m)  # row scaling
     E = np.ones(n)  # col scaling
+    # Pre-compute row index for each data entry (vectorized)
+    _row_idx = np.repeat(np.arange(m, dtype=np.int64), np.diff(A_work.indptr))
+    _nonempty = np.diff(A_work.indptr) > 0
+    _nonempty_starts = A_work.indptr[:-1][_nonempty]
+
     for _ in range(10):
-        # Row scaling (inf-norm)
-        A_abs = A_work.copy()
-        A_abs.data = np.abs(A_abs.data)
-        row_norms = np.array(A_abs.max(axis=1).todense()).ravel()
+        # Row inf-norms (vectorized)
+        abs_data = np.abs(A_work.data)
+        row_norms = np.zeros(m)
+        if len(_nonempty_starts) > 0:
+            row_norms[_nonempty] = np.maximum.reduceat(abs_data, _nonempty_starts)
         row_norms = np.maximum(row_norms, 1e-10)
         d = 1.0 / np.sqrt(row_norms)
-        # Enforce: all rows in same PSD block get same scale (geometric mean)
         for start, end in cone_groups:
             block_d = d[start:end]
             d[start:end] = np.exp(np.mean(np.log(np.maximum(block_d, 1e-20))))
         d = np.clip(d, 1e-4, 1e4)
-        A_work = sp.diags(d) @ A_work
+        A_work.data *= d[_row_idx]
         D *= d
-        # Col scaling (inf-norm)
-        A_abs = A_work.copy()
-        A_abs.data = np.abs(A_abs.data)
-        col_norms = np.array(A_abs.max(axis=0).todense()).ravel()
+        # Col inf-norms (scatter max)
+        abs_data = np.abs(A_work.data)
+        col_norms = np.zeros(n)
+        np.maximum.at(col_norms, A_work.indices, abs_data)
         col_norms = np.maximum(col_norms, 1e-10)
         e = 1.0 / np.sqrt(col_norms)
         e = np.clip(e, 1e-4, 1e4)
-        A_work = A_work @ sp.diags(e)
+        A_work.data *= e[A_work.indices]
         E *= e
     b_scaled = D * b_np
     c_scaled = E * c_np
 
     # ═══ ONE-TIME SETUP: transfer everything to GPU ═══
-    A_gpu = _scipy_to_torch_csr(A_work.tocsc(), device)
+    # A_work is CSR after Ruiz; _scipy_to_torch_csr expects CSC
+    A_work_csc = A_work.tocsc()
+    A_gpu = _scipy_to_torch_csr(A_work_csc, device)
 
     # We also need A^T as sparse CSR for fast A^T @ v
     A_T_csc = A_work.T.tocsc()
@@ -647,15 +724,27 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     else:
         solver_type = 'cg'
         _cg_x_prev = [torch.zeros(n, dtype=torch.float64, device=device)]
+        # Diagonal Jacobi preconditioner for CG path
+        A_work_sq = A_work.copy()
+        A_work_sq.data = A_work_sq.data ** 2
+        _diag_ata = np.array(A_work_sq.sum(axis=0)).ravel()
+        _precond_inv = [torch.tensor(
+            1.0 / (sigma + rho * _diag_ata + 1e-20),
+            dtype=torch.float64, device=device)]
 
     # Mutable rho in a list so closures see updates
     rho_val = [rho]
 
     def _refactor():
-        """Recompute Cholesky factor for current rho."""
+        """Recompute Cholesky factor / preconditioner for current rho."""
         if use_dense:
             M = sigI + rho_val[0] * ATA_dense
             _refactor.L = torch.linalg.cholesky(M)
+        else:
+            # Update preconditioner for new rho
+            _precond_inv[0] = torch.tensor(
+                1.0 / (sigma + rho_val[0] * _diag_ata + 1e-20),
+                dtype=torch.float64, device=device)
 
     _refactor()
 
@@ -669,10 +758,9 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
             def matvec(v):
                 return sigma * v + r * torch.mv(AT_gpu, torch.mv(A_gpu, v))
 
-            # Scale CG iters with problem size: d=32(n=25K)→25, d=64(n=98K)→75
             _cg_maxiter = max(25, min(n // 1000, 100))
             x = _torch_cg(matvec, rhs, _cg_x_prev[0], maxiter=_cg_maxiter,
-                          tol=1e-10)
+                          tol=1e-10, precond_inv=_precond_inv[0])
             _cg_x_prev[0] = x.clone()
             return x
 
@@ -705,21 +793,50 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     final_k = max_iters
     s_prev = ws.s.clone()
 
-    # Adaptive rho: residual balancing with decaying aggressiveness.
-    # Early iters: large rho changes to find the right ballpark fast.
-    # Late iters: tiny rho nudges to avoid shocking near convergence.
-    # This prevents the limit cycle seen with Boyd's fixed-tau rule,
-    # where rho doubles, shocks iterates, recovers, then doubles again.
-    RHO_MAX = 1e4
-    RHO_MIN = 1e-1            # sweep proved rho<0.1 gives worse primal residual
-    RHO_MAX_CHANGE_0 = 5.0   # initial max change factor
-    RHO_DECAY_HALF = 2000    # half-life (slower decay to allow correction)
-    adapt_interval = max(check_interval * 4, 100)
+    # Track last-computed residuals so callers can distinguish genuine
+    # infeasibility ('solved' with tau>tau_tol and tight KKT) from
+    # "solver stalled" (hit iter cap with loose residuals). Without these,
+    # the bisection caller cannot certify an infeasibility verdict.
+    pri_res = float('inf')
+    dual_res = float('inf')
+    eps_pri = 0.0
+    eps_dual = 0.0
 
-    # Anderson acceleration: extrapolate from last aa_mem iterates
+    # Adaptive rho: windowed geometric-mean residual-balancing.
+    # Standard residual-balancing (Boyd 2010) oscillates when the primal/
+    # dual ratio hovers near the threshold — each update overshoots in
+    # opposite directions. SCS-style fix (O'Donoghue 2016, Wohlberg 2017):
+    # maintain a buffer of recent ratios, compute their geometric mean,
+    # and only update rho when the MEAN is consistently off-balance.
+    # Scale by sqrt(mean) not mean — damped step prevents flip-flopping.
+    RHO_MAX = 1e4
+    RHO_MIN = 1e-1
+    RHO_MAX_CHANGE_0 = 5.0
+    RHO_DECAY_HALF = 2000
+    adapt_interval = max(check_interval * 4, 100)
+    _rho_ratio_buf = []          # rolling buffer of pri/dual ratios
+    _RHO_BUF_LEN = 5            # geometric mean window (SCS uses 5)
+    _RHO_THRESH_HI = 3.0        # update if geo-mean > 3   (vs Boyd's >10)
+    _RHO_THRESH_LO = 1.0 / 3.0  # update if geo-mean < 1/3 (vs Boyd's <0.1)
+
+    # Anderson acceleration: extrapolate from last aa_mem iterates.
+    # Key settings derived from Zhang & O'Donoghue (2020) and COSMO.jl:
+    #   aa_interval=10 : let ADMM run 10 iters before each AA application
+    #                    (vs 5 — more ADMM progress between accelerations
+    #                    reduces stale-history risk for adaptive-rho problems)
+    #   aa_mem=5       : SCS default; empirically optimal for conic SDPs
+    #   damping β=0.85 : NeurIPS 2021/arXiv:2202.05295 show damped AA
+    #                    outperforms binary accept/reject on ill-conditioned
+    #                    PSD problems. Prevents overshoot.
+    #   periodic_rst=100: COSMO-style restart every 100 iters (NOT on
+    #                    rejection — resetting on rejection is wrong per
+    #                    SCS/Zhang 2020; the history stays valid after one
+    #                    bad step and helps the NEXT application).
     aa_mem = 5
-    aa = AndersonAccelerator(aa_mem, n + m + m, device)  # state = [x, s, y]
-    aa_interval = 5  # apply every 5 iterations (let ADMM make progress between)
+    aa = AndersonAccelerator(aa_mem, n + m + m, device)
+    aa_interval = 10
+    _AA_BETA = 0.85     # damping coefficient for accepted AA steps
+    _AA_RST_PERIOD = 100  # periodic restart interval (iters, not AA calls)
 
     for k in range(max_iters):
         r = rho_val[0]
@@ -740,19 +857,32 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
         # ── Step 3: dual update ──
         y_new = ws.y + r * (s_new - v_hat)
 
-        # ── Step 4: Anderson acceleration (safeguarded) ──
+        # ── Step 4: Anderson acceleration (damped, safeguarded) ──
+        # Periodic restart (COSMO-style): flush history every 100 iters.
+        # This is the ONLY restart we do — never restart on a single
+        # rejected step (SCS/Zhang 2020: rejection doesn't invalidate
+        # the stored curvature; the next application benefits from it).
+        if k > 0 and k % _AA_RST_PERIOD == 0 and aa.k > 0:
+            aa.k = 0
+            aa.F.zero_()
+            aa.X.zero_()
+
         if (k + 1) % aa_interval == 0 and k > aa_mem * aa_interval:
             u_old = torch.cat([ws.x, ws.s, ws.y])
             u_new = torch.cat([x_new, s_new, y_new])
             u_acc = aa.step(u_old, u_new)
-            # Safeguard: reject if AA step is worse than standard step
             res_std = torch.norm(u_new - u_old)
             res_acc = torch.norm(u_acc - u_old)
-            if res_acc <= 2.0 * res_std:  # accept if not much worse
-                x_new = u_acc[:n]
-                s_new = u_acc[n:n + m]
+            if res_acc <= 2.0 * res_std:
+                # Damped acceptance: β=0.85 interpolation between the
+                # plain ADMM step and the AA step. Prevents overshoot
+                # for ill-conditioned PSD cones (arXiv:2202.05295).
+                u_combined = (1.0 - _AA_BETA) * u_new + _AA_BETA * u_acc
+                x_new = u_combined[:n]
+                s_new = u_combined[n:n + m]
                 _project_cones_gpu(s_new, cone_info)
-                y_new = u_acc[n + m:]
+                y_new = u_combined[n + m:]
+            # Rejection: keep history (do NOT reset here — see comment above).
 
         # Update primal variables
         s_prev.copy_(ws.s)
@@ -790,28 +920,51 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
                 final_k = k + 1
                 break
 
-            # Adaptive rho: residual balancing with decaying aggressiveness
+            # Adaptive rho: windowed geometric-mean residual balancing.
+            # Classic residual balancing (Boyd 2010) fires on every check
+            # and can oscillate when the ratio hovers near the threshold.
+            # SCS fix (O'Donoghue 2016): accumulate 5 ratios first, then
+            # act on their geometric mean. Use sqrt-scaling (Wohlberg 2017)
+            # so each step is damped. Only update when the geometric mean
+            # is conclusively off-balance (>3 or <1/3, not >10 or <0.1).
             if (k + 1) % adapt_interval == 0 and dual_res > 1e-30:
-                # Decaying max change: aggressive early, gentle late
-                max_change = 1.0 + (RHO_MAX_CHANGE_0 - 1.0) / (
-                    1.0 + k / RHO_DECAY_HALF)
-                ratio = (pri_res / dual_res) ** 0.5
-                ratio = max(1.0 / max_change, min(max_change, ratio))
-                rho_new = max(RHO_MIN, min(RHO_MAX, r * ratio))
-                if abs(rho_new - r) / max(r, 1e-12) > 0.01:
-                    ws.y *= (r / rho_new)
-                    rho_val[0] = rho_new
-                    _refactor()
+                _rho_ratio_buf.append(pri_res / (dual_res + 1e-30))
+                if len(_rho_ratio_buf) >= _RHO_BUF_LEN:
+                    import math as _math
+                    geo_mean = _math.exp(
+                        sum(_math.log(max(rv, 1e-30))
+                            for rv in _rho_ratio_buf) / len(_rho_ratio_buf))
+                    _rho_ratio_buf.clear()
+                    if geo_mean > _RHO_THRESH_HI or geo_mean < _RHO_THRESH_LO:
+                        # Damped scale: sqrt(geo_mean) not geo_mean
+                        scale = geo_mean ** 0.5
+                        max_change = 1.0 + (RHO_MAX_CHANGE_0 - 1.0) / (
+                            1.0 + k / RHO_DECAY_HALF)
+                        scale = max(1.0 / max_change, min(max_change, scale))
+                        rho_new = max(RHO_MIN, min(RHO_MAX, r * scale))
+                        if abs(rho_new - r) / max(r, 1e-12) > 0.01:
+                            ws.y *= (r / rho_new)
+                            rho_val[0] = rho_new
+                            _refactor()
         # End convergence check
     else:
         final_k = max_iters
-        # Check final residuals to distinguish "nearly solved" from "infeasible"
+        # Compute final primal AND dual residuals. Both are needed for
+        # downstream infeasibility certification; skipping dual_res (the
+        # previous behavior) leaves callers unable to distinguish a
+        # genuine infeasible problem from ADMM stalling on primal alone.
         Ax_final = torch.mv(A_gpu, ws.x)
-        pri_res_final = torch.norm(Ax_final + ws.s - b).item()
-        eps_pri_final = eps_abs * (m ** 0.5) + eps_rel * max(
+        pri_res = torch.norm(Ax_final + ws.s - b).item()
+        s_diff_final = ws.s - s_prev
+        dual_res = (rho_val[0] * torch.norm(
+            torch.mv(AT_gpu, s_diff_final))).item()
+        eps_pri = eps_abs * (m ** 0.5) + eps_rel * max(
             torch.norm(Ax_final).item(), torch.norm(ws.s).item(),
             torch.norm(b).item())
-        if pri_res_final < 10.0 * eps_pri_final:
+        eps_dual = eps_abs * (n ** 0.5) + eps_rel * max(
+            torch.norm(torch.mv(AT_gpu, ws.y)).item(),
+            torch.norm(c).item())
+        if pri_res < 10.0 * eps_pri:
             status = 'solved_inaccurate'
         else:
             status = 'infeasible_inaccurate'
@@ -825,23 +978,30 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     if status in ('solved', 'solved_inaccurate'):
         max_psd_violation = 0.0
         for mat_dim, group in cone_info.size_groups.items():
+            n_cones = len(group)
             idx = cone_info.svec_indices[mat_dim]
             rows_idx = idx['rows']
             cols_idx = idx['cols']
             unpack_scale = idx['unpack_scale']
             svec_dim = idx['dim']
+            gather_idx = cone_info.batch_gather[mat_dim]
 
-            batch = torch.zeros(len(group), mat_dim, mat_dim,
+            # Batched gather (same as _project_cones_gpu — no Python loop)
+            svec_flat = ws.s[gather_idx].reshape(n_cones, svec_dim)
+            svec_flat = svec_flat * unpack_scale.unsqueeze(0)
+            batch = torch.zeros(n_cones, mat_dim, mat_dim,
                                 dtype=torch.float64, device=device)
-            for bi, (_, s_off, _) in enumerate(group):
-                svec_block = ws.s[s_off:s_off + svec_dim]
-                vals = svec_block * unpack_scale
-                batch[bi, rows_idx, cols_idx] = vals
-                batch[bi, cols_idx, rows_idx] = vals
+            batch[:, rows_idx, cols_idx] = svec_flat
+            batch[:, cols_idx, rows_idx] = svec_flat
 
-            eigs = torch.linalg.eigvalsh(batch)
-            min_eig = eigs[:, 0].min().item()
-            max_psd_violation = max(max_psd_violation, -min_eig)
+            # Fast path: cholesky_ex (~144x cheaper than eigvalsh per CLAUDE.md).
+            # If all matrices factor, they're PSD (min_eig >= 0) — skip eigh.
+            _, info = torch.linalg.cholesky_ex(batch)
+            non_psd_mask = info > 0
+            if non_psd_mask.any():
+                eigs = torch.linalg.eigvalsh(batch[non_psd_mask])
+                min_eig = eigs[:, 0].min().item()
+                max_psd_violation = max(max_psd_violation, -min_eig)
 
         # If PSD blocks have significantly negative eigenvalues, reclassify
         psd_tol = max(eps_abs * 100, 1e-3)
@@ -877,6 +1037,13 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
             'dobj': dobj,
             'setup_time': setup_time,
             'solve_time': solve_time,
+            # Last-measured residuals on the SCALED problem (for caller-side
+            # verdict certification). Zero-initialized if no convergence
+            # check fired; finite values only after at least one check.
+            'pri_res': pri_res,
+            'dual_res': dual_res,
+            'eps_pri': eps_pri,
+            'eps_dual': eps_dual,
         }
     }
 
@@ -893,7 +1060,7 @@ class ADMMSolver:
     """
 
     def __init__(self, A_csc, b_np, c_np, cone, *,
-                 sigma=1e-6, rho=0.5, alpha=1.0,
+                 sigma=1e-6, rho=0.1, alpha=1.0,
                  device='cuda', verbose=False):
         self.device = device
         self.sigma = sigma
@@ -905,26 +1072,129 @@ class ADMMSolver:
         self.m = m
         self.n = n
 
-        # Transfer to GPU
-        self.b = torch.tensor(b_np, dtype=torch.float64, device=device)
-        self.c = torch.tensor(c_np, dtype=torch.float64, device=device)
         self.cone_info = ConeInfo(cone, device)
 
         # CSR pattern cache — avoids re-transferring indptr/indices
         self._csr_cache = _CSRPatternCache(device)
 
-        # Pre-allocate sigI once (must be before _update_A which uses it)
-        self._sigI = sigma * torch.eye(n, dtype=torch.float64, device=device)
+        # Pre-allocate sigI only for Cholesky path (n < 5000).
+        # For CG path (n >= 5000), sigma*I is applied implicitly.
+        if n < 5000:
+            self._sigI = sigma * torch.eye(n, dtype=torch.float64, device=device)
 
-        # Store A data for in-place update
+        # ── Ruiz equilibration: compute D, E ONCE from first A ──
+        self._D, self._E = self._compute_ruiz(A_csc, cone)
+        self._D_gpu = torch.tensor(self._D, dtype=torch.float64, device=device)
+        self._E_gpu = torch.tensor(self._E, dtype=torch.float64, device=device)
+
+        # Scale b, c (stored scaled on GPU)
+        self._b_orig = b_np.copy()
+        self._c_orig = c_np.copy()
+        # Cache unscaled b, c on GPU so post-solve obj computation doesn't
+        # rebuild tensors per solve call (one H2D + alloc saved per step).
+        self._b_orig_gpu = torch.tensor(b_np, dtype=torch.float64, device=device)
+        self._c_orig_gpu = torch.tensor(c_np, dtype=torch.float64, device=device)
+        self.b = torch.tensor(self._D * b_np, dtype=torch.float64, device=device)
+        self.c = torch.tensor(self._E * c_np, dtype=torch.float64, device=device)
+
+        # Store A data for in-place update (applies cached D, E)
         self._update_A(A_csc)
 
         # Workspace
         self.ws = _ADMMWorkspace(n, m, device)
 
+    def _compute_ruiz(self, A_csc, cone):
+        """Compute Ruiz row/col scaling D, E from A and cone structure.
+
+        PSD cone rows within the same block share one scaling factor
+        (geometric mean) to preserve svec packing.
+
+        Optimized: in-place data scaling, avoid redundant .copy(), CSR for
+        row norms (CSR.max(axis=1) is O(nnz), CSC.max(axis=1) is O(m*n)).
+        5 iterations is sufficient for convergence.
+        """
+        z_dim = cone.get('z', 0)
+        l_dim = cone.get('l', 0)
+        psd_sizes = list(cone.get('s', []))
+
+        # Build cone boundary groups
+        cone_groups = []
+        psd_start = z_dim + l_dim
+        offset = psd_start
+        for pdim in psd_sizes:
+            svec_dim = pdim * (pdim + 1) // 2
+            cone_groups.append((offset, offset + svec_dim))
+            offset += svec_dim
+
+        m, n = A_csc.shape
+        # Work in CSR for fast row operations
+        A_csr = A_csc.tocsr().copy()
+        D = np.ones(m)
+        E = np.ones(n)
+
+        # Pre-compute row index for each data entry (vectorized)
+        row_indices = np.repeat(np.arange(m, dtype=np.int64),
+                                np.diff(A_csr.indptr))
+        # Mask for non-empty rows (for reduceat)
+        nonempty = np.diff(A_csr.indptr) > 0
+        nonempty_starts = A_csr.indptr[:-1][nonempty]
+
+        for _ in range(10):
+            # Row inf-norms (vectorized segmented max)
+            abs_data = np.abs(A_csr.data)
+            row_norms = np.zeros(m)
+            if len(nonempty_starts) > 0:
+                row_maxes = np.maximum.reduceat(abs_data, nonempty_starts)
+                row_norms[nonempty] = row_maxes
+            row_norms = np.maximum(row_norms, 1e-10)
+            d = 1.0 / np.sqrt(row_norms)
+            for start_r, end_r in cone_groups:
+                block_d = d[start_r:end_r]
+                d[start_r:end_r] = np.exp(np.mean(np.log(
+                    np.maximum(block_d, 1e-20))))
+            d = np.clip(d, 1e-4, 1e4)
+            # In-place row scaling (vectorized)
+            A_csr.data *= d[row_indices]
+            D *= d
+
+            # Col inf-norms (scatter max)
+            abs_data = np.abs(A_csr.data)
+            col_norms = np.zeros(n)
+            np.maximum.at(col_norms, A_csr.indices, abs_data)
+            col_norms = np.maximum(col_norms, 1e-10)
+            e = 1.0 / np.sqrt(col_norms)
+            e = np.clip(e, 1e-4, 1e4)
+            # In-place col scaling (vectorized)
+            A_csr.data *= e[A_csr.indices]
+            E *= e
+
+        return D, E
+
     def _update_A(self, A_csc):
-        """Update A matrix on GPU and refactor."""
-        self.A_gpu, self.AT_gpu = self._csr_cache.to_gpu(A_csc)
+        """Update A matrix on GPU, applying cached Ruiz scaling.
+
+        Optimization: pre-computes per-entry Ruiz scale factors on first call
+        so subsequent calls skip sp.diags(D) @ A @ sp.diags(E) (830ms → ~50ms).
+        """
+        A_csc_sorted = A_csc.tocsc()
+        A_csc_sorted.sort_indices()
+
+        if not hasattr(self, '_ruiz_entry_scale'):
+            # First call: compute per-entry scale D[row]*E[col] and cache
+            # CSC stores entries in column-major order: for each col j,
+            # rows are A.indices[A.indptr[j]:A.indptr[j+1]]
+            rows = A_csc_sorted.indices
+            cols = np.repeat(np.arange(A_csc_sorted.shape[1], dtype=np.int64),
+                             np.diff(A_csc_sorted.indptr))
+            self._ruiz_entry_scale = self._D[rows] * self._E[cols]
+            self._ruiz_col_idx = cols  # cached for diag_ata computation
+
+        # Fast path: element-wise multiply (no sparse matrix multiply)
+        scaled_data = A_csc_sorted.data * self._ruiz_entry_scale
+        # Reuse structure from input (no copy needed — _csr_cache only reads data)
+        A_csc_sorted.data = scaled_data
+
+        self.A_gpu, self.AT_gpu = self._csr_cache.to_gpu(A_csc_sorted)
 
         n = self.n
         if n < 5000:
@@ -937,6 +1207,28 @@ class ADMMSolver:
             if not hasattr(self, '_cg_x_prev'):
                 self._cg_x_prev = torch.zeros(n, dtype=torch.float64,
                                               device=self.device)
+            # Diagonal Jacobi preconditioner: M_inv = 1/(sigma + rho*diag(ATA))
+            # diag(ATA)[j] = ||A[:,j]||^2 (column-wise squared norm)
+            # Compute without copying sparse matrix: bincount on column indices
+            diag_ata = np.bincount(self._ruiz_col_idx,
+                                   weights=scaled_data ** 2,
+                                   minlength=n)
+            self._precond_inv = torch.tensor(
+                1.0 / (self.sigma + self.rho * diag_ata + 1e-20),
+                dtype=torch.float64, device=self.device)
+
+    def update_b(self, b_np):
+        """Update b vector with cached Ruiz scaling.
+
+        Reuses self.b's GPU buffer — avoids per-call tensor alloc + keeps
+        downstream tensor views valid.
+        """
+        scaled = self._D * b_np
+        if self.b.shape[0] == scaled.shape[0]:
+            self.b.copy_(torch.from_numpy(scaled))
+        else:
+            self.b = torch.tensor(scaled, dtype=torch.float64,
+                                  device=self.device)
 
     def update_A_data(self, base_data, t_data, t_val, A_template):
         """In-place update of A matrix data for new t_val.
@@ -949,8 +1241,14 @@ class ADMMSolver:
         self._update_A(A_template)
 
     def solve(self, *, max_iters=50000, eps_abs=1e-6, eps_rel=1e-6,
-              warm_start=None, check_interval=10):
-        """Run ADMM solve with current A, b, c."""
+              warm_start=None, check_interval=10, tau_col=None,
+              tau_tol=1e-4):
+        """Run ADMM solve with current A, b, c.
+
+        If tau_col is set, enable early tau classification:
+        - Early FEASIBLE: tau <= tau_tol (safe — just moves hi down)
+        - Early INFEASIBLE: tau >> tau_tol and stable (conservative)
+        """
         import time
 
         n, m = self.n, self.m
@@ -976,11 +1274,12 @@ class ADMMSolver:
                 return sigma * v + rho * torch.mv(AT_gpu, torch.mv(A_gpu, v))
 
             cg_prev = self._cg_x_prev
+            precond_inv = getattr(self, '_precond_inv', None)
 
             def solve_fn(rhs):
                 _cg_maxiter = max(25, min(self.n // 1000, 100))
                 x = _torch_cg(matvec, rhs, cg_prev, maxiter=_cg_maxiter,
-                              tol=1e-10)
+                              tol=1e-10, precond_inv=precond_inv)
                 cg_prev.copy_(x)
                 return x
 
@@ -1007,6 +1306,25 @@ class ADMMSolver:
         final_k = max_iters
         s_prev = ws.s.clone()
 
+        # Track last-measured residuals so the bisection caller can
+        # distinguish 'solved+tau>tau_tol' (certified infeasibility) from
+        # 'solved_inaccurate+tau>tau_tol' (iter-cap stall — uncertain).
+        # Without these the caller cannot tell the two cases apart and
+        # risks moving the bisection bracket on an uncertified verdict.
+        pri_res = float('inf')
+        dual_res = float('inf')
+        eps_pri = 0.0
+        eps_dual = 0.0
+
+        # Anderson acceleration — same improved config as admm_solve:
+        # interval=10, damping β=0.85, periodic restart every 100 iters.
+        # History is NEVER reset on safeguard rejection (see admm_solve).
+        aa_mem = 5
+        aa = AndersonAccelerator(aa_mem, n + m + m, device)
+        aa_interval = 10
+        _AA_BETA = 0.85
+        _AA_RST_PERIOD = 100
+
         for k in range(max_iters):
             # x-update
             v = rho * (b - ws.s) - ws.y
@@ -1022,10 +1340,34 @@ class ADMMSolver:
             s_new = s_input
 
             # dual update
-            ws.y = ws.y + rho * (s_new - v_hat)
+            y_new = ws.y + rho * (s_new - v_hat)
+
+            # Anderson acceleration (damped, safeguarded, periodic restart).
+            # Periodic restart only — never on rejection (see admm_solve).
+            if k > 0 and k % _AA_RST_PERIOD == 0 and aa.k > 0:
+                aa.k = 0
+                aa.F.zero_()
+                aa.X.zero_()
+
+            if (k + 1) % aa_interval == 0 and k > aa_mem * aa_interval:
+                u_old = torch.cat([ws.x, ws.s, ws.y])
+                u_new = torch.cat([x_new, s_new, y_new])
+                u_acc = aa.step(u_old, u_new)
+                res_std = torch.norm(u_new - u_old)
+                res_acc = torch.norm(u_acc - u_old)
+                if res_acc <= 2.0 * res_std:
+                    # Damped acceptance (β=0.85) — prevents overshoot on
+                    # ill-conditioned PSD cones (arXiv:2202.05295).
+                    u_combined = (1.0 - _AA_BETA) * u_new + _AA_BETA * u_acc
+                    x_new = u_combined[:n]
+                    s_new = u_combined[n:n + m]
+                    _project_cones_gpu(s_new, cone_info)
+                    y_new = u_combined[n + m:]
+
             ws.x = x_new
             s_prev.copy_(ws.s)
             ws.s = s_new
+            ws.y = y_new
 
             # convergence check
             if (k + 1) % check_interval == 0:
@@ -1056,36 +1398,76 @@ class ADMMSolver:
                     status = 'solved'
                     final_k = k + 1
                     break
+
+                # ── Early tau classification (phase-1 problems) ──
+                # ONLY early feasible exit. Early infeasible is UNSOUND:
+                # ADMM tau at low iteration count is meaningless — it
+                # caused lb=1.388 > val(32) in the 2026-04-16 run by
+                # misclassifying t=1.388 as infeasible after 110 iters.
+                if tau_col is not None and (k + 1) >= 50:
+                    tau_now = ws.x[tau_col].item()
+
+                    # SAFE: early feasible (tau small → hi moves down)
+                    if (tau_now <= tau_tol
+                            and pri_res < 10 * eps_pri):
+                        status = 'solved'
+                        final_k = k + 1
+                        break
         else:
             final_k = max_iters
+            # Compute BOTH primal and dual residuals at the final iterate
+            # (previously only pri was computed). Callers rely on dual_res
+            # being finite to certify an infeasibility verdict — leaving
+            # it at inf silently degrades every infeas classification to
+            # 'uncertain' upstream.
             Ax_final = torch.mv(A_gpu, ws.x)
-            pri_res_final = torch.norm(Ax_final + ws.s - b).item()
-            eps_pri_final = eps_abs * (m ** 0.5) + eps_rel * max(
+            pri_res = torch.norm(Ax_final + ws.s - b).item()
+            s_diff_final = ws.s - s_prev
+            dual_res = (rho * torch.norm(
+                torch.mv(AT_gpu, s_diff_final))).item()
+            eps_pri = eps_abs * (m ** 0.5) + eps_rel * max(
                 torch.norm(Ax_final).item(), torch.norm(ws.s).item(),
                 torch.norm(b).item())
-            if pri_res_final < 10.0 * eps_pri_final:
+            eps_dual = eps_abs * (n ** 0.5) + eps_rel * max(
+                torch.norm(torch.mv(AT_gpu, ws.y)).item(),
+                torch.norm(c).item())
+            if pri_res < 10.0 * eps_pri:
                 status = 'solved_inaccurate'
             else:
                 status = 'infeasible_inaccurate'
 
         solve_time = time.time() - t_solve
-        pobj = torch.dot(c, ws.x).item()
-        dobj = -torch.dot(b, ws.y).item()
+
+        # ── Unscale: x_orig = E * x_scaled, s_orig = s/D, y_orig = D * y ──
+        x_unscaled = ws.x * self._E_gpu
+        s_unscaled = ws.s / self._D_gpu
+        y_unscaled = ws.y * self._D_gpu
+
+        pobj = torch.dot(self._c_orig_gpu, x_unscaled).item()
+        dobj = -torch.dot(self._b_orig_gpu, y_unscaled).item()
 
         if self.verbose:
             print(f"  ADMM: {final_k} iters, {solve_time:.3f}s, "
                   f"status={status}")
 
         return {
-            'x': ws.x.cpu().numpy(),
-            'y': ws.y.cpu().numpy(),
-            's': ws.s.cpu().numpy(),
+            'x': x_unscaled.cpu().numpy(),
+            'y': y_unscaled.cpu().numpy(),
+            's': s_unscaled.cpu().numpy(),
             'info': {
                 'iter': final_k,
                 'status': status,
                 'pobj': pobj,
                 'dobj': dobj,
                 'solve_time': solve_time,
+                # Residuals on the SCALED problem (unscaling only divides
+                # by D/E norms, not informative for the KKT verdict).
+                # pri_res, dual_res finite only after at least one
+                # check_interval fire; else left at inf.
+                'pri_res': pri_res,
+                'dual_res': dual_res,
+                'eps_pri': eps_pri,
+                'eps_dual': eps_dual,
             }
         }
 
