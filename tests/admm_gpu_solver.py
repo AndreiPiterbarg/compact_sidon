@@ -531,9 +531,9 @@ class _ADMMWorkspace:
 
 def admm_solve(A_csc, b_np, c_np, cone, *,
                max_iters=50000, eps_abs=1e-6, eps_rel=1e-6,
-               sigma=1e-6, rho=0.1, alpha=1.0,
+               sigma=1e-6, rho=0.5, alpha=1.0,
                device='cuda', warm_start=None, verbose=False,
-               check_interval=25):
+               check_interval=10):
     """Fully GPU ADMM solver for conic programs.
 
     Solves: min c^T x  s.t. Ax + s = b, s in K
@@ -705,12 +705,16 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     final_k = max_iters
     s_prev = ws.s.clone()
 
-    # Adaptive rho parameters (Boyd et al. Section 3.4.1)
-    RHO_ADAPT_MU = 10.0   # adapt only when ratio exceeds this
-    RHO_ADAPT_TAU = 2.0    # multiplicative factor per adaptation
+    # Adaptive rho: residual balancing with decaying aggressiveness.
+    # Early iters: large rho changes to find the right ballpark fast.
+    # Late iters: tiny rho nudges to avoid shocking near convergence.
+    # This prevents the limit cycle seen with Boyd's fixed-tau rule,
+    # where rho doubles, shocks iterates, recovers, then doubles again.
     RHO_MAX = 1e4
-    RHO_MIN = 1e-2         # don't drop rho too low (makes ADMM too loose)
-    adapt_interval = max(check_interval * 4, 100)  # adapt less frequently
+    RHO_MIN = 1e-1            # sweep proved rho<0.1 gives worse primal residual
+    RHO_MAX_CHANGE_0 = 5.0   # initial max change factor
+    RHO_DECAY_HALF = 2000    # half-life (slower decay to allow correction)
+    adapt_interval = max(check_interval * 4, 100)
 
     # Anderson acceleration: extrapolate from last aa_mem iterates
     aa_mem = 5
@@ -786,15 +790,17 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
                 final_k = k + 1
                 break
 
-            # Adaptive rho (Boyd et al. Section 3.4.1)
-            if (k + 1) % adapt_interval == 0:
-                if pri_res > RHO_ADAPT_MU * dual_res and r < RHO_MAX:
-                    rho_val[0] = min(r * RHO_ADAPT_TAU, RHO_MAX)
-                    ws.y *= (r / rho_val[0])  # rescale dual
-                    _refactor()
-                elif dual_res > RHO_ADAPT_MU * pri_res and r > RHO_MIN:
-                    rho_val[0] = max(r / RHO_ADAPT_TAU, RHO_MIN)
-                    ws.y *= (r / rho_val[0])  # rescale dual
+            # Adaptive rho: residual balancing with decaying aggressiveness
+            if (k + 1) % adapt_interval == 0 and dual_res > 1e-30:
+                # Decaying max change: aggressive early, gentle late
+                max_change = 1.0 + (RHO_MAX_CHANGE_0 - 1.0) / (
+                    1.0 + k / RHO_DECAY_HALF)
+                ratio = (pri_res / dual_res) ** 0.5
+                ratio = max(1.0 / max_change, min(max_change, ratio))
+                rho_new = max(RHO_MIN, min(RHO_MAX, r * ratio))
+                if abs(rho_new - r) / max(r, 1e-12) > 0.01:
+                    ws.y *= (r / rho_new)
+                    rho_val[0] = rho_new
                     _refactor()
         # End convergence check
     else:
@@ -887,7 +893,7 @@ class ADMMSolver:
     """
 
     def __init__(self, A_csc, b_np, c_np, cone, *,
-                 sigma=1e-6, rho=0.1, alpha=1.0,
+                 sigma=1e-6, rho=0.5, alpha=1.0,
                  device='cuda', verbose=False):
         self.device = device
         self.sigma = sigma
@@ -943,7 +949,7 @@ class ADMMSolver:
         self._update_A(A_template)
 
     def solve(self, *, max_iters=50000, eps_abs=1e-6, eps_rel=1e-6,
-              warm_start=None, check_interval=25):
+              warm_start=None, check_interval=10):
         """Run ADMM solve with current A, b, c."""
         import time
 

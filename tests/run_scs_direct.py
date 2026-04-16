@@ -481,7 +481,7 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
 
     if not violations:
         elapsed = time.time() - t_total
-        return _result(best_lb, d, order, bandwidth, n_y, 0, elapsed)
+        return _result(best_lb, d, order, bandwidth, n_y, 0, elapsed, y_vals)
 
     # CG rounds
     last_x = sol['x'].copy() if sol['x'] is not None else None
@@ -585,9 +585,26 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             if use_gpu:
                 from admm_gpu_solver import ADMMSolver, augment_phase1
 
+                # Fix t = t_val via equality constraint before phase-1.
+                # Without this, x[t_col] is free and the solver picks it
+                # large enough to satisfy scalar window constraints
+                # f_W(y) - t <= 0 for ANY t_val, making the problem always
+                # feasible. With the fix, scalar windows become
+                # f_W(y) <= t_val, giving correct infeasibility detection.
+                n_cols_full = A_full_t1.shape[1]
+                fix_t_row = sp.csc_matrix(
+                    ([1.0], ([0], [meta['t_col']])),
+                    shape=(1, n_cols_full))
+                A_fixed = sp.vstack([fix_t_row, A_full_t1], format='csc')
+                A_fixed.sort_indices()
+                b_fixed = np.insert(b_full_base, 0, t_val)
+                cone_fixed = {'z': cone_full['z'] + 1,
+                              'l': cone_full['l'],
+                              's': cone_full['s']}
+
                 # Phase-1: add tau slack to PSD diagonals, minimize tau.
                 A_p1, b_p1, c_p1, cone_p1, tau_col = augment_phase1(
-                    A_full_t1, b_full_base, cone_full)
+                    A_fixed, b_fixed, cone_fixed)
                 gpu_tau_col[0] = tau_col
 
                 if gpu_solver[0] is None:
@@ -613,8 +630,7 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                             ('solved', 'solved_inaccurate')
                             and tau_val <= tau_tol)
 
-                # Strip tau from x for warm-start compatibility with outer
-                # loop (which uses ws_x of original dimension)
+                # Strip tau + fix_t row from x for warm-start compatibility
                 sol_orig = dict(sol_t)
                 sol_orig['x'] = sol_t['x'][:meta['n_x']].copy() \
                     if sol_t['x'] is not None else None
@@ -763,11 +779,13 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             break
 
     elapsed = time.time() - t_total
+    # Keep best feasible y for proof/verification
+    best_y = last_feas_y if last_feas_y is not None else y_vals
     return _result(best_lb, d, order, bandwidth, n_y,
-                   len(active_windows), elapsed)
+                   len(active_windows), elapsed, best_y)
 
 
-def _result(lb, d, order, bw, n_y, n_active, elapsed):
+def _result(lb, d, order, bw, n_y, n_active, elapsed, y_solution=None):
     v = val_d_known.get(d, 0)
     gc = (lb - 1) / (v - 1) * 100 if v > 1 else 0
     sound = lb <= v + 1e-4 if v > 0 else True
@@ -776,6 +794,7 @@ def _result(lb, d, order, bw, n_y, n_active, elapsed):
         'n_y': n_y, 'n_active_windows': n_active,
         'gap_closure': gc, 'elapsed': elapsed, 'sound': sound,
         'solver': 'scs_direct',
+        'y_solution': y_solution,
     }
 
 
@@ -836,12 +855,22 @@ def main():
     print(f"{'='*70}")
 
     tag = f"d{args.d}_o{args.order}_bw{args.bw}_scs"
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       '..', 'data', f'result_{tag}.json')
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            '..', 'data')
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Save solution vector (proof artifact)
+    y_sol = r.pop('y_solution', None)
+    if y_sol is not None:
+        y_path = os.path.join(data_dir, f'solution_{tag}.npy')
+        np.save(y_path, y_sol)
+        print(f"Solution vector saved to {y_path} ({len(y_sol)} entries)")
+
+    # Save result JSON
+    out = os.path.join(data_dir, f'result_{tag}.json')
     with open(out, 'w') as f:
         json.dump(r, f, indent=2, default=str)
-    print(f"Saved to {out}")
+    print(f"Result saved to {out}")
 
 
 if __name__ == '__main__':
