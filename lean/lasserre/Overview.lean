@@ -33,3 +33,9 @@ import lasserre.NumericalCertification
 import lasserre.Soundness
 import lasserre.Bridge
 import lasserre.Guardrails
+-- Proved mathematical foundations (no sorry)
+import lasserre.ProofPartialConsistency
+import lasserre.ProofRelaxation
+import lasserre.ProofPSDSubmatrix
+import lasserre.ProofSimplexMoments
+import lasserre.ProofSoundnessChain
