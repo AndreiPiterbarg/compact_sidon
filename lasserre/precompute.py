@@ -149,7 +149,8 @@ def _precompute(d, order, verbose=True):
         'idx_ij': idx_ij,
         'consist_mono': consist_mono,
         'consist_idx': consist_idx, 'consist_ei_idx': consist_ei_idx,
-        'f_r': f_r, 'f_c': f_c, 'f_v': f_v,
+        'f_r': f_r_all, 'f_c': f_c_all, 'f_v': f_v_all,
+        'F_coo_lists': (f_r_all, f_c_all, f_v_all),
         'F_scipy': F_scipy,
         'nontrivial_windows': nontrivial_windows,
     }
