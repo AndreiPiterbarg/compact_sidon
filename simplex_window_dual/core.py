@@ -68,6 +68,11 @@ def window_quadratic_coefficients(
 
 def evaluate_quadratic_polynomial(coeffs: Dict[Monomial, float], x: np.ndarray) -> float:
     """Evaluate a sparse quadratic polynomial at x."""
+    return evaluate_polynomial(coeffs, x)
+
+
+def evaluate_polynomial(coeffs: Dict[Monomial, float], x: np.ndarray) -> float:
+    """Evaluate a sparse polynomial at x."""
     total = 0.0
     for mono, coeff in coeffs.items():
         term = coeff

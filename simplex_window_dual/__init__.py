@@ -17,10 +17,26 @@ from simplex_window_dual.core import (
     up_to_degree_monomials,
     window_quadratic_coefficients,
 )
+from simplex_window_dual.degree1 import (
+    Degree1CertificateProblem,
+    Degree1CertificateResult,
+    build_degree1_problem,
+    degree1_identity_coefficients,
+    degree1_rhs_polynomial,
+    evaluate_degree1_rhs_on_simplex,
+    solve_degree1_feasibility,
+)
 from simplex_window_dual.simplex_qp import solve_simplex_quadratic
 
 __all__ = [
+    "Degree1CertificateProblem",
+    "Degree1CertificateResult",
+    "build_degree1_problem",
+    "degree1_identity_coefficients",
+    "degree1_rhs_polynomial",
     "exact_degree_monomials",
+    "evaluate_degree1_rhs_on_simplex",
+    "solve_degree1_feasibility",
     "solve_simplex_quadratic",
     "up_to_degree_monomials",
     "window_quadratic_coefficients",
