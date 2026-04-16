@@ -456,9 +456,12 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
 
     if use_gpu:
         from admm_gpu_solver import admm_solve
+        # Round 0 only needs a rough scalar bound — use loose eps.
+        # Tight eps (1e-7) causes adaptive rho oscillation in admm_solve.
+        r0_eps = max(scs_eps, 1e-5)
         sol = admm_solve(A_base, b_base, c_obj, cone_base,
-                         max_iters=scs_max_iters, eps_abs=scs_eps,
-                         eps_rel=scs_eps, device='cuda', verbose=verbose)
+                         max_iters=scs_max_iters, eps_abs=r0_eps,
+                         eps_rel=r0_eps, device='cuda', verbose=verbose)
     else:
         data = {'A': A_base, 'b': b_base, 'c': c_obj}
         solver = scs.SCS(data, cone_base, **scs_kwargs)
@@ -568,14 +571,67 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         gpu_solver = [None]  # mutable ref for closure
         gpu_tau_col = [None]
 
+        # Pre-build the fix_t + phase-1 augmented pattern ONCE per CG round.
+        # Only A.data and b[0] change per bisection step.
+        from admm_gpu_solver import ADMMSolver, augment_phase1
+
+        n_cols_full = A_full_t1.shape[1]
+        fix_t_row = sp.csc_matrix(
+            ([1.0], ([0], [meta['t_col']])),
+            shape=(1, n_cols_full))
+
+        # Build augmented pattern at t=1 and t=2 to extract base/t decomposition
+        A_fixed_t1 = sp.vstack([fix_t_row, A_full_t1], format='csc')
+        A_fixed_t1.sort_indices()
+        b_fixed_t1 = np.insert(b_full_base, 0, 1.0)
+        cone_fixed = {'z': cone_full['z'] + 1,
+                      'l': cone_full['l'],
+                      's': cone_full['s']}
+
+        A_p1_t1, b_p1_t1, c_p1_cached, cone_p1_cached, tau_col_cached = \
+            augment_phase1(A_fixed_t1, b_fixed_t1, cone_fixed)
+
+        # Build at t=2 to extract t-dependent part of the full augmented matrix
+        if has_t_full:
+            _tmp_data = A_full_t1.data.copy()
+            np.add(full_base_data, 2.0 * full_t_data, out=A_full_t1.data)
+            A_fixed_t2 = sp.vstack([fix_t_row, A_full_t1], format='csc')
+            A_fixed_t2.sort_indices()
+            b_fixed_t2 = np.insert(b_full_base, 0, 2.0)
+            A_p1_t2, b_p1_t2, _, _, _ = augment_phase1(
+                A_fixed_t2, b_fixed_t2, cone_fixed)
+            # Extract decomposition in augmented space
+            aug_t_data = A_p1_t2.data - A_p1_t1.data
+            aug_base_data = A_p1_t1.data - aug_t_data
+            aug_b_t_data = b_p1_t2 - b_p1_t1
+            aug_b_base_data = b_p1_t1 - aug_b_t_data
+            # Restore A_full_t1.data
+            np.copyto(A_full_t1.data, _tmp_data)
+        else:
+            aug_t_data = None
+            aug_base_data = A_p1_t1.data.copy()
+            aug_b_t_data = None
+            aug_b_base_data = b_p1_t1.copy()
+
+        gpu_tau_col[0] = tau_col_cached
+
+        # Reusable template — only .data and b change per step
+        A_p1_template = A_p1_t1.copy()
+        b_p1_template = b_p1_t1.copy()
+
         def check_feasible(t_val, max_iters_override=None,
                            eps_override=None):
             t_b = time.time()
 
-            # In-place update: A.data = base + t * t_part
-            if has_t_full:
-                np.add(full_base_data, t_val * full_t_data,
-                       out=A_full_t1.data)
+            # In-place update of augmented A and b for this t_val
+            if aug_t_data is not None:
+                np.add(aug_base_data, t_val * aug_t_data,
+                       out=A_p1_template.data)
+                np.add(aug_b_base_data, t_val * aug_b_t_data,
+                       out=b_p1_template)
+            else:
+                np.copyto(A_p1_template.data, aug_base_data)
+                np.copyto(b_p1_template, aug_b_base_data)
 
             build_time = time.time() - t_b
 
@@ -583,41 +639,27 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             cur_eps = eps_override or scs_eps
 
             if use_gpu:
-                from admm_gpu_solver import ADMMSolver, augment_phase1
-
-                # Fix t = t_val via equality constraint before phase-1.
-                # Without this, x[t_col] is free and the solver picks it
-                # large enough to satisfy scalar window constraints
-                # f_W(y) - t <= 0 for ANY t_val, making the problem always
-                # feasible. With the fix, scalar windows become
-                # f_W(y) <= t_val, giving correct infeasibility detection.
-                n_cols_full = A_full_t1.shape[1]
-                fix_t_row = sp.csc_matrix(
-                    ([1.0], ([0], [meta['t_col']])),
-                    shape=(1, n_cols_full))
-                A_fixed = sp.vstack([fix_t_row, A_full_t1], format='csc')
-                A_fixed.sort_indices()
-                b_fixed = np.insert(b_full_base, 0, t_val)
-                cone_fixed = {'z': cone_full['z'] + 1,
-                              'l': cone_full['l'],
-                              's': cone_full['s']}
-
-                # Phase-1: add tau slack to PSD diagonals, minimize tau.
-                A_p1, b_p1, c_p1, cone_p1, tau_col = augment_phase1(
-                    A_fixed, b_fixed, cone_fixed)
-                gpu_tau_col[0] = tau_col
-
                 if gpu_solver[0] is None:
-                    # First call — create persistent solver
+                    # rho=0.1 proven 10-20x faster than rho=0.5
+                    # for phase-1 problems (sweep_bisection.py)
                     gpu_solver[0] = ADMMSolver(
-                        A_p1, b_p1, c_p1, cone_p1,
+                        A_p1_template, b_p1_template, c_p1_cached,
+                        cone_p1_cached, rho=0.1,
                         device='cuda', verbose=False)
+                    # Warm-up: 100 iters at initial t to seed workspace
+                    gpu_solver[0].solve(
+                        max_iters=100, eps_abs=1.0, eps_rel=1.0,
+                        tau_col=tau_col_cached)
                 else:
-                    # Subsequent calls — only update A values + refactor
-                    gpu_solver[0]._update_A(A_p1)
+                    gpu_solver[0]._update_A(A_p1_template)
+                    gpu_solver[0].update_b(b_p1_template)
+
+                tau_col = gpu_tau_col[0]
+                tau_tol = max(cur_eps * 10, 1e-4)
 
                 sol_t = gpu_solver[0].solve(
-                    max_iters=cur_iters, eps_abs=cur_eps, eps_rel=cur_eps)
+                    max_iters=cur_iters, eps_abs=cur_eps, eps_rel=cur_eps,
+                    tau_col=tau_col, tau_tol=tau_tol)
 
                 # Extract tau and original x (without tau variable)
                 tau_val = sol_t['x'][tau_col] if sol_t['x'] is not None \
@@ -625,7 +667,6 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
 
                 # Feasibility: tau* <= threshold means PSD constraints are
                 # satisfiable without slack
-                tau_tol = max(cur_eps * 10, 1e-4)
                 feasible = (sol_t['info']['status'] in
                             ('solved', 'solved_inaccurate')
                             and tau_val <= tau_tol)
@@ -673,9 +714,15 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             ws_s[:n] = last_s[:n]
         has_warm[0] = last_x is not None
 
-        # Ensure hi feasible
+        # Ensure hi feasible — coarse budget only.
+        # Bug fix 2026-04-16: without overrides, check_feasible uses
+        # the full scs_max_iters (20K) and scs_eps (1e-7). If the
+        # solver doesn't early-exit, this takes 20K × 80ms = 27 min
+        # PER CALL. Coarse budget is sufficient: we only need
+        # feas/infeas classification, not precision.
         for _ in range(10):
-            feas, sol_hi, bt = check_feasible(hi)
+            feas, sol_hi, bt = check_feasible(
+                hi, max_iters_override=800, eps_override=1e-5)
             if feas:
                 break
             hi *= 1.5
@@ -695,16 +742,18 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         last_feas_t = None
 
         for step in range(n_bisect):
-            # Graduated iteration budget: coarse early, fine late
-            if step < 3:
+            # Graduated iteration budget — tuned via sweep_bisection.py.
+            # With rho=0.1 + Ruiz, most steps converge in 100-500 iters.
+            # Early tau classification handles the rest.
+            if step < 4:
                 adaptive_iters = min(scs_max_iters, 800)
-                adaptive_eps = scs_eps * 5
-            elif step < 6:
+                adaptive_eps = max(scs_eps, 1e-5)
+            elif step < 10:
                 adaptive_iters = min(scs_max_iters, 2000)
-                adaptive_eps = scs_eps * 3
+                adaptive_eps = max(scs_eps, 1e-6)
             else:
-                adaptive_iters = min(scs_max_iters, 5000)
-                adaptive_eps = scs_eps * 2
+                adaptive_iters = min(scs_max_iters, 4000)
+                adaptive_eps = scs_eps
 
             # Tau-interpolation: jump closer to boundary once we have
             # tau from both sides (same technique as lasserre_scs.py)
@@ -747,7 +796,7 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                   flush=True)
 
             # Early termination: interval converged
-            if hi - lo < 1e-8 and step >= 4:
+            if hi - lo < 5e-4 and step >= 4:
                 print(f"    Converged: interval {hi-lo:.2e} < 1e-8",
                       flush=True)
                 break
@@ -764,6 +813,23 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         v = val_d_known.get(d, 0)
         gc = (best_lb - 1) / (v - 1) * 100 if v > 1 else 0
         print(f"    lb={lb:.10f} (+{improvement:.2e}) gc={gc:.1f}%", flush=True)
+
+        # ── Save checkpoint after each CG round ──
+        _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 '..', 'data')
+        os.makedirs(_data_dir, exist_ok=True)
+        _tag = f"d{d}_o{order}_bw{bandwidth}_scs"
+        _best_y = last_feas_y if last_feas_y is not None else ws_x[:n_y].copy()
+        _ckpt = _result(best_lb, d, order, bandwidth, n_y,
+                        len(active_windows), time.time() - t_total, _best_y)
+        _ckpt['cg_round'] = cg_round
+        _y_sol = _ckpt.pop('y_solution', None)
+        if _y_sol is not None:
+            np.save(os.path.join(_data_dir, f'solution_{_tag}_cg{cg_round}.npy'),
+                    _y_sol)
+        with open(os.path.join(_data_dir, f'result_{_tag}_cg{cg_round}.json'), 'w') as _f:
+            json.dump(_ckpt, _f, indent=2, default=str)
+        print(f"    Checkpoint saved: cg{cg_round} lb={best_lb:.10f}", flush=True)
 
         # Use saved y* from bisection (avoids extra solve, like CUDA's
         # incremental approach — reuse existing work instead of recomputing)
@@ -804,7 +870,7 @@ def main():
     parser.add_argument('--order', type=int, default=3)
     parser.add_argument('--bw', type=int, required=True)
     parser.add_argument('--cg-rounds', type=int, default=10)
-    parser.add_argument('--bisect', type=int, default=12)
+    parser.add_argument('--bisect', type=int, default=10)
     parser.add_argument('--gpu', action='store_true')
     parser.add_argument('--scs-iters', type=int, default=100000)
     parser.add_argument('--scs-eps', type=float, default=1e-5)
