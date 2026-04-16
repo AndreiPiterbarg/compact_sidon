@@ -1,4 +1,4 @@
-"""Degree-1 window-multiplier LP certificates on the simplex."""
+"""Polynomial window-multiplier LP certificates on the simplex."""
 
 from __future__ import annotations
 
@@ -18,15 +18,16 @@ from simplex_window_dual.core import (
 
 
 @dataclass(frozen=True)
-class Degree1CertificateProblem:
+class MultiplierCertificateProblem:
     d: int
+    multiplier_degree: int
     windows: Tuple[Tuple[int, int], ...]
-    monomials_deg3: Tuple[Monomial, ...]
-    monomials_deg2: Tuple[Monomial, ...]
-    a_slice: slice
-    b_slice: slice
-    n_slice: slice
-    h_slice: slice
+    multiplier_monomials: Tuple[Monomial, ...]
+    slack_monomials: Tuple[Monomial, ...]
+    equality_monomials: Tuple[Monomial, ...]
+    multiplier_slice: slice
+    slack_slice: slice
+    equality_slice: slice
     n_vars: int
     a_eq_base: sp.csc_matrix
     a_eq_alpha: sp.csc_matrix
@@ -35,7 +36,7 @@ class Degree1CertificateProblem:
 
 
 @dataclass(frozen=True)
-class Degree1CertificateResult:
+class MultiplierCertificateResult:
     success: bool
     alpha: float
     status: int
@@ -46,49 +47,41 @@ class Degree1CertificateResult:
     def constant_window_weights(self) -> np.ndarray | None:
         return None if self.x is None else self.x
 
-
-def _unit_monomials(d: int) -> Tuple[Monomial, ...]:
-    out = []
-    for i in range(d):
-        mono = [0] * d
-        mono[i] = 1
-        out.append(tuple(mono))
-    return tuple(out)
-
-
-def build_degree1_problem(d: int) -> Degree1CertificateProblem:
-    """Build the fixed-structure LP for degree-1 dual certificates.
+def build_multiplier_problem(
+    d: int,
+    multiplier_degree: int,
+) -> MultiplierCertificateProblem:
+    """Build the fixed-structure LP for polynomial dual certificates.
 
     The feasibility problem at target alpha is
 
-        sum_W (a_W + sum_i b_{W,i} x_i) (f_W(x) - alpha)
+        sum_W Lambda_W(x) (f_W(x) - alpha)
           = N(x) + (1 - sum_i x_i) H(x)
 
     with:
-      - a_W, b_{W,i} >= 0
-      - N having nonnegative coefficients in all monomials of degree <= 3
-      - H free, degree <= 2
-      - sum_W a_W = 1 normalization
+      - each Lambda_W having nonnegative coefficients, degree <= multiplier_degree
+      - N having nonnegative coefficients, degree <= multiplier_degree + 2
+      - H free, degree <= multiplier_degree + 1
+      - sum_W coeff(Lambda_W, 1) = 1 normalization
 
     For x in the simplex, the RHS reduces to N(x) >= 0. Therefore if the LP is
     feasible, max_W f_W(x) >= alpha for every simplex point x.
     """
     windows, f_coeffs = window_quadratic_coefficients(d)
-    monomials_deg3 = up_to_degree_monomials(d, 3)
-    monomials_deg2 = up_to_degree_monomials(d, 2)
-    idx_deg3 = {mono: idx for idx, mono in enumerate(monomials_deg3)}
-    idx_deg2 = {mono: idx for idx, mono in enumerate(monomials_deg2)}
+    multiplier_monomials = up_to_degree_monomials(d, multiplier_degree)
+    slack_monomials = up_to_degree_monomials(d, multiplier_degree + 2)
+    equality_monomials = up_to_degree_monomials(d, multiplier_degree + 1)
+    idx_slack = {mono: idx for idx, mono in enumerate(slack_monomials)}
+    idx_equality = {mono: idx for idx, mono in enumerate(equality_monomials)}
 
     n_windows = len(windows)
     k = 0
-    a_slice = slice(k, k + n_windows)
-    k += n_windows
-    b_slice = slice(k, k + n_windows * d)
-    k += n_windows * d
-    n_slice = slice(k, k + len(monomials_deg3))
-    k += len(monomials_deg3)
-    h_slice = slice(k, k + len(monomials_deg2))
-    k += len(monomials_deg2)
+    multiplier_slice = slice(k, k + n_windows * len(multiplier_monomials))
+    k += n_windows * len(multiplier_monomials)
+    slack_slice = slice(k, k + len(slack_monomials))
+    k += len(slack_monomials)
+    equality_slice = slice(k, k + len(equality_monomials))
+    k += len(equality_monomials)
     n_vars = k
 
     rows_base = []
@@ -97,72 +90,56 @@ def build_degree1_problem(d: int) -> Degree1CertificateProblem:
     rows_alpha = []
     cols_alpha = []
     vals_alpha = []
-    b_eq = np.zeros(len(monomials_deg3) + 1, dtype=np.float64)
+    b_eq = np.zeros(len(slack_monomials) + 1, dtype=np.float64)
 
     zero = tuple(0 for _ in range(d))
-    unit_monos = _unit_monomials(d)
+    multiplier_zero_idx = multiplier_monomials.index(zero)
 
-    for row_idx, mono in enumerate(monomials_deg3):
-        # Window quadratic coefficients from a_W * f_W(x)
+    for row_idx, mono in enumerate(slack_monomials):
+        # Window coefficients from Lambda_W(x) * f_W(x)
         for w_idx, coeff in enumerate(f_coeffs):
-            value = coeff.get(mono, 0.0)
-            if value:
-                rows_base.append(row_idx)
-                cols_base.append(a_slice.start + w_idx)
-                vals_base.append(value)
+            for gamma_idx, gamma in enumerate(multiplier_monomials):
+                gamma_arr = np.array(gamma, dtype=np.int64)
+                mono_arr = np.array(mono, dtype=np.int64)
+                if np.any(mono_arr < gamma_arr):
+                    continue
+                residual = tuple((mono_arr - gamma_arr).tolist())
+                value = coeff.get(residual, 0.0)
+                if value:
+                    rows_base.append(row_idx)
+                    cols_base.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + gamma_idx)
+                    vals_base.append(value)
 
-        # Window quadratic coefficients from b_{W,i} * x_i * f_W(x)
-        for w_idx, coeff in enumerate(f_coeffs):
-            for i in range(d):
-                shifted = list(mono)
-                if shifted[i] >= 1:
-                    shifted[i] -= 1
-                    value = coeff.get(tuple(shifted), 0.0)
-                    if value:
-                        rows_base.append(row_idx)
-                        cols_base.append(b_slice.start + w_idx * d + i)
-                        vals_base.append(value)
-
-        # Alpha contributions: -alpha * a_W to the constant monomial
-        if mono == zero:
-            for w_idx in range(n_windows):
-                rows_alpha.append(row_idx)
-                cols_alpha.append(a_slice.start + w_idx)
-                vals_alpha.append(-1.0)
-
-        # Alpha contributions: -alpha * b_{W,i} to the degree-1 monomial x_i
-        for i, unit in enumerate(unit_monos):
-            if mono == unit:
-                for w_idx in range(n_windows):
+                if mono == gamma:
                     rows_alpha.append(row_idx)
-                    cols_alpha.append(b_slice.start + w_idx * d + i)
+                    cols_alpha.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + gamma_idx)
                     vals_alpha.append(-1.0)
 
         # -N(x)
         rows_base.append(row_idx)
-        cols_base.append(n_slice.start + idx_deg3[mono])
+        cols_base.append(slack_slice.start + idx_slack[mono])
         vals_base.append(-1.0)
 
         # -(1 - sum x_i) H(x) = -H(x) + sum_i x_i H(x)
-        if mono in idx_deg2:
+        if mono in idx_equality:
             rows_base.append(row_idx)
-            cols_base.append(h_slice.start + idx_deg2[mono])
+            cols_base.append(equality_slice.start + idx_equality[mono])
             vals_base.append(-1.0)
         for i in range(d):
             shifted = list(mono)
             if shifted[i] >= 1:
                 shifted[i] -= 1
                 shifted_mono = tuple(shifted)
-                if shifted_mono in idx_deg2:
+                if shifted_mono in idx_equality:
                     rows_base.append(row_idx)
-                    cols_base.append(h_slice.start + idx_deg2[shifted_mono])
+                    cols_base.append(equality_slice.start + idx_equality[shifted_mono])
                     vals_base.append(1.0)
 
-    # Normalization: sum_W a_W = 1
-    norm_row = len(monomials_deg3)
+    # Normalization: sum_W coeff(Lambda_W, 1) = 1
+    norm_row = len(slack_monomials)
     for w_idx in range(n_windows):
         rows_base.append(norm_row)
-        cols_base.append(a_slice.start + w_idx)
+        cols_base.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + multiplier_zero_idx)
         vals_base.append(1.0)
     b_eq[norm_row] = 1.0
 
@@ -178,21 +155,21 @@ def build_degree1_problem(d: int) -> Degree1CertificateProblem:
     )
 
     bounds = (
-        ((0.0, None),) * n_windows
-        + ((0.0, None),) * (n_windows * d)
-        + ((0.0, None),) * len(monomials_deg3)
-        + ((None, None),) * len(monomials_deg2)
+        ((0.0, None),) * (n_windows * len(multiplier_monomials))
+        + ((0.0, None),) * len(slack_monomials)
+        + ((None, None),) * len(equality_monomials)
     )
 
-    return Degree1CertificateProblem(
+    return MultiplierCertificateProblem(
         d=d,
+        multiplier_degree=multiplier_degree,
         windows=windows,
-        monomials_deg3=monomials_deg3,
-        monomials_deg2=monomials_deg2,
-        a_slice=a_slice,
-        b_slice=b_slice,
-        n_slice=n_slice,
-        h_slice=h_slice,
+        multiplier_monomials=multiplier_monomials,
+        slack_monomials=slack_monomials,
+        equality_monomials=equality_monomials,
+        multiplier_slice=multiplier_slice,
+        slack_slice=slack_slice,
+        equality_slice=equality_slice,
         n_vars=n_vars,
         a_eq_base=a_eq_base,
         a_eq_alpha=a_eq_alpha,
@@ -201,11 +178,11 @@ def build_degree1_problem(d: int) -> Degree1CertificateProblem:
     )
 
 
-def solve_degree1_feasibility(
-    problem: Degree1CertificateProblem,
+def solve_multiplier_feasibility(
+    problem: MultiplierCertificateProblem,
     alpha: float,
-) -> Degree1CertificateResult:
-    """Solve the degree-1 LP feasibility problem at fixed alpha."""
+) -> MultiplierCertificateResult:
+    """Solve the polynomial-multiplier LP feasibility problem at fixed alpha."""
     a_eq = problem.a_eq_base + alpha * problem.a_eq_alpha
     objective = np.zeros(problem.n_vars, dtype=np.float64)
     res = linprog(
@@ -215,7 +192,7 @@ def solve_degree1_feasibility(
         bounds=problem.bounds,
         method="highs",
     )
-    return Degree1CertificateResult(
+    return MultiplierCertificateResult(
         success=bool(res.success),
         alpha=alpha,
         status=int(res.status),
@@ -225,8 +202,8 @@ def solve_degree1_feasibility(
 
 
 def degree1_identity_coefficients(
-    problem: Degree1CertificateProblem,
-    result: Degree1CertificateResult,
+    problem: MultiplierCertificateProblem,
+    result: MultiplierCertificateResult,
 ) -> Dict[Monomial, float]:
     """Return the coefficient residuals of the certificate identity.
 
@@ -240,29 +217,44 @@ def degree1_identity_coefficients(
     coeff_vector -= problem.b_eq
     return {
         mono: float(coeff_vector[idx])
-        for idx, mono in enumerate(problem.monomials_deg3)
+        for idx, mono in enumerate(problem.slack_monomials)
     }
 
 
 def degree1_rhs_polynomial(
-    problem: Degree1CertificateProblem,
-    result: Degree1CertificateResult,
+    problem: MultiplierCertificateProblem,
+    result: MultiplierCertificateResult,
 ) -> Dict[Monomial, float]:
     """Return the nonnegative slack polynomial N(x)."""
     if result.x is None:
         raise ValueError("certificate has no primal vector")
-    start = problem.n_slice.start
+    start = problem.slack_slice.start
     return {
         mono: float(result.x[start + idx])
-        for idx, mono in enumerate(problem.monomials_deg3)
+        for idx, mono in enumerate(problem.slack_monomials)
         if result.x[start + idx] > 1e-12
     }
 
 
 def evaluate_degree1_rhs_on_simplex(
-    problem: Degree1CertificateProblem,
-    result: Degree1CertificateResult,
+    problem: MultiplierCertificateProblem,
+    result: MultiplierCertificateResult,
     x: np.ndarray,
 ) -> float:
     """Evaluate the certified RHS N(x) on a simplex point."""
     return evaluate_polynomial(degree1_rhs_polynomial(problem, result), x)
+
+
+Degree1CertificateProblem = MultiplierCertificateProblem
+Degree1CertificateResult = MultiplierCertificateResult
+
+
+def build_degree1_problem(d: int) -> Degree1CertificateProblem:
+    return build_multiplier_problem(d, multiplier_degree=1)
+
+
+def solve_degree1_feasibility(
+    problem: Degree1CertificateProblem,
+    alpha: float,
+) -> Degree1CertificateResult:
+    return solve_multiplier_feasibility(problem, alpha)

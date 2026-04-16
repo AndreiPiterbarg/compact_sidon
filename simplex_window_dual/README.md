@@ -23,9 +23,10 @@ This is the baseline family
 
 It is easy to evaluate exactly, but empirically it is too weak.
 
-### 2. Degree-1 nonnegative window multipliers
+### 2. Polynomial nonnegative window multipliers
 
-This is the main implemented family. For fixed \(\alpha\), search for
+This is the main implemented family. For fixed \(\alpha\) and multiplier degree
+\(r \ge 1\), search for
 
 \[
 \sum_W \Lambda_W(x)\,(x^\top M_W x - \alpha)
@@ -34,20 +35,22 @@ This is the main implemented family. For fixed \(\alpha\), search for
 
 where
 
-- each window multiplier \(\Lambda_W(x)\) has nonnegative coefficients and degree at most 1,
-- \(N(x)\) has nonnegative coefficients and degree at most 3,
-- \(H(x)\) is a free polynomial of degree at most 2.
+- each window multiplier \(\Lambda_W(x)\) has nonnegative coefficients and degree at most \(r\),
+- \(N(x)\) has nonnegative coefficients and degree at most \(r+2\),
+- \(H(x)\) is a free polynomial of degree at most \(r+1\).
 
 On the simplex \(\{x \ge 0,\ \mathbf{1}^\top x = 1\}\), the right-hand side
 reduces to \(N(x)\), which is nonnegative coefficientwise and therefore
 nonnegative for all \(x \ge 0\). If such an identity exists, then every simplex
 point satisfies \(\max_W x^\top M_W x \ge \alpha\).
 
-This feasibility problem is a linear program at fixed \(\alpha\).
+This feasibility problem is a linear program at fixed \(\alpha\). The current
+CLI exposes the multiplier degree with `--degree`.
 
 ## Status
 
 This directory is intended to be a real development base for the dual proof
-route. The immediate goal is to see whether degree-1 certificates can exceed
-the current record \(1.2802\) at some moderate dimension, before moving to
-higher-degree multipliers or cloud runs.
+route. Degree-2 is already strictly stronger than degree-1 on the small `d=4`
+sanity case, so the immediate goal is to see whether moderate-degree
+certificates can exceed the current record \(1.2802\) at some moderate
+dimension before moving to larger cloud runs.

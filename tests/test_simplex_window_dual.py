@@ -5,8 +5,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simplex_window_dual.degree1 import (
     build_degree1_problem,
+    build_multiplier_problem,
     degree1_identity_coefficients,
     evaluate_degree1_rhs_on_simplex,
+    solve_multiplier_feasibility,
     solve_degree1_feasibility,
 )
 from simplex_window_dual.simplex_qp import solve_simplex_quadratic
@@ -87,3 +89,16 @@ def test_degree1_certificate_identity_residual_is_small():
         x = rng.dirichlet(np.ones(problem.d))
         rhs = evaluate_degree1_rhs_on_simplex(problem, result, x)
         assert rhs >= -1e-9
+
+
+def test_degree2_certificate_strengthens_d4_threshold():
+    degree1 = solve_degree1_feasibility(build_degree1_problem(4), 1.05)
+    degree2_problem = build_multiplier_problem(4, multiplier_degree=2)
+    degree2 = solve_multiplier_feasibility(degree2_problem, 1.05)
+
+    assert not degree1.success
+    assert degree2.success
+
+    residuals = degree1_identity_coefficients(degree2_problem, degree2)
+    worst = max(abs(v) for v in residuals.values())
+    assert worst < 1e-8
