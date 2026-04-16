@@ -117,3 +117,27 @@ def test_monotone_search_stops_after_first_infeasible():
     assert abs(outcome.best_result.alpha - 1.0) < 1e-12
     assert outcome.attempted_alphas == [1.0, 1.05]
     assert abs(outcome.first_infeasible_alpha - 1.05) < 1e-12
+
+
+def test_reflection_symmetry_reduction_preserves_feasibility():
+    plain_problem = build_multiplier_problem(4, multiplier_degree=2)
+    symmetric_problem = build_multiplier_problem(
+        4,
+        multiplier_degree=2,
+        use_reflection_symmetry=True,
+    )
+
+    assert symmetric_problem.n_vars < plain_problem.n_vars
+
+    plain_yes = solve_multiplier_feasibility(plain_problem, 1.05)
+    symmetric_yes = solve_multiplier_feasibility(symmetric_problem, 1.05)
+    plain_no = solve_multiplier_feasibility(plain_problem, 1.07)
+    symmetric_no = solve_multiplier_feasibility(symmetric_problem, 1.07)
+
+    assert plain_yes.success
+    assert symmetric_yes.success
+    assert not plain_no.success
+    assert not symmetric_no.success
+
+    residuals = degree1_identity_coefficients(symmetric_problem, symmetric_yes)
+    assert max(abs(v) for v in residuals.values()) < 1e-8

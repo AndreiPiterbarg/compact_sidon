@@ -22,10 +22,13 @@ from simplex_window_dual.core import (
 class MultiplierCertificateProblem:
     d: int
     multiplier_degree: int
+    use_reflection_symmetry: bool
     windows: Tuple[Tuple[int, int], ...]
     multiplier_monomials: Tuple[Monomial, ...]
     slack_monomials: Tuple[Monomial, ...]
     equality_monomials: Tuple[Monomial, ...]
+    slack_full_to_reduced: Tuple[int, ...]
+    equality_full_to_reduced: Tuple[int, ...]
     multiplier_slice: slice
     slack_slice: slice
     equality_slice: slice
@@ -43,15 +46,39 @@ class MultiplierCertificateResult:
     status: int
     message: str
     x: np.ndarray | None
+    solver_method: str | None = None
 
     @property
     def constant_window_weights(self) -> np.ndarray | None:
         return None if self.x is None else self.x
 
+
+def _reflect_monomial(mono: Monomial) -> Monomial:
+    return tuple(reversed(mono))
+
+
+def _reflect_window(window: Tuple[int, int], d: int) -> Tuple[int, int]:
+    ell, s_lo = window
+    return (ell, 2 * d - ell - s_lo)
+
+
+def _build_orbit_map(reflected_indices: Tuple[int, ...]) -> Tuple[Tuple[int, ...], int]:
+    rep_to_reduced: Dict[int, int] = {}
+    full_to_reduced = []
+    for full_idx, reflected_idx in enumerate(reflected_indices):
+        rep = min(full_idx, reflected_idx)
+        reduced_idx = rep_to_reduced.get(rep)
+        if reduced_idx is None:
+            reduced_idx = len(rep_to_reduced)
+            rep_to_reduced[rep] = reduced_idx
+        full_to_reduced.append(reduced_idx)
+    return tuple(full_to_reduced), len(rep_to_reduced)
+
 @lru_cache(maxsize=None)
 def build_multiplier_problem(
     d: int,
     multiplier_degree: int,
+    use_reflection_symmetry: bool = False,
 ) -> MultiplierCertificateProblem:
     """Build the fixed-structure LP for polynomial dual certificates.
 
@@ -73,17 +100,55 @@ def build_multiplier_problem(
     multiplier_monomials = up_to_degree_monomials(d, multiplier_degree)
     slack_monomials = up_to_degree_monomials(d, multiplier_degree + 2)
     equality_monomials = up_to_degree_monomials(d, multiplier_degree + 1)
+    idx_multiplier = {mono: idx for idx, mono in enumerate(multiplier_monomials)}
     idx_slack = {mono: idx for idx, mono in enumerate(slack_monomials)}
     idx_equality = {mono: idx for idx, mono in enumerate(equality_monomials)}
 
     n_windows = len(windows)
+    if use_reflection_symmetry:
+        window_to_idx = {window: idx for idx, window in enumerate(windows)}
+        reflected_windows = tuple(
+            window_to_idx[_reflect_window(window, d)] for window in windows
+        )
+        reflected_multiplier = tuple(
+            idx_multiplier[_reflect_monomial(mono)] for mono in multiplier_monomials
+        )
+        reflected_slack = tuple(
+            idx_slack[_reflect_monomial(mono)] for mono in slack_monomials
+        )
+        reflected_equality = tuple(
+            idx_equality[_reflect_monomial(mono)] for mono in equality_monomials
+        )
+
+        multiplier_reflected_indices = []
+        for w_idx in range(n_windows):
+            for gamma_idx in range(len(multiplier_monomials)):
+                multiplier_reflected_indices.append(
+                    reflected_windows[w_idx] * len(multiplier_monomials)
+                    + reflected_multiplier[gamma_idx]
+                )
+        multiplier_full_to_reduced, multiplier_var_count = _build_orbit_map(
+            tuple(multiplier_reflected_indices)
+        )
+        slack_full_to_reduced, slack_var_count = _build_orbit_map(reflected_slack)
+        equality_full_to_reduced, equality_var_count = _build_orbit_map(
+            reflected_equality
+        )
+    else:
+        multiplier_var_count = n_windows * len(multiplier_monomials)
+        multiplier_full_to_reduced = tuple(range(multiplier_var_count))
+        slack_full_to_reduced = tuple(range(len(slack_monomials)))
+        slack_var_count = len(slack_monomials)
+        equality_full_to_reduced = tuple(range(len(equality_monomials)))
+        equality_var_count = len(equality_monomials)
+
     k = 0
-    multiplier_slice = slice(k, k + n_windows * len(multiplier_monomials))
-    k += n_windows * len(multiplier_monomials)
-    slack_slice = slice(k, k + len(slack_monomials))
-    k += len(slack_monomials)
-    equality_slice = slice(k, k + len(equality_monomials))
-    k += len(equality_monomials)
+    multiplier_slice = slice(k, k + multiplier_var_count)
+    k += multiplier_var_count
+    slack_slice = slice(k, k + slack_var_count)
+    k += slack_var_count
+    equality_slice = slice(k, k + equality_var_count)
+    k += equality_var_count
     n_vars = k
 
     rows_base = []
@@ -99,9 +164,9 @@ def build_multiplier_problem(
 
     for w_idx, coeff in enumerate(f_coeffs):
         coeff_items = tuple(coeff.items())
-        base_col = multiplier_slice.start + w_idx * len(multiplier_monomials)
         for gamma_idx, gamma in enumerate(multiplier_monomials):
-            col_idx = base_col + gamma_idx
+            full_idx = w_idx * len(multiplier_monomials) + gamma_idx
+            col_idx = multiplier_slice.start + multiplier_full_to_reduced[full_idx]
 
             rows_alpha.append(idx_slack[gamma])
             cols_alpha.append(col_idx)
@@ -116,12 +181,12 @@ def build_multiplier_problem(
     for row_idx, mono in enumerate(slack_monomials):
         # -N(x)
         rows_base.append(row_idx)
-        cols_base.append(slack_slice.start + idx_slack[mono])
+        cols_base.append(slack_slice.start + slack_full_to_reduced[idx_slack[mono]])
         vals_base.append(-1.0)
 
     # -(1 - sum x_i) H(x) = -H(x) + sum_i x_i H(x)
     for eq_idx, mono in enumerate(equality_monomials):
-        col_idx = equality_slice.start + eq_idx
+        col_idx = equality_slice.start + equality_full_to_reduced[eq_idx]
         rows_base.append(idx_slack[mono])
         cols_base.append(col_idx)
         vals_base.append(-1.0)
@@ -138,7 +203,8 @@ def build_multiplier_problem(
     norm_row = len(slack_monomials)
     for w_idx in range(n_windows):
         rows_base.append(norm_row)
-        cols_base.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + multiplier_zero_idx)
+        full_idx = w_idx * len(multiplier_monomials) + multiplier_zero_idx
+        cols_base.append(multiplier_slice.start + multiplier_full_to_reduced[full_idx])
         vals_base.append(1.0)
     b_eq[norm_row] = 1.0
 
@@ -154,18 +220,21 @@ def build_multiplier_problem(
     )
 
     bounds = (
-        ((0.0, None),) * (n_windows * len(multiplier_monomials))
-        + ((0.0, None),) * len(slack_monomials)
-        + ((None, None),) * len(equality_monomials)
+        ((0.0, None),) * multiplier_var_count
+        + ((0.0, None),) * slack_var_count
+        + ((None, None),) * equality_var_count
     )
 
     return MultiplierCertificateProblem(
         d=d,
         multiplier_degree=multiplier_degree,
+        use_reflection_symmetry=use_reflection_symmetry,
         windows=windows,
         multiplier_monomials=multiplier_monomials,
         slack_monomials=slack_monomials,
         equality_monomials=equality_monomials,
+        slack_full_to_reduced=slack_full_to_reduced,
+        equality_full_to_reduced=equality_full_to_reduced,
         multiplier_slice=multiplier_slice,
         slack_slice=slack_slice,
         equality_slice=equality_slice,
@@ -184,20 +253,33 @@ def solve_multiplier_feasibility(
     """Solve the polynomial-multiplier LP feasibility problem at fixed alpha."""
     a_eq = problem.a_eq_base + alpha * problem.a_eq_alpha
     objective = np.zeros(problem.n_vars, dtype=np.float64)
-    res = linprog(
-        objective,
-        A_eq=a_eq,
-        b_eq=problem.b_eq,
-        bounds=problem.bounds,
-        method="highs",
-    )
-    return MultiplierCertificateResult(
-        success=bool(res.success),
-        alpha=alpha,
-        status=int(res.status),
-        message=str(res.message),
-        x=None if not res.success else np.array(res.x, copy=True),
-    )
+    methods = ("highs", "highs-ds", "highs-ipm")
+    first_failure = None
+
+    for method in methods:
+        res = linprog(
+            objective,
+            A_eq=a_eq,
+            b_eq=problem.b_eq,
+            bounds=problem.bounds,
+            method=method,
+        )
+        result = MultiplierCertificateResult(
+            success=bool(res.success),
+            alpha=alpha,
+            status=int(res.status),
+            message=str(res.message),
+            x=None if not res.success else np.array(res.x, copy=True),
+            solver_method=method,
+        )
+        if result.success:
+            return result
+        if first_failure is None:
+            first_failure = result
+        if result.status != 4:
+            return result
+
+    return first_failure
 
 
 def degree1_identity_coefficients(
@@ -229,9 +311,9 @@ def degree1_rhs_polynomial(
         raise ValueError("certificate has no primal vector")
     start = problem.slack_slice.start
     return {
-        mono: float(result.x[start + idx])
+        mono: float(result.x[start + problem.slack_full_to_reduced[idx]])
         for idx, mono in enumerate(problem.slack_monomials)
-        if result.x[start + idx] > 1e-12
+        if result.x[start + problem.slack_full_to_reduced[idx]] > 1e-12
     }
 
 

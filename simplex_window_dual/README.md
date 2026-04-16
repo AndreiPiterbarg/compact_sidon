@@ -49,6 +49,19 @@ CLI exposes the multiplier degree with `--degree` and stops an increasing alpha
 sweep after the first infeasible point, since feasibility is monotone downward
 in \(\alpha\).
 
+## Symmetry reduction
+
+The discrete problem is invariant under reflecting the bins
+\((x_1,\dots,x_d) \mapsto (x_d,\dots,x_1)\). If a certificate exists, averaging
+it with its reflection produces another certificate with:
+
+- reflected window multipliers tied together,
+- reflected slack coefficients tied together,
+- reflected equality-multiplier coefficients tied together.
+
+The builder now supports this exact reduction through the
+`--reflection-symmetry` CLI flag.
+
 ## Status
 
 This directory is intended to be a real development base for the dual proof

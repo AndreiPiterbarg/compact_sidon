@@ -10,6 +10,8 @@ Two families are currently implemented:
 
 1. Constant window mixtures.
 2. Polynomial nonnegative window multipliers with a simplex equality multiplier.
+
+Reflection symmetry reduction is also available for the multiplier LP.
 """
 
 from simplex_window_dual.core import (
