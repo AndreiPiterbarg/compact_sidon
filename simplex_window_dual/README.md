@@ -62,6 +62,30 @@ it with its reflection produces another certificate with:
 The builder now supports this exact reduction through the
 `--reflection-symmetry` CLI flag.
 
+Once those coefficient ties are imposed, the polynomial identities for
+reflected monomials become duplicates. The builder can therefore compress the
+equality rows into reflection orbits as well via `--reflection-row-orbits`.
+
+## Sweep runner
+
+For larger local or cloud runs, use the resumable JSONL sweep runner:
+
+```bash
+python -m simplex_window_dual.run_sweep \
+  --d-values 12,14,16 \
+  --degree 2 \
+  --reflection-symmetry \
+  --reflection-row-orbits \
+  --alpha-start 1.12 \
+  --alpha-stop 1.30 \
+  --alpha-step 0.01 \
+  --jsonl-out data/simplex_window_dual/prime_sweep.jsonl \
+  --resume
+```
+
+Each alpha attempt is appended immediately to the JSONL log, so long pod runs
+can be resumed without losing earlier work.
+
 ## Status
 
 This directory is intended to be a real development base for the dual proof
