@@ -11,6 +11,7 @@ from simplex_window_dual.degree1 import (
     solve_multiplier_feasibility,
     solve_degree1_feasibility,
 )
+from simplex_window_dual.search import search_multiplier_grid
 from simplex_window_dual.simplex_qp import solve_simplex_quadratic
 
 
@@ -102,3 +103,17 @@ def test_degree2_certificate_strengthens_d4_threshold():
     residuals = degree1_identity_coefficients(degree2_problem, degree2)
     worst = max(abs(v) for v in residuals.values())
     assert worst < 1e-8
+
+
+def test_monotone_search_stops_after_first_infeasible():
+    outcome = search_multiplier_grid(
+        d=4,
+        alphas=[1.00, 1.05, 1.06],
+        multiplier_degree=1,
+        stop_on_first_infeasible=True,
+    )
+
+    assert outcome.best_result is not None
+    assert abs(outcome.best_result.alpha - 1.0) < 1e-12
+    assert outcome.attempted_alphas == [1.0, 1.05]
+    assert abs(outcome.first_infeasible_alpha - 1.05) < 1e-12

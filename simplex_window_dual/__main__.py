@@ -29,6 +29,7 @@ def main() -> None:
         d=args.d,
         alphas=_frange(args.alpha_start, args.alpha_stop, args.alpha_step),
         multiplier_degree=args.degree,
+        stop_on_first_infeasible=True,
     )
     best = outcome.best_result
     if best is None:

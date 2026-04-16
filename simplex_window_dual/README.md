@@ -45,7 +45,9 @@ nonnegative for all \(x \ge 0\). If such an identity exists, then every simplex
 point satisfies \(\max_W x^\top M_W x \ge \alpha\).
 
 This feasibility problem is a linear program at fixed \(\alpha\). The current
-CLI exposes the multiplier degree with `--degree`.
+CLI exposes the multiplier degree with `--degree` and stops an increasing alpha
+sweep after the first infeasible point, since feasibility is monotone downward
+in \(\alpha\).
 
 ## Status
 

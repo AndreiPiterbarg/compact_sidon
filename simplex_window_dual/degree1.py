@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Dict, Tuple
 
 import numpy as np
@@ -47,6 +48,7 @@ class MultiplierCertificateResult:
     def constant_window_weights(self) -> np.ndarray | None:
         return None if self.x is None else self.x
 
+@lru_cache(maxsize=None)
 def build_multiplier_problem(
     d: int,
     multiplier_degree: int,
@@ -95,45 +97,42 @@ def build_multiplier_problem(
     zero = tuple(0 for _ in range(d))
     multiplier_zero_idx = multiplier_monomials.index(zero)
 
+    for w_idx, coeff in enumerate(f_coeffs):
+        coeff_items = tuple(coeff.items())
+        base_col = multiplier_slice.start + w_idx * len(multiplier_monomials)
+        for gamma_idx, gamma in enumerate(multiplier_monomials):
+            col_idx = base_col + gamma_idx
+
+            rows_alpha.append(idx_slack[gamma])
+            cols_alpha.append(col_idx)
+            vals_alpha.append(-1.0)
+
+            for beta, value in coeff_items:
+                mono = tuple(g + b for g, b in zip(gamma, beta))
+                rows_base.append(idx_slack[mono])
+                cols_base.append(col_idx)
+                vals_base.append(value)
+
     for row_idx, mono in enumerate(slack_monomials):
-        # Window coefficients from Lambda_W(x) * f_W(x)
-        for w_idx, coeff in enumerate(f_coeffs):
-            for gamma_idx, gamma in enumerate(multiplier_monomials):
-                gamma_arr = np.array(gamma, dtype=np.int64)
-                mono_arr = np.array(mono, dtype=np.int64)
-                if np.any(mono_arr < gamma_arr):
-                    continue
-                residual = tuple((mono_arr - gamma_arr).tolist())
-                value = coeff.get(residual, 0.0)
-                if value:
-                    rows_base.append(row_idx)
-                    cols_base.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + gamma_idx)
-                    vals_base.append(value)
-
-                if mono == gamma:
-                    rows_alpha.append(row_idx)
-                    cols_alpha.append(multiplier_slice.start + w_idx * len(multiplier_monomials) + gamma_idx)
-                    vals_alpha.append(-1.0)
-
         # -N(x)
         rows_base.append(row_idx)
         cols_base.append(slack_slice.start + idx_slack[mono])
         vals_base.append(-1.0)
 
-        # -(1 - sum x_i) H(x) = -H(x) + sum_i x_i H(x)
-        if mono in idx_equality:
-            rows_base.append(row_idx)
-            cols_base.append(equality_slice.start + idx_equality[mono])
-            vals_base.append(-1.0)
+    # -(1 - sum x_i) H(x) = -H(x) + sum_i x_i H(x)
+    for eq_idx, mono in enumerate(equality_monomials):
+        col_idx = equality_slice.start + eq_idx
+        rows_base.append(idx_slack[mono])
+        cols_base.append(col_idx)
+        vals_base.append(-1.0)
+
         for i in range(d):
-            shifted = list(mono)
-            if shifted[i] >= 1:
-                shifted[i] -= 1
-                shifted_mono = tuple(shifted)
-                if shifted_mono in idx_equality:
-                    rows_base.append(row_idx)
-                    cols_base.append(equality_slice.start + idx_equality[shifted_mono])
-                    vals_base.append(1.0)
+            lifted = list(mono)
+            lifted[i] += 1
+            lifted_mono = tuple(lifted)
+            rows_base.append(idx_slack[lifted_mono])
+            cols_base.append(col_idx)
+            vals_base.append(1.0)
 
     # Normalization: sum_W coeff(Lambda_W, 1) = 1
     norm_row = len(slack_monomials)
