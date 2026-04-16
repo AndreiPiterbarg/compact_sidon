@@ -52,6 +52,7 @@ gpupod/.session.json
 data/*.npy
 data/*.dat
 data/_shards_L2/
+data/**/_shards_L2/
 data/subtree_test/
 
 # Temp/backup files
