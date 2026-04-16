@@ -673,7 +673,7 @@ def _build_model_highd(P, add_upper_loc, verbose):
 # Clique-local violation checking (replaces _batch_check_violations)
 # =====================================================================
 
-def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
+def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6, k_vecs=0):
     r"""Window violation checking: clique-local PSD + scalar for uncovered.
 
     Covered windows (active bins fit in one clique): check the clique-
@@ -773,10 +773,26 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
         L_all = L_t[np.newaxis, :, :] - L_q_all
         L_all = 0.5 * (L_all + np.swapaxes(L_all, -2, -1))
 
-        min_eigs = np.linalg.eigvalsh(L_all)[:, 0]
-        violated = min_eigs < -tol
-        for k in np.where(violated)[0]:
-            violations.append((w_indices[k], float(min_eigs[k])))
+        if k_vecs > 0:
+            # Return bottom-k eigenvectors alongside min eigenvalue.
+            # eigh is O(n^3); eigvalsh is also O(n^3) but avoids storing
+            # eigenvectors. Since we need both here, eigh is correct.
+            # Ascending order: column i of vecs is the i-th smallest eigenvector.
+            eig_vals, eig_vecs = np.linalg.eigh(L_all)
+            min_eigs = eig_vals[:, 0]
+            violated = min_eigs < -tol
+            for ki in np.where(violated)[0]:
+                # Use only eigenvectors with strictly negative eigenvalue — those
+                # are the violated directions. Cap at k_vecs.
+                n_neg = int((eig_vals[ki] < -tol).sum())
+                actual_k = min(k_vecs, max(1, n_neg))
+                vecs = eig_vecs[ki, :, :actual_k].copy()  # (n_cb, actual_k)
+                violations.append((w_indices[ki], float(min_eigs[ki]), vecs))
+        else:
+            min_eigs = np.linalg.eigvalsh(L_all)[:, 0]
+            violated = min_eigs < -tol
+            for ki in np.where(violated)[0]:
+                violations.append((w_indices[ki], float(min_eigs[ki])))
 
     # ---- Scalar-only check for uncovered windows ----
     # No PSD check for uncovered windows — partial-Q PSD is unsound.
@@ -784,7 +800,10 @@ def _check_violations_highd(y_vals, t_val, P, active_windows, tol=1e-6):
     uncovered_mask = (window_covering < 0) & ~is_active
     uncovered_violated = uncovered_mask & (f_vals > t_val + tol)
     for w in np.where(uncovered_violated)[0]:
-        violations.append((int(w), -(f_vals[w] - t_val)))
+        if k_vecs > 0:
+            violations.append((int(w), -(f_vals[w] - t_val), None))
+        else:
+            violations.append((int(w), -(f_vals[w] - t_val)))
 
     violations.sort(key=lambda x: x[1])
     return violations
