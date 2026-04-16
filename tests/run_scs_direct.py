@@ -422,8 +422,13 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                      add_upper_loc=True, max_cg_rounds=10, n_bisect=12,
                      use_gpu=False, scs_max_iters=100000, scs_eps=1e-5,
                      scs_scale=None, use_indirect=False,
-                     verbose=True):
-    """Full CG Lasserre solver using direct SCS."""
+                     verbose=True, hook=None):
+    """Full CG Lasserre solver using direct SCS.
+
+    hook: optional GapAccelHook (see lasserre.gap_accelerator). When
+      provided, per-round diagnostic and cut-reordering hooks are called.
+      Passing hook=None reproduces exactly the prior behavior.
+    """
     import scs
 
     t_total = time.time()
@@ -491,9 +496,20 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
     last_y_dual = sol['y'].copy() if sol['y'] is not None else None
     last_s = sol['s'].copy() if sol['s'] is not None else None
 
+    # Keep last feasible solution across rounds so post-loop fallback
+    # (line ~869) has a bound name even if the first round aborts early.
+    last_feas_y = None
+    last_feas_t = None
+
     for cg_round in range(1, max_cg_rounds + 1):
         n_add = min(100, len(violations))
-        for w, eig in violations[:n_add]:
+
+        if hook is not None:
+            violations = hook.reorder_violations(
+                violations, y_vals, P, list(active_windows), n_add)
+
+        for item in violations[:n_add]:
+            w = item[0]
             active_windows.add(w)
 
         print(f"\n  [CG round {cg_round}] {len(active_windows)} windows",
@@ -814,6 +830,12 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         gc = (best_lb - 1) / (v - 1) * 100 if v > 1 else 0
         print(f"    lb={lb:.10f} (+{improvement:.2e}) gc={gc:.1f}%", flush=True)
 
+        if hook is not None:
+            _best_y_for_hook = last_feas_y if last_feas_y is not None else ws_x[:n_y].copy()
+            hook.on_round_end(
+                cg_round, best_lb, gc, _best_y_for_hook, P,
+                list(active_windows), sol_dict=None)
+
         # ── Save checkpoint after each CG round ──
         _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  '..', 'data')
@@ -844,11 +866,21 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             print(f"    Improvement < 1e-5 — stopping.", flush=True)
             break
 
+        if hook is not None:
+            should_abort, abort_reason = hook.should_abort()
+            if should_abort:
+                print(f"    [gap_accel] ABORT: {abort_reason}", flush=True)
+                break
+
     elapsed = time.time() - t_total
     # Keep best feasible y for proof/verification
     best_y = last_feas_y if last_feas_y is not None else y_vals
-    return _result(best_lb, d, order, bandwidth, n_y,
-                   len(active_windows), elapsed, best_y)
+    result = _result(best_lb, d, order, bandwidth, n_y,
+                     len(active_windows), elapsed, best_y)
+    if hook is not None:
+        tag = f"d{d}_o{order}_bw{bandwidth}_scs"
+        result['gap_accel'] = hook.finalize(tag=tag)
+    return result
 
 
 def _result(lb, d, order, bw, n_y, n_active, elapsed, y_solution=None):
@@ -878,6 +910,14 @@ def main():
                         help='SCS scale param. scale=1 gives ~7x for d<=12')
     parser.add_argument('--use-indirect', action='store_true',
                         help='Use SCS indirect (CG) backend for d>=48')
+    parser.add_argument('--use-gap-accel', action='store_true',
+                        help='Enable lasserre.gap_accelerator hook for '
+                        'diagnostics and cut diversification')
+    parser.add_argument('--gap-target', type=float, default=1.2802,
+                        help='Target lb for gap-accel diagnostic comparison')
+    parser.add_argument('--gap-abort', action='store_true',
+                        help='Allow gap-accel to abort the run on '
+                        'high-confidence Layer-1 failure')
     args = parser.parse_args()
 
     print(f"Direct SCS: d={args.d} O{args.order} bw={args.bw} GPU={args.gpu}")
@@ -902,11 +942,25 @@ def main():
             time.sleep(60)
     threading.Thread(target=_mon, daemon=True).start()
 
+    hook = None
+    if args.use_gap_accel:
+        # Added 2026-04-16: gap-convergence accelerator.
+        # Package path import assumes repo root on sys.path.
+        _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _repo_root not in sys.path:
+            sys.path.insert(0, _repo_root)
+        from lasserre.gap_accelerator import GapAccelHook
+        cfg = {'abort_on_unfavorable_diagnostic': args.gap_abort}
+        hook = GapAccelHook(
+            config=cfg, target_lb=args.gap_target,
+            tag=f"d{args.d}_o{args.order}_bw{args.bw}_scs")
+
     r = solve_scs_direct(
         args.d, args.order, args.bw,
         max_cg_rounds=args.cg_rounds, n_bisect=args.bisect,
         use_gpu=args.gpu, scs_max_iters=args.scs_iters, scs_eps=args.scs_eps,
         scs_scale=args.scs_scale, use_indirect=args.use_indirect,
+        hook=hook,
     )
 
     print(f"\n{'='*70}")
