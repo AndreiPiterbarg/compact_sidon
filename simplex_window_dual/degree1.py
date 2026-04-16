@@ -23,12 +23,15 @@ class MultiplierCertificateProblem:
     d: int
     multiplier_degree: int
     use_reflection_symmetry: bool
+    use_reflection_row_orbits: bool
     windows: Tuple[Tuple[int, int], ...]
     multiplier_monomials: Tuple[Monomial, ...]
     slack_monomials: Tuple[Monomial, ...]
     equality_monomials: Tuple[Monomial, ...]
     slack_full_to_reduced: Tuple[int, ...]
     equality_full_to_reduced: Tuple[int, ...]
+    coefficient_row_full_to_reduced: Tuple[int, ...]
+    coefficient_row_orbit_sizes: Tuple[int, ...]
     multiplier_slice: slice
     slack_slice: slice
     equality_slice: slice
@@ -79,6 +82,7 @@ def build_multiplier_problem(
     d: int,
     multiplier_degree: int,
     use_reflection_symmetry: bool = False,
+    use_reflection_row_orbits: bool = False,
 ) -> MultiplierCertificateProblem:
     """Build the fixed-structure LP for polynomial dual certificates.
 
@@ -96,6 +100,11 @@ def build_multiplier_problem(
     For x in the simplex, the RHS reduces to N(x) >= 0. Therefore if the LP is
     feasible, max_W f_W(x) >= alpha for every simplex point x.
     """
+    if use_reflection_row_orbits and not use_reflection_symmetry:
+        raise ValueError(
+            "reflection row orbits require use_reflection_symmetry=True"
+        )
+
     windows, f_coeffs = window_quadratic_coefficients(d)
     multiplier_monomials = up_to_degree_monomials(d, multiplier_degree)
     slack_monomials = up_to_degree_monomials(d, multiplier_degree + 2)
@@ -134,6 +143,13 @@ def build_multiplier_problem(
         equality_full_to_reduced, equality_var_count = _build_orbit_map(
             reflected_equality
         )
+        if use_reflection_row_orbits:
+            coefficient_row_full_to_reduced, coefficient_row_count = _build_orbit_map(
+                reflected_slack
+            )
+        else:
+            coefficient_row_full_to_reduced = tuple(range(len(slack_monomials)))
+            coefficient_row_count = len(slack_monomials)
     else:
         multiplier_var_count = n_windows * len(multiplier_monomials)
         multiplier_full_to_reduced = tuple(range(multiplier_var_count))
@@ -141,6 +157,12 @@ def build_multiplier_problem(
         slack_var_count = len(slack_monomials)
         equality_full_to_reduced = tuple(range(len(equality_monomials)))
         equality_var_count = len(equality_monomials)
+        coefficient_row_full_to_reduced = tuple(range(len(slack_monomials)))
+        coefficient_row_count = len(slack_monomials)
+
+    row_orbit_sizes = [0] * coefficient_row_count
+    for reduced_idx in coefficient_row_full_to_reduced:
+        row_orbit_sizes[reduced_idx] += 1
 
     k = 0
     multiplier_slice = slice(k, k + multiplier_var_count)
@@ -157,7 +179,7 @@ def build_multiplier_problem(
     rows_alpha = []
     cols_alpha = []
     vals_alpha = []
-    b_eq = np.zeros(len(slack_monomials) + 1, dtype=np.float64)
+    b_eq = np.zeros(coefficient_row_count + 1, dtype=np.float64)
 
     zero = tuple(0 for _ in range(d))
     multiplier_zero_idx = multiplier_monomials.index(zero)
@@ -167,27 +189,28 @@ def build_multiplier_problem(
         for gamma_idx, gamma in enumerate(multiplier_monomials):
             full_idx = w_idx * len(multiplier_monomials) + gamma_idx
             col_idx = multiplier_slice.start + multiplier_full_to_reduced[full_idx]
+            row_idx = coefficient_row_full_to_reduced[idx_slack[gamma]]
 
-            rows_alpha.append(idx_slack[gamma])
+            rows_alpha.append(row_idx)
             cols_alpha.append(col_idx)
             vals_alpha.append(-1.0)
 
             for beta, value in coeff_items:
                 mono = tuple(g + b for g, b in zip(gamma, beta))
-                rows_base.append(idx_slack[mono])
+                rows_base.append(coefficient_row_full_to_reduced[idx_slack[mono]])
                 cols_base.append(col_idx)
                 vals_base.append(value)
 
     for row_idx, mono in enumerate(slack_monomials):
         # -N(x)
-        rows_base.append(row_idx)
+        rows_base.append(coefficient_row_full_to_reduced[row_idx])
         cols_base.append(slack_slice.start + slack_full_to_reduced[idx_slack[mono]])
         vals_base.append(-1.0)
 
     # -(1 - sum x_i) H(x) = -H(x) + sum_i x_i H(x)
     for eq_idx, mono in enumerate(equality_monomials):
         col_idx = equality_slice.start + equality_full_to_reduced[eq_idx]
-        rows_base.append(idx_slack[mono])
+        rows_base.append(coefficient_row_full_to_reduced[idx_slack[mono]])
         cols_base.append(col_idx)
         vals_base.append(-1.0)
 
@@ -195,12 +218,12 @@ def build_multiplier_problem(
             lifted = list(mono)
             lifted[i] += 1
             lifted_mono = tuple(lifted)
-            rows_base.append(idx_slack[lifted_mono])
+            rows_base.append(coefficient_row_full_to_reduced[idx_slack[lifted_mono]])
             cols_base.append(col_idx)
             vals_base.append(1.0)
 
     # Normalization: sum_W coeff(Lambda_W, 1) = 1
-    norm_row = len(slack_monomials)
+    norm_row = coefficient_row_count
     for w_idx in range(n_windows):
         rows_base.append(norm_row)
         full_idx = w_idx * len(multiplier_monomials) + multiplier_zero_idx
@@ -229,12 +252,15 @@ def build_multiplier_problem(
         d=d,
         multiplier_degree=multiplier_degree,
         use_reflection_symmetry=use_reflection_symmetry,
+        use_reflection_row_orbits=use_reflection_row_orbits,
         windows=windows,
         multiplier_monomials=multiplier_monomials,
         slack_monomials=slack_monomials,
         equality_monomials=equality_monomials,
         slack_full_to_reduced=slack_full_to_reduced,
         equality_full_to_reduced=equality_full_to_reduced,
+        coefficient_row_full_to_reduced=coefficient_row_full_to_reduced,
+        coefficient_row_orbit_sizes=tuple(row_orbit_sizes),
         multiplier_slice=multiplier_slice,
         slack_slice=slack_slice,
         equality_slice=equality_slice,
@@ -297,7 +323,12 @@ def degree1_identity_coefficients(
     coeff_vector = (problem.a_eq_base + result.alpha * problem.a_eq_alpha) @ result.x
     coeff_vector -= problem.b_eq
     return {
-        mono: float(coeff_vector[idx])
+        mono: float(
+            coeff_vector[problem.coefficient_row_full_to_reduced[idx]]
+            / problem.coefficient_row_orbit_sizes[
+                problem.coefficient_row_full_to_reduced[idx]
+            ]
+        )
         for idx, mono in enumerate(problem.slack_monomials)
     }
 

@@ -26,6 +26,7 @@ def search_multiplier_grid(
     alphas: Iterable[float],
     multiplier_degree: int = 1,
     use_reflection_symmetry: bool = False,
+    use_reflection_row_orbits: bool = False,
     stop_on_first_infeasible: bool = False,
 ) -> SearchOutcome:
     """Try a list of alpha values and keep the best feasible certificate.
@@ -43,6 +44,7 @@ def search_multiplier_grid(
         d,
         multiplier_degree=multiplier_degree,
         use_reflection_symmetry=use_reflection_symmetry,
+        use_reflection_row_orbits=use_reflection_row_orbits,
     )
     best = None
     attempted = []
@@ -79,6 +81,7 @@ def search_degree1_grid(
     alphas: Iterable[float],
     multiplier_degree: int = 1,
     use_reflection_symmetry: bool = False,
+    use_reflection_row_orbits: bool = False,
     stop_on_first_infeasible: bool = False,
 ) -> SearchOutcome:
     """Backward-compatible alias for multiplier-certificate grid search."""
@@ -87,5 +90,6 @@ def search_degree1_grid(
         alphas=alphas,
         multiplier_degree=multiplier_degree,
         use_reflection_symmetry=use_reflection_symmetry,
+        use_reflection_row_orbits=use_reflection_row_orbits,
         stop_on_first_infeasible=stop_on_first_infeasible,
     )

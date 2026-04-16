@@ -11,6 +11,7 @@ from simplex_window_dual.degree1 import (
     solve_multiplier_feasibility,
     solve_degree1_feasibility,
 )
+from simplex_window_dual.run_sweep import run_dimension_sweep
 from simplex_window_dual.search import search_multiplier_grid
 from simplex_window_dual.simplex_qp import solve_simplex_quadratic
 
@@ -141,3 +142,69 @@ def test_reflection_symmetry_reduction_preserves_feasibility():
 
     residuals = degree1_identity_coefficients(symmetric_problem, symmetric_yes)
     assert max(abs(v) for v in residuals.values()) < 1e-8
+
+
+def test_reflection_row_orbits_preserve_feasibility_and_reduce_rows():
+    symmetric_problem = build_multiplier_problem(
+        4,
+        multiplier_degree=2,
+        use_reflection_symmetry=True,
+    )
+    row_orbit_problem = build_multiplier_problem(
+        4,
+        multiplier_degree=2,
+        use_reflection_symmetry=True,
+        use_reflection_row_orbits=True,
+    )
+
+    assert len(row_orbit_problem.b_eq) < len(symmetric_problem.b_eq)
+    assert row_orbit_problem.n_vars == symmetric_problem.n_vars
+
+    symmetric_yes = solve_multiplier_feasibility(symmetric_problem, 1.05)
+    row_orbit_yes = solve_multiplier_feasibility(row_orbit_problem, 1.05)
+    symmetric_no = solve_multiplier_feasibility(symmetric_problem, 1.07)
+    row_orbit_no = solve_multiplier_feasibility(row_orbit_problem, 1.07)
+
+    assert symmetric_yes.success
+    assert row_orbit_yes.success
+    assert not symmetric_no.success
+    assert not row_orbit_no.success
+
+    residuals = degree1_identity_coefficients(row_orbit_problem, row_orbit_yes)
+    assert max(abs(v) for v in residuals.values()) < 1e-8
+
+
+def test_run_dimension_sweep_writes_resumable_jsonl(tmp_path):
+    out_path = tmp_path / "simplex_sweep.jsonl"
+    summary = run_dimension_sweep(
+        d=4,
+        alphas=[1.00, 1.05, 1.06],
+        multiplier_degree=1,
+        use_reflection_symmetry=True,
+        use_reflection_row_orbits=True,
+        stop_on_first_infeasible=True,
+        jsonl_out=str(out_path),
+        resume=False,
+    )
+
+    assert summary.best_feasible_alpha == 1.0
+    assert summary.first_infeasible_alpha == 1.05
+    assert tuple(summary.attempted_alphas) == (1.0, 1.05)
+
+    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 3
+    assert '"kind": "attempt"' in lines[0]
+    assert '"kind": "summary"' in lines[-1]
+
+    resumed = run_dimension_sweep(
+        d=4,
+        alphas=[1.00, 1.05, 1.06],
+        multiplier_degree=1,
+        use_reflection_symmetry=True,
+        use_reflection_row_orbits=True,
+        stop_on_first_infeasible=True,
+        jsonl_out=str(out_path),
+        resume=True,
+    )
+    assert resumed.best_feasible_alpha == summary.best_feasible_alpha
+    assert resumed.first_infeasible_alpha == summary.first_infeasible_alpha

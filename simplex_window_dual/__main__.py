@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--d", type=int, default=8)
     parser.add_argument("--degree", type=int, default=1)
     parser.add_argument("--reflection-symmetry", action="store_true")
+    parser.add_argument("--reflection-row-orbits", action="store_true")
     parser.add_argument("--alpha-start", type=float, default=1.00)
     parser.add_argument("--alpha-stop", type=float, default=1.10)
     parser.add_argument("--alpha-step", type=float, default=0.01)
@@ -31,6 +32,7 @@ def main() -> None:
         alphas=_frange(args.alpha_start, args.alpha_stop, args.alpha_step),
         multiplier_degree=args.degree,
         use_reflection_symmetry=args.reflection_symmetry,
+        use_reflection_row_orbits=args.reflection_row_orbits,
         stop_on_first_infeasible=True,
     )
     best = outcome.best_result
