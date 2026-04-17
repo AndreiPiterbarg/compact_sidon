@@ -42,31 +42,20 @@ Michael Garstka, Mark Cannon, and Paul Goulart, \emph{{COSMO}: A conic operator
   splitting method for convex conic problems}, Journal of Optimization Theory
   and Applications \textbf{190} (2021), no.~3, 779--810.
 
-\bibitem[Gom60]{Gomory1960}
-Ralph~E. Gomory, \emph{Solving linear programming problems in integers},
-  Proceedings of Symposia in Applied Mathematics \textbf{10} (1960), 211--215.
-
-\bibitem[HAB{\etalchar{+}}17]{Hales2017}
-Thomas Hales, Mark Adams, Gertrud Bauer, Tat~Dat Dang, John Harrison, Le~Truong
-  Hoang, Cezary Kaliszyk, Victor Magron, Sean McLaughlin, Tat~Thang Nguyen,
-  Quang~Truong Nguyen, Tobias Nipkow, Steven Obua, Joseph Pleso, Jason Rute,
-  Alexey Solovyev, Thi Hoai~An Ta, Nam~Trung Tran, Thi~Diep Trieu, Josef Urban,
-  Ky~Vu, and Roland Zumkeller, \emph{A formal proof of the {K}epler
-  conjecture}, Forum of Mathematics, Pi \textbf{5} (2017), e2.
-
 \bibitem[Han88]{Handelman1988}
 David Handelman, \emph{Representing polynomials by positive linear functions on
   compact convex polyhedra}, Pacific Journal of Mathematics \textbf{132}
   (1988), no.~1, 35--62.
 
-\bibitem[HL04]{HenrionLasserre2004}
-Didier Henrion and Jean~B. Lasserre, \emph{Solving nonconvex optimization
-  problems}, IEEE Control Systems Magazine \textbf{24} (2004), no.~3, 72--83.
-
-\bibitem[JCK08]{JansonRump2008}
+\bibitem[JCK08]{JanssonChaykinKeil2008}
 Christian Jansson, Denis Chaykin, and Christian Keil, \emph{Rigorous error
   bounds for the optimal value in semidefinite programming}, SIAM Journal on
   Numerical Analysis \textbf{46} (2008), no.~1, 180--200.
+
+\bibitem[Kel60]{Kelley1960}
+Jr. Kelley, J.~E., \emph{The cutting-plane method for solving convex programs},
+  Journal of the Society for Industrial and Applied Mathematics \textbf{8}
+  (1960), no.~4, 703--712.
 
 \bibitem[Las01]{Lasserre2001}
 Jean~B. Lasserre, \emph{Global optimization with polynomials and the problem of
@@ -104,11 +93,6 @@ Brendan O'Donoghue, Eric Chu, Neal Parikh, and Stephen Boyd, \emph{Conic
 \bibitem[Par03]{Parrilo03}
 Pablo~A. Parrilo, \emph{Semidefinite programming relaxations for semialgebraic
   problems}, Mathematical Programming \textbf{96} (2003), no.~2, 293--320.
-
-\bibitem[PT21]{PlattTrudgian2021}
-David~J. Platt and Timothy~S. Trudgian, \emph{The {R}iemann hypothesis is true
-  up to $3 \cdot 10^{12}$}, Bulletin of the London Mathematical Society
-  \textbf{53} (2021), no.~3, 792--797.
 
 \bibitem[Sch91]{Schmudgen1991}
 Konrad Schm{\"u}dgen, \emph{The $k$-moment problem for compact semi-algebraic

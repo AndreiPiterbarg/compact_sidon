@@ -3,44 +3,44 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: lasserre_lower_bound.aux
 The style file: amsalpha.bst
 Database file #1: lasserre_refs.bib
-You've used 25 entries,
+You've used 22 entries,
             2624 wiz_defined-function locations,
-            746 strings with 9059 characters,
-and the built_in function-call counts, 10365 in all, are:
-= -- 975
-> -- 546
+            724 strings with 8230 characters,
+and the built_in function-call counts, 8595 in all, are:
+= -- 825
+> -- 388
 < -- 8
-+ -- 195
-- -- 188
-* -- 967
-:= -- 1703
-add.period$ -- 25
-call.type$ -- 25
-change.case$ -- 174
-chr.to.int$ -- 25
-cite$ -- 25
-duplicate$ -- 358
-empty$ -- 742
-format.name$ -- 219
-if$ -- 2030
++ -- 135
+- -- 129
+* -- 782
+:= -- 1392
+add.period$ -- 22
+call.type$ -- 22
+change.case$ -- 136
+chr.to.int$ -- 22
+cite$ -- 22
+duplicate$ -- 316
+empty$ -- 656
+format.name$ -- 158
+if$ -- 1702
 int.to.chr$ -- 1
 int.to.str$ -- 0
-missing$ -- 50
-newline$ -- 86
-num.names$ -- 73
-pop$ -- 174
+missing$ -- 44
+newline$ -- 77
+num.names$ -- 64
+pop$ -- 137
 preamble$ -- 1
-purify$ -- 199
+purify$ -- 158
 quote$ -- 0
-skip$ -- 252
+skip$ -- 221
 stack$ -- 0
-substring$ -- 679
-swap$ -- 25
+substring$ -- 607
+swap$ -- 22
 text.length$ -- 8
 text.prefix$ -- 8
 top$ -- 0
-type$ -- 192
+type$ -- 168
 warning$ -- 0
-while$ -- 106
-width$ -- 27
-write$ -- 279
+while$ -- 92
+width$ -- 24
+write$ -- 248
