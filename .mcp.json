@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "arxiv": {
+      "command": "uvx",
+      "args": ["--from", "arxiv-mcp-server", "arxiv-mcp-server", "--storage-path", "/Users/jaibajaj/.arxiv-mcp-cache"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "semantic-scholar": {
+      "command": "uvx",
+      "args": ["semanticscholar-mcp-server"]
+    }
+  }
+}
