@@ -28,7 +28,7 @@
   urlcolor=MidnightBlue,
   pdftitle={A Lasserre SDP Lower Bound for the Autoconvolution Constant},
   pdfauthor={Andrei Piterbarg and Jai Bajaj},
-  pdfsubject={A semidefinite-programming lower bound for the autoconvolution constant}
+  pdfsubject={A Lasserre SDP lower bound for the autoconvolution constant}
 }
 \captionsetup{font=small, labelfont=bf}
 \setlist{topsep=4pt, itemsep=2pt, parsep=0pt}
@@ -98,8 +98,8 @@ We prove that the autoconvolution constant
   \inf_f \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2},
 \]
 taken over nonnegative functions supported on $(-\tfrac14,\tfrac14)$,
-satisfies $C_{1a}\ge 1.3$.  Instead of an exhaustive
-branch-and-prune cascade, the proof reduces the infinite-dimensional
+satisfies $C_{1a}\ge 1.3$.  In contrast to the branch-and-prune
+cascade of~\cite{BajajCS2026}, the proof reduces the infinite-dimensional
 optimization to the polynomial program
 \[
   \val(d)
@@ -113,10 +113,10 @@ $\val(d)\ge 1.3$ at $d=16$ via the order-$3$ Lasserre
 hierarchy~\cite{Lasserre2001} combined with localizing
 matrices~\cite{Lasserre2015}.  At higher resolutions we replace
 the full moment cone by its correlative-sparsity
-restriction~\cite{Waki2006}, which preserves soundness while permitting
-numerical computation up to $d=128$.  The external dependency of the
-proof is a single finite SDP whose dual solution we record as a
-primal-infeasibility certificate.
+restriction~\cite{Waki2006}, which preserves soundness while
+accommodating numerical corroboration at $d\in\{32,64,128\}$.  The
+external dependency of the proof is a single finite SDP at
+$(d,k)=(16,3)$ whose dual solution we record as the certificate.
 \end{abstract}
 \noindent\textit{2020 Mathematics Subject Classification.}
 11B83, 42A85, 90C22, 90C23.
@@ -173,8 +173,8 @@ value has resisted substantial improvement for nearly a decade.
   \midrule
   Published upper bound & $\le 1.50992$ & Matolcsi \& Vinuesa~\cite{MV10} \\
   Published lower bound & $\ge 1.2802$  & Cloninger \& Steinerberger~\cite{CS17} \\
-  Cascade lower bound   & $\ge 1.4$     & Bajaj~\cite{BajajCS2026} \\
   SDP lower bound       & $\ge 1.3$     & This work \\
+  Cascade lower bound   & $\ge 1.4$     & Bajaj~\cite{BajajCS2026} \\
   \bottomrule
 \end{tabular}
 \caption[Published bounds on C1a in the normalization used here.]{Published bounds on $C_{1a}$ in the normalization used here,
@@ -228,11 +228,10 @@ $k$ is the Lasserre order.  A looser version of the certificate at
 $d=8$, $k=3$ already suffices to reproduce the $1.2802$ bound
 of~\cite{CS17} in a few seconds; the improvement to $1.3$ requires
 moment matrices of size~$969$, solved by MOSEK~\cite{MOSEK} in under
-ten minutes on a workstation.  Higher resolutions $d\in\{32,64,128\}$
-are reported as empirical corroboration and remain within the same
-soundness framework, but rely on correlative
-sparsity~\cite{Waki2006} whose bound at $d=16$ is redundant with the
-full hierarchy.
+ten minutes on a workstation.  Results at $d\in\{32,64,128\}$ are reported as empirical corroboration
+and remain within the same soundness framework, but rely on
+correlative sparsity~\cite{Waki2006}; at $d=16$ that restriction is
+redundant with the full hierarchy.
 
 \subsection{Proof Strategy at a High Level}
 
@@ -252,9 +251,8 @@ Figure~\ref{fig:overview} shows the three-step reduction.
     exceeds $1.3$.
 \end{enumerate}
 
-Crucially, step (iii) requires only a certified lower bound on a
-concrete SDP --- no enumeration, no branch-and-prune, and no
-resolution refinement.
+Step (iii) requires only a certified lower bound on a concrete SDP;
+no enumeration or resolution refinement enters the proof.
 
 \begin{figure}[t]
 \centering
@@ -331,7 +329,11 @@ gives the claimed lower bound on $\|f*f\|_{L^\infty}$.
 
 Each matrix $M_W$ is nonnegative, symmetric, and has entries only at
 positions $(i,j)$ with $i+j$ in a fixed integer interval; these are
-the support sets depicted in Figure~\ref{fig:window-matrix}.  The set
+the support sets depicted in Figure~\ref{fig:window-matrix}.
+Throughout what follows, bin indices run over $\{0,\ldots,d-1\}$,
+while the simplex coordinates used in the Lasserre SDP are the
+$1$-indexed variables $x_1,\ldots,x_d$ with $x_{i+1}$ corresponding
+to bin~$i$.  The set
 of admissible windows is
 \[
   \mathcal{W}_d
@@ -394,12 +396,12 @@ $\mu\in\Delta_d$.  By Lemma~\ref{lem:continuous-window},
 Taking the infimum over $f$ gives $C_{1a}\ge \val(d)$.
 \end{proof}
 
-Theorem~\ref{thm:val-le-c1a} is the key bridge: any mechanism that
-certifies $\val(d)\ge c_{\mathrm{target}}$ certifies
+Theorem~\ref{thm:val-le-c1a} is the bridge to the SDP world: any
+mechanism that certifies $\val(d)\ge c_{\mathrm{target}}$ certifies
 $C_{1a}\ge c_{\mathrm{target}}$.  The Lasserre hierarchy is one such
 mechanism.  Upper bounds on $\val(d)$ obtained by numerical
-multistart~\cite[docs/val\_d\_results.md]{BajajCS2026} suggest
-$\val(16)\approx 1.319$, crossing $1.30$ for the first time at
+multistart (see~\cite{BajajCS2026}) suggest
+$\val(16)\approx 1.319$, crossing $1.3$ for the first time at
 $d=16$; this is the empirical reason for our choice of resolution.
 
 
@@ -409,9 +411,7 @@ $d=16$; this is the empirical reason for our choice of resolution.
 
 We now describe how to lower-bound $\val(d)$ by a convergent sequence
 of semidefinite programs.  The construction is classical, due to
-Lasserre~\cite{Lasserre2001,Lasserre2015} and Parrilo~\cite{Parrilo03};
-we include it in detail because the soundness argument uses the
-specific form that reappears below under correlative sparsity.
+Lasserre~\cite{Lasserre2001,Lasserre2015} and Parrilo~\cite{Parrilo03}.
 
 \subsection{Pseudo-Moments and the Moment Matrix}
 
@@ -676,19 +676,15 @@ $\mathcal{Y}_k(d)\subseteq \mathcal{Y}_k^{\mathrm{sp}}(d;b)$ follows,
 and the inequality on SDP optima is monotone in the feasible set.
 \end{proof}
 
-\begin{remark}[Consistency must remain global]
+\begin{remark}[Global consistency constraint]
 \label{rem:global-consistency}
 The simplex identity $y_\alpha=\sum_i y_{\alpha+e_i}$ of
 Proposition~\ref{prop:simplex-moments}(iii) couples moments across
 cliques and cannot be relaxed to a per-clique statement without
-losing the bound.  We follow~\cite{Waki2006} in retaining this as a
-global linear equality among the pseudo-moments; the implementation
-moreover tracks all moments of degree at most $2k-1$ globally, so the
-consistency chain is an exact equality up to that degree.  Replacing
-the equality by an inequality only over moments that remain in the
-clique basis is an option when some high-degree children fall outside
-the clique basis at order~$k$; this is the only source of looseness
-introduced beyond the principal-submatrix relaxation.
+losing the bound.  We follow~\cite{Waki2006} in retaining the
+identity as a global linear equality among the pseudo-moments; the
+implementation moreover tracks every moment of degree at most $2k-1$
+so that the consistency chain is an exact equality up to that degree.
 \end{remark}
 
 \subsection{Tightness at Target Resolutions}
@@ -772,8 +768,9 @@ Standard primal-dual interior-point solvers
 (MOSEK~\cite{MOSEK}, SDPA~\cite{SDPA}) or splitting methods
 (SCS~\cite{SCS}, COSMO~\cite{COSMO}) handle the SDPs arising in
 Algorithm~\ref{alg:lasserre-cg}; our implementation uses MOSEK at
-$d\le 32$ and switches to SCS on GPU pods for $d\ge 64$ due to memory
-constraints.
+$d\le 32$ and switches to SCS on GPU-equipped workstations at
+$d\ge 64$, where the interior-point memory footprint of MOSEK exceeds
+available RAM.
 
 \subsection{Recovering a Rigorous Lower Bound}
 
@@ -969,19 +966,16 @@ SDP route is the only one with a realistic asymptotic budget.
   \item \textbf{Finite-precision SDP.}
     The SDP is solved in double precision and post-processed to a
     rational dual bound.  While standard in rigorous
-    SDP~\cite{JanssonChaykinKeil2008}, the procedure imports trust in the
-    arithmetic library used to evaluate the rational objective.  For
-    a completely kernel-level formal proof this would need to be
-    replaced by a Lean- or Coq-verified LP/SDP evaluator, in the
-    style of the rigorous Kepler proof~\cite{Hales2017} or the
-    rigorous verification of the Riemann hypothesis up to $3\cdot
-    10^{12}$~\cite{PlattTrudgian2021}.
+    SDP~\cite{JanssonChaykinKeil2008}, the procedure imports trust in
+    the arithmetic library used to evaluate the rational objective.
+    A kernel-level formal proof would replace this step with a Lean-
+    or Coq-verified SDP evaluator; such an evaluator is not yet
+    available.
   \item \textbf{Correlative sparsity.}
     At $d\ge 32$ the bound depends on the clique bandwidth~$b$.  Our
     implementation defaults to the smallest $b$ that covers all
-    killing windows at the target threshold; too small~$b$ produces a
-    looser bound but a cheaper SDP.  The trade-off is quantified in
-    the memory/bandwidth table of~\cite[PROBLEM\_STATE.md]{BajajCS2026}.
+    active windows at the target threshold; too small~$b$ produces a
+    looser bound but a cheaper SDP.
 \end{itemize}
 
 
