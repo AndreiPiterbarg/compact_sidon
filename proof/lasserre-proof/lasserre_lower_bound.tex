@@ -560,33 +560,32 @@ indicator of the empty monomial) reduces to the scalar constraint.
 
 \begin{theorem}[Soundness of the Lasserre relaxation]
 \label{thm:lasserre-soundness}
-Let $k\ge 1$, $d\ge 2$, and let $(t^\star,y^\star)$ be any point of the
-feasible set of the order-$k$ Lasserre SDP above.  Then
-$t^\star\ge \val(d)$ need \emph{not} hold; but any dual-feasible pair
-produces a valid lower bound:
+For every $k\ge 1$ and every $d\ge 2$,
 \[
-  \val(d) \;\ge\; \val^{(k)}(d).
+  \val^{(k)}(d) \;\le\; \val^{(k+1)}(d) \;\le\; \val(d),
 \]
-Moreover, $\val^{(k)}(d)\le\val^{(k+1)}(d)\le\val(d)$ for every $k$,
 with equality in the limit $k\to\infty$~\cite[Thm.~4.1]{Lasserre2001}.
 \end{theorem}
 
 \begin{proof}
-Any minimizer $\mu^\star\in\Delta_d$ of $\val(d)$ defines a
+Any minimizer $\mu^\star\in\Delta_d$ of $\val(d)$ defines a Dirac
 pseudo-moment sequence $y^\star_\alpha=(\mu^\star)^\alpha$ that
-satisfies every condition of Proposition~\ref{prop:simplex-moments};
-moreover, if $t^\star=\val(d)=\max_W (\mu^\star)^\top M_W\mu^\star$,
-then
+satisfies every condition of Proposition~\ref{prop:simplex-moments}.
+Because $y^\star$ is Dirac, every localizing matrix reduces to a
+scalar multiple of the moment matrix:
+$M_{k-1}(x_{i+1}x_{j+1}\cdot y^\star)=\mu^\star_i\mu^\star_j\,M_{k-1}(y^\star)$.
+Set $t^\star=\val(d)=\max_W (\mu^\star)^\top M_W\mu^\star$.  Then
 \[
   t^\star\cdot M_{k-1}(y^\star) - \sum_{ij}(M_W)_{ij}\,M_{k-1}(x_{i+1}x_{j+1}\cdot y^\star)
   \;=\;
-  (t^\star - (\mu^\star)^\top M_W\mu^\star)\cdot M_{k-1}(y^\star),
+  \bigl(t^\star - (\mu^\star)^\top M_W\mu^\star\bigr)\cdot M_{k-1}(y^\star),
 \]
-which is PSD because $t^\star \ge (\mu^\star)^\top M_W\mu^\star$ and
+which is PSD because the scalar prefactor is nonnegative and
 $M_{k-1}(y^\star)\PSD$.  Thus $(t^\star, y^\star)$ is feasible for the
-order-$k$ SDP, so its optimum is $\le t^\star=\val(d)$; in other
-words, $\val^{(k)}(d)\le\val(d)$.  Monotonicity and convergence are
-Lasserre's classical theorem~\cite[Thm.~4.1]{Lasserre2001}.
+order-$k$ SDP, so its optimum is $\le t^\star=\val(d)$; that is,
+$\val^{(k)}(d)\le\val(d)$.  Monotonicity in $k$ and convergence
+$\val^{(k)}(d)\to\val(d)$ as $k\to\infty$ are Lasserre's classical
+theorem~\cite[Thm.~4.1]{Lasserre2001}.
 \end{proof}
 
 
@@ -824,10 +823,7 @@ gives
   \qquad k\ge 1,\ b\le d-1.
 \end{equation}
 Figure~\ref{fig:ladder} visualizes this ladder together with
-representative numerical values.  The key observation is that
-$\val(d)$ is monotone in~$d$ (a finer partition can only lower the
-test value), so certified bounds at one resolution transfer to all
-finer ones.
+representative numerical values.
 
 \begin{figure}[t]
 \centering
@@ -846,25 +842,25 @@ optimization~\cite{BajajCS2026} are shown as open circles.}
 
 \begin{theorem}[Recorded SDP certificate]
 \label{thm:certificate}
-At $(d,k)=(16,3)$, the dense Lasserre SDP
-$\val^{(3)}(16)$ admits a dual-feasible point whose objective value,
-after rigorous post-processing, satisfies
+The order-$3$ Lasserre relaxation at $d=16$ satisfies
 \[
-  \val^{(3)}(16) \;\ge\; 1.30.
+  \val^{(3)}(16) \;\ge\; 1.3,
 \]
+witnessed by a dual-feasible point of the SDP whose post-processed
+objective value exceeds $1.3$.
 \end{theorem}
 
-The SDP has $n_y=\binom{22}{6}\approx 7.4\times 10^4$
-pseudo-moment variables, a single moment matrix of size
-$\binom{19}{3}=969$, and $d+1=17$ localizing matrices (one per simplex
-coordinate, plus the window localizing per active window).  MOSEK
+The SDP has $n_y=\binom{22}{6}\approx 7.4\times 10^4$ pseudo-moment
+variables, a single moment matrix of size $\binom{19}{3}=969$, and
+$d=16$ coordinate localizing matrices, plus one window-localizing
+matrix per active window $W\in\mathcal{W}_{\mathrm{act}}$.  MOSEK
 solves the resulting problem in under ten minutes on a 32-core
 workstation; the rigorous post-processing step of
 Section~\ref{sec:algorithm} adds a negligible overhead.  The
-certificate file \texttt{data/gap\_report\_d16\_o3.json} records the
-dual variables in double precision and the corresponding rational
-lower bound; together they constitute the external dependency of the
-proof.
+certificate file recorded with the source code stores the dual
+variables in double precision together with the corresponding
+rational lower bound; together these constitute the external
+dependency of the proof.
 
 \subsection{Proof of the Main Theorem}
 
@@ -873,7 +869,7 @@ Let $f\in\mathcal{F}$ be nonnegative with $\|f*f\|_{L^\infty}<\infty$.
 By homogeneity, assume $\int f = 1$.  Theorem~\ref{thm:val-le-c1a}
 gives $C_{1a}\ge \val(16)$, and the ladder~\eqref{eq:ladder} gives
 $\val(16)\ge \val^{(3)}(16)$.  By
-Theorem~\ref{thm:certificate}, $\val^{(3)}(16)\ge 1.30$, so
+Theorem~\ref{thm:certificate}, $\val^{(3)}(16)\ge 1.3$, so
 \[
   \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2}
   \;\ge\;
@@ -881,9 +877,9 @@ Theorem~\ref{thm:certificate}, $\val^{(3)}(16)\ge 1.30$, so
   \;\ge\;
   \val^{(3)}(16)
   \;\ge\;
-  1.30.
+  1.3.
 \]
-Taking the infimum over $f\in\mathcal{F}$ gives $C_{1a}\ge 1.30$.
+Taking the infimum over $f\in\mathcal{F}$ gives $C_{1a}\ge 1.3$.
 \end{proof}
 
 
