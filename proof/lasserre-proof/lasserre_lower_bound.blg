@@ -1,0 +1,46 @@
+This is BibTeX, Version 0.99d (TeX Live 2025)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: lasserre_lower_bound.aux
+The style file: amsalpha.bst
+Database file #1: lasserre_refs.bib
+You've used 25 entries,
+            2624 wiz_defined-function locations,
+            746 strings with 9059 characters,
+and the built_in function-call counts, 10365 in all, are:
+= -- 975
+> -- 546
+< -- 8
++ -- 195
+- -- 188
+* -- 967
+:= -- 1703
+add.period$ -- 25
+call.type$ -- 25
+change.case$ -- 174
+chr.to.int$ -- 25
+cite$ -- 25
+duplicate$ -- 358
+empty$ -- 742
+format.name$ -- 219
+if$ -- 2030
+int.to.chr$ -- 1
+int.to.str$ -- 0
+missing$ -- 50
+newline$ -- 86
+num.names$ -- 73
+pop$ -- 174
+preamble$ -- 1
+purify$ -- 199
+quote$ -- 0
+skip$ -- 252
+stack$ -- 0
+substring$ -- 679
+swap$ -- 25
+text.length$ -- 8
+text.prefix$ -- 8
+top$ -- 0
+type$ -- 192
+warning$ -- 0
+while$ -- 106
+width$ -- 27
+write$ -- 279
