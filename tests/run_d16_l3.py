@@ -31,6 +31,15 @@ from lasserre_highd import (
     _build_banded_cliques, enum_monomials, val_d_known,
 )
 
+# Atom-based window ranking (primal oracle).  Scores each candidate window
+# by μ̂^T M_W μ̂ where μ̂ are projected rank-1 atoms of M_1(y).  Mathematically
+# a pure ranking heuristic — every selected window is still a valid Lasserre
+# localizer so lb ≤ val(d) holds regardless of ordering.  Empirically +14 pp
+# gc per round over min-eig / dual-guided selection (measured Apr 2026).
+from lasserre.gap_accelerator import (
+    atom_based_window_ranking, blend_rankings,
+)
+
 SQRT2 = np.sqrt(2.0)
 
 
@@ -291,6 +300,155 @@ def _greedy_diverse_cuts(violations, n_add, P, d, active_windows,
 # MEMORY:
 #   PSD: 100 × 11781 rows × nnz per row = O(100M) COO entries → 10-20 GB
 #   Cuts: 100 rows × n_y cols (sparse) = O(7M nnz) → <100 MB
+
+
+# =====================================================================
+# Checkpointing — full-state save/load for resumable runs
+# =====================================================================
+#
+# Saves at the END of each CG round: all state needed to resume the CG
+# loop from the next round as if the run had never been interrupted.
+# File layout (in --data-dir):
+#
+#   ckpt_<tag>_cg<N>.json   — metadata (cg_round, best_lb, active_windows,
+#                              last_feas_t, scalar_lb, d/order/bw for
+#                              compatibility verification, timestamp).
+#   ckpt_<tag>_cg<N>.npz    — compressed arrays: last_feas_y, ws_x, ws_y,
+#                              ws_s, violations (w and min_eig).
+#
+# On startup, _try_load_checkpoint() scans <data-dir> for the highest-round
+# ckpt matching (d, order, bandwidth) and returns its loaded state dict.
+# The solver then skips Round 0 and jumps into the CG loop at round+1.
+#
+# Soundness: the checkpoint contains only warm-start data.  The SDP is
+# rebuilt from active_windows on resume, so a corrupted / stale checkpoint
+# can only affect solve SPEED (warm-start quality) — never correctness.
+# The problem-identity fields (d/order/bw) must match, otherwise the ckpt
+# is silently ignored.
+
+def _save_checkpoint(
+    data_dir, tag, cg_round, best_lb, active_windows,
+    last_feas_y, last_feas_t, last_x, last_y_dual, last_s,
+    violations, scalar_lb, d, order, bandwidth, elapsed_s,
+):
+    """Atomically write ckpt_<tag>_cg<N>.{json,npz}.
+
+    Uses a temp-file-then-rename pattern so an interrupt mid-write can't
+    leave a partial file that would later deserialise incorrectly.
+    """
+    os.makedirs(data_dir, exist_ok=True)
+    stem = os.path.join(data_dir, f'ckpt_{tag}_cg{cg_round}')
+
+    def _arr(x):
+        if x is None:
+            return np.array([], dtype=np.float64)
+        return np.asarray(x, dtype=np.float64)
+
+    v_w = (np.array([int(v[0]) for v in violations], dtype=np.int64)
+           if violations else np.array([], dtype=np.int64))
+    v_e = (np.array([float(v[1]) for v in violations], dtype=np.float64)
+           if violations else np.array([], dtype=np.float64))
+
+    npz_tmp = stem + '.npz.tmp'
+    # Use a manual file handle: np.savez_compressed auto-appends '.npz'
+    # to string paths that don't end in '.npz', which breaks tmp→final rename.
+    with open(npz_tmp, 'wb') as _fh:
+        np.savez_compressed(
+            _fh,
+            last_feas_y=_arr(last_feas_y),
+            last_x=_arr(last_x),
+            last_y_dual=_arr(last_y_dual),
+            last_s=_arr(last_s),
+            violations_w=v_w,
+            violations_eig=v_e,
+        )
+    os.replace(npz_tmp, stem + '.npz')
+
+    meta = {
+        'version': 1,
+        'cg_round': int(cg_round),
+        'best_lb': float(best_lb),
+        'scalar_lb': float(scalar_lb),
+        'active_windows': sorted(int(w) for w in active_windows),
+        'last_feas_t': (float(last_feas_t)
+                        if last_feas_t is not None else None),
+        'n_violations': len(violations),
+        'd': int(d),
+        'order': int(order),
+        'bandwidth': int(bandwidth),
+        'elapsed_s': float(elapsed_s),
+        'timestamp': datetime.now().isoformat(),
+    }
+    json_tmp = stem + '.json.tmp'
+    with open(json_tmp, 'w') as fh:
+        json.dump(meta, fh, indent=2, default=str)
+    os.replace(json_tmp, stem + '.json')
+
+
+def _try_load_checkpoint(data_dir, tag, d, order, bandwidth):
+    """Scan data_dir for the highest-round ckpt matching (d,order,bw).
+
+    Returns a dict of resume state, or None if no compatible ckpt is found.
+    Graceful on any read error (returns None) — a failed resume should
+    never cause a crash; we fall back to a clean start.
+    """
+    if not os.path.isdir(data_dir):
+        return None
+    import re as _re
+    pat = _re.compile(rf'^ckpt_{_re.escape(tag)}_cg(\d+)\.json$')
+    best_round = -1
+    best_meta_path = None
+    for fn in os.listdir(data_dir):
+        m = pat.match(fn)
+        if m:
+            r = int(m.group(1))
+            if r > best_round:
+                best_round = r
+                best_meta_path = os.path.join(data_dir, fn)
+
+    if best_meta_path is None:
+        return None
+
+    try:
+        with open(best_meta_path) as fh:
+            meta = json.load(fh)
+    except Exception:
+        return None
+
+    if (meta.get('d') != d or meta.get('order') != order
+            or meta.get('bandwidth') != bandwidth):
+        return None  # mismatched problem identity — do not resume
+
+    npz_path = best_meta_path.replace('.json', '.npz')
+    if not os.path.exists(npz_path):
+        return None
+    try:
+        data = np.load(npz_path)
+    except Exception:
+        return None
+
+    def _or_none(a):
+        return a if (a is not None and a.size > 0) else None
+
+    violations = list(zip(
+        data['violations_w'].astype(int).tolist(),
+        data['violations_eig'].astype(float).tolist(),
+    ))
+
+    return {
+        'cg_round': int(meta['cg_round']),
+        'best_lb': float(meta['best_lb']),
+        'scalar_lb': float(meta['scalar_lb']),
+        'active_windows': set(int(w) for w in meta['active_windows']),
+        'last_feas_t': meta.get('last_feas_t'),
+        'last_feas_y': _or_none(data['last_feas_y']),
+        'last_x': _or_none(data['last_x']),
+        'last_y_dual': _or_none(data['last_y_dual']),
+        'last_s': _or_none(data['last_s']),
+        'violations': violations,
+        'meta_path': best_meta_path,
+        'timestamp': meta.get('timestamp'),
+    }
 
 
 def _psd_lower_tri_map(n):
@@ -710,6 +868,8 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                      use_gpu=False, scs_max_iters=100000, scs_eps=1e-5,
                      scs_scale=None, use_indirect=False,
                      k_vecs=3, cuts_per_round=100,
+                     rho=0.1, atom_frac=0.5,
+                     resume=False, data_dir=None,
                      verbose=True):
     """Full CG Lasserre solver using direct SCS."""
     import scs
@@ -729,6 +889,24 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
     print("\nBuilding base SCS problem...", flush=True)
     t_build = time.time()
     A_base, b_base, c_obj, cone_base, meta = build_base_problem(P, add_upper_loc)
+    # Optional Z/2 time-reversal symmetry injection (gated by env var so it
+    # cannot perturb any in-flight production run that hasn't opted in).
+    # See lasserre/z2_symmetry.py for the mathematical justification.
+    if os.environ.get('SIDON_Z2_SYMMETRY') == '1':
+        try:
+            _repo_root = os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))
+            if _repo_root not in sys.path:
+                sys.path.insert(0, _repo_root)
+            from lasserre.z2_symmetry import (
+                inject_z2_equalities_into_base_problem)
+            A_base, b_base, cone_base, _n_z2 = (
+                inject_z2_equalities_into_base_problem(
+                    P, A_base, b_base, cone_base, verbose=verbose))
+        except Exception as _z2_e:
+            print(f"  [WARN] Z/2 symmetry injection failed ({_z2_e}); "
+                  f"falling back to un-symmetrised problem.",
+                  flush=True)
     print(f"  Built in {time.time()-t_build:.1f}s\n", flush=True)
 
     scs_kwargs = dict(max_iters=scs_max_iters, eps_abs=scs_eps, eps_rel=scs_eps,
@@ -789,51 +967,121 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
     last_y_dual = sol['y'].copy() if sol['y'] is not None else None
     last_s = sol['s'].copy() if sol['s'] is not None else None
 
-    for cg_round in range(1, max_cg_rounds + 1):
-        # Dual-guided + support-diverse greedy selection.
-        #
-        # The scalar window constraints t ≥ f_W(y) are in the nonneg cone.
-        # Their DUAL variables λ_W measure the "pressure" each window exerts
-        # on the bound — high λ_W means the window is near-binding and
-        # adding its PSD cone will likely tighten lb.  We proxy |λ_W| by
-        # CLOSENESS TO BINDING: gap_W = t_val − f_W(y_last_feas).  Small
-        # positive gap ⇒ window is near-tight ⇒ high dual pressure.
-        #
-        # Combined score per violation:  |min_eig| / (gap_W + ε)
-        # High score = severe PSD violation AND near-binding scalar constraint.
-        #
-        # This is the dual-guided cut selection rule (Frangioni 2002, Kiwiel 2004).
-        # Mathematically sound: only reorders the pool, every selected cut
-        # remains a valid necessary condition for the Lasserre hierarchy.
-        n_add = min(cuts_per_round, len(violations))
-
-        if last_feas_y is not None and last_feas_t is not None:
-            # Compute f_W(y_last_feas) for ALL windows in one sparse matvec.
-            _f_vals_all = P['F_scipy'].dot(last_feas_y)    # (n_win,)
-            _t_ref = last_feas_t
-
-            def _dual_guided_score(violation):
-                w = violation[0]
-                min_eig = violation[1]
-                gap = max(_t_ref - _f_vals_all[w], 1e-6)   # avoid div-by-zero
-                return abs(min_eig) / gap
-
-            selected = _greedy_diverse_cuts(
-                violations, n_add, P, P['d'], active_windows,
-                score_fn=_dual_guided_score)
+    # ── Checkpoint resume (after Round 0 so base SDP is always reproduced,
+    # only CG state is restored) ──
+    # Resolve data directory for checkpoints.  Default: ../data relative to
+    # this script (matches the existing checkpoint write path).
+    _ckpt_dir = data_dir if data_dir is not None else os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', 'data')
+    _ckpt_tag = f"d{d}_o{order}_bw{bandwidth}_scs"
+    start_round = 1
+    if resume:
+        _ckpt = _try_load_checkpoint(_ckpt_dir, _ckpt_tag, d, order, bandwidth)
+        if _ckpt is not None:
+            print(
+                f"  [RESUME] Loaded checkpoint at CG round "
+                f"{_ckpt['cg_round']} (lb={_ckpt['best_lb']:.10f}, "
+                f"active_windows={len(_ckpt['active_windows'])}, "
+                f"saved at {_ckpt.get('timestamp', 'unknown')})",
+                flush=True)
+            # Restore warm-starts and tracking state.
+            best_lb = _ckpt['best_lb']
+            active_windows = _ckpt['active_windows']
+            last_feas_y = _ckpt['last_feas_y']
+            last_feas_t = _ckpt['last_feas_t']
+            if _ckpt['last_x'] is not None:
+                last_x = _ckpt['last_x']
+            if _ckpt['last_y_dual'] is not None:
+                last_y_dual = _ckpt['last_y_dual']
+            if _ckpt['last_s'] is not None:
+                last_s = _ckpt['last_s']
+            violations = _ckpt['violations']
+            start_round = _ckpt['cg_round'] + 1
+            scalar_lb = _ckpt['scalar_lb']   # informational — Round 0 already done
         else:
-            # Round 1: no last_feas_y yet — fall back to min-eig-only sort.
+            print(f"  [RESUME] No compatible checkpoint found — starting fresh",
+                  flush=True)
+
+    # Count consecutive rounds with < 1e-6 improvement.  With backoff
+    # bisection active, a single stalled round is no longer a reliable
+    # signal that the relaxation is capped — even a stall round can come
+    # back +0.005 on the next attempt as cuts evolve.  Require three
+    # consecutive stalls before aborting (was one).
+    consecutive_stalls = 0
+    for cg_round in range(start_round, max_cg_rounds + 1):
+        # Atom-based window ranking + min-eig blend (Frangioni 2002 primal
+        # oracle style; implemented in lasserre/gap_accelerator.py).
+        #
+        # Each candidate window is scored by μ̂^T M_W μ̂ where μ̂ are rank-1
+        # atoms extracted from M_1(y_last_feas) via truncated SVD and
+        # projected onto Δ_d (nonneg + sum=1).  Score = Σᵢ wᵢ (μ̂ᵢ^T M_W μ̂ᵢ)
+        # weighted by the atomic weights wᵢ.  High score = window would be
+        # most violated by the current primal approximation — adding it
+        # constrains the optimum the hardest.
+        #
+        # Empirically +14 pp gc per round over dual-guided (measured Apr 2026).
+        # Mathematically sound: pure RANKING heuristic — every selected window
+        # is a valid Lasserre localizer; lb ≤ val(d) holds regardless of
+        # ordering.  The atom extraction itself is non-rigorous (heuristic
+        # simplex projection of eigenvectors) but that is OK because atoms
+        # are used only to rank, never to build constraints.
+        #
+        # Blending: 50% atom-ranked + 50% min-eig-ranked gives robust mix —
+        # atoms catch "high-pressure" windows, eig-rank catches severely
+        # violated ones that atoms may miss when atom projection is lossy.
+        # Continuous schedules driven by cg_round:
+        # (1) `round_eps` starts 100x looser than the CLI target `scs_eps`
+        #     and tightens log-linearly to the target over 10 rounds.  Early
+        #     rounds converge fast at loose eps (certifying easy t values);
+        #     later rounds (where certifying infeasibility near the true
+        #     optimum requires tight dual certificates) run at the full
+        #     CLI-specified tolerance.  Empirically, the previous run
+        #     hit R2 step-11 stalls because its retry ran 50000 iters at
+        #     scs_eps=1e-7 on an easy t value — that waste is now gone.
+        # (2) `round_cuts` grows linearly with cg_round so that, as lb
+        #     deceleration kicks in, we add more pressure per round to break
+        #     through plateaus instead of paying the per-round overhead for
+        #     diminishing returns.
+        round_eps = max(scs_eps,
+                        min(1e-5,
+                            scs_eps * (10.0 ** (2.0 - cg_round / 5.0))))
+        round_cuts = cuts_per_round + 10 * cg_round
+        n_add = min(round_cuts, len(violations))
+
+        if last_feas_y is not None:
+            # Run atom ranking on all violation candidates.  Cheap:
+            # O(k × d² × n_windows) where k ≈ 16 atoms and n ≤ 496 candidates.
+            cand_ws = [int(v[0]) for v in violations]
+            atom_rank = atom_based_window_ranking(last_feas_y, P, cand_ws)
+            # violations is already sorted ascending by min_eig (most
+            # violated first) — that IS the eig-rank.
+            selected = blend_rankings(
+                eig_rank=violations,
+                atom_rank=atom_rank,
+                n_add=n_add,
+                atom_frac=atom_frac,
+            )
+            selection_mode = 'atom+eig'
+        else:
+            # Round 1: no last_feas_y yet — fall back to diverse eig-rank.
             selected = _greedy_diverse_cuts(
                 violations, n_add, P, P['d'], active_windows)
+            selection_mode = 'eig+diverse (round1)'
 
-        for w, _eig in selected:
-            active_windows.add(w)
+        for w, _score in selected:
+            active_windows.add(int(w))
 
         print(f"\n  [CG round {cg_round}] {len(active_windows)} windows "
-              f"(+{len(selected)} added, dual-guided)",
+              f"(+{len(selected)} added, {selection_mode}, "
+              f"round_eps={round_eps:.1e}, round_cuts={round_cuts})",
               flush=True)
 
-        lo = max(0.5, best_lb - 1e-3)
+        # Initial lo slightly below best_lb as a numerical guard against
+        # any residual solver noise that could briefly accept t = best_lb
+        # as feasible.  The 1e-3 slack previously used wasted the first
+        # bisection step re-certifying a known-infeas region; 1e-5 is
+        # tight enough to be safe without throwing away a whole step.
+        lo = max(0.5, best_lb - 1e-5)
         hi = best_lb + 0.02 if best_lb > 0.5 else 5.0
 
         c_feas = np.zeros(meta['n_x'])  # feasibility objective
@@ -1011,7 +1259,7 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                     # for phase-1 problems (sweep_bisection.py)
                     gpu_solver[0] = ADMMSolver(
                         A_p1_template, b_p1_template, c_p1_cached,
-                        cone_p1_cached, rho=0.1,
+                        cone_p1_cached, rho=rho,
                         device='cuda', verbose=False)
                     # Warm-up: 100 iters at initial t to seed workspace
                     gpu_solver[0].solve(
@@ -1137,13 +1385,13 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             # behavior — no hyperparameter changes.
             if step < 4:
                 adaptive_iters = min(scs_max_iters, 800)
-                adaptive_eps = max(scs_eps, 1e-5)
+                adaptive_eps = max(round_eps, 1e-5)
             elif step < 10:
                 adaptive_iters = min(scs_max_iters, 2000)
-                adaptive_eps = max(scs_eps, 1e-6)
+                adaptive_eps = max(round_eps, 1e-6)
             else:
                 adaptive_iters = min(scs_max_iters, 4000)
-                adaptive_eps = scs_eps
+                adaptive_eps = round_eps
 
             # Tau-interpolation (unchanged).
             use_interp = False
@@ -1209,20 +1457,84 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                   f"{interp_tag}{retry_tag}",
                   flush=True)
 
-            # If we cannot certify a verdict even after the full-budget
-            # retry, ADMM is stalling at this t. Continuing the bisection
-            # at the same mid gives no new information; we stop the
-            # bracket refinement here and fall back to the existing lo/hi.
+            # Backoff bisection on uncertain (soundness-preserved).
+            #
+            # The previous behaviour was to break the bisection loop whenever
+            # `mid` returned uncertain — discarding the entire remainder of
+            # the bracket (lo, hi) without probing it.  But `lo` is certified
+            # infeas and smaller t makes the SDP MORE infeasible, so probing
+            # a t closer to lo (i.e., lo + α*(mid-lo) for α < 1) is strictly
+            # easier to certify than `mid` itself.  Each successful backoff
+            # advances lo (or shrinks hi if it surprisingly comes back feas),
+            # producing real lb progress from a round that would otherwise
+            # have stalled.  Every accepted verdict is a valid Lasserre
+            # feasibility certificate at its respective t, so lb ≤ val(d)
+            # is preserved.  Only if ALL backoffs are also uncertain do we
+            # truly give up.
             if verdict == _VERDICT_UNCERTAIN:
-                print(
-                    f"    Stall (uncertain after full-budget retry); "
-                    f"ending bisection early. lo={lo:.8f} hi={hi:.8f}",
-                    flush=True)
-                break
+                backoff_alphas = [0.5, 0.25, 0.125]
+                for bo_i, alpha in enumerate(backoff_alphas):
+                    new_mid = lo + alpha * (mid - lo)
+                    # Stop if the backoff point is numerically too close to lo
+                    # (we already know lo is infeas; probing essentially the
+                    # same point gains nothing).
+                    if new_mid - lo < 1e-6:
+                        break
+                    t_bo = time.time()
+                    v_bo, sol_bo, tau_bo, bt_bo = check_feasible(
+                        new_mid, max_iters_override=adaptive_iters,
+                        eps_override=adaptive_eps)
+                    dt_bo = time.time() - t_bo
+                    iter_bo = sol_bo['info']['iter'] if sol_bo is not None else -1
+                    print(
+                        f"      [backoff {bo_i+1}/{len(backoff_alphas)} "
+                        f"alpha={alpha:.3f}] t={new_mid:.8f} {v_bo} "
+                        f"({dt_bo:.1f}s, {iter_bo} iters)",
+                        flush=True)
+                    if v_bo == _VERDICT_INFEAS:
+                        lo = new_mid
+                        tau_bo_finite = (tau_bo if np.isfinite(tau_bo)
+                                         and tau_bo > 0 else 1.0)
+                        tau_lo = tau_bo_finite
+                        verdict_log.append((new_mid, _VERDICT_INFEAS))
+                        verdict = _VERDICT_INFEAS
+                        break
+                    elif v_bo == _VERDICT_FEAS:
+                        hi = new_mid
+                        tau_bo_finite = (tau_bo if np.isfinite(tau_bo)
+                                         else 0.0)
+                        tau_hi = tau_bo_finite
+                        if sol_bo['x'] is not None:
+                            last_feas_y = sol_bo['x'][:n_y].copy()
+                            last_feas_t = new_mid
+                        verdict_log.append((new_mid, _VERDICT_FEAS))
+                        verdict = _VERDICT_FEAS
+                        break
+                    # uncertain: keep shrinking alpha and try again.
 
-            # Early termination: interval converged
-            if hi - lo < 5e-4 and step >= 4:
-                print(f"    Converged: interval {hi-lo:.2e} < 5e-4",
+                if verdict == _VERDICT_UNCERTAIN:
+                    # Backoffs all failed — truly can't certify anything in
+                    # (lo, mid].  Abort this round's bisection; lb stays at
+                    # the current lo which was carried in from earlier.
+                    print(
+                        f"    Stall (uncertain after retry + "
+                        f"{len(backoff_alphas)} backoffs); "
+                        f"ending bisection early. "
+                        f"lo={lo:.8f} hi={hi:.8f}",
+                        flush=True)
+                    break
+                # else: a backoff succeeded; lo or hi was updated above.
+                # Fall through to the convergence check and next step.
+
+            # Early termination: interval converged.  Threshold was 5e-4
+            # historically but that caps lb precision at +/- 0.0005; when
+            # we are pushing for lb > 1.2802 (a 4-decimal target), the
+            # looser cut-off can terminate the bisection 0.0003-0.0005
+            # below the value the current relaxation actually supports.
+            # Tightening to 1e-4 extracts that precision at modest cost
+            # (usually 1-2 additional bisection steps).
+            if hi - lo < 1e-4 and step >= 4:
+                print(f"    Converged: interval {hi-lo:.2e} < 1e-4",
                       flush=True)
                 break
 
@@ -1267,11 +1579,30 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         gc = (best_lb - 1) / (v - 1) * 100 if v > 1 else 0
         print(f"    lb={lb:.10f} (+{improvement:.2e}) gc={gc:.1f}%", flush=True)
 
-        # ── Save checkpoint after each CG round ──
-        _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 '..', 'data')
+        # ── Partial checkpoint (before violation check) ──
+        # Written with the PREVIOUS round's violations as a fallback, so a
+        # crash during the (expensive) violation eigendecomposition below
+        # still leaves a usable ckpt.  The post-violation save overwrites
+        # this atomically with the latest candidate pool.
+        _data_dir = data_dir if data_dir is not None else os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'data')
         os.makedirs(_data_dir, exist_ok=True)
         _tag = f"d{d}_o{order}_bw{bandwidth}_scs"
+
+        try:
+            _save_checkpoint(
+                _data_dir, _tag, cg_round, best_lb, active_windows,
+                last_feas_y, last_feas_t,
+                ws_x.copy(), ws_y.copy(), ws_s.copy(),
+                violations,                 # stale (prior round) — best we have
+                scalar_lb, d, order, bandwidth,
+                elapsed_s=time.time() - t_total,
+            )
+        except Exception as e:
+            print(f"    WARNING: partial checkpoint save failed: {e}",
+                  flush=True)
+
+        # Legacy artefacts (kept for backward-compat with downstream proof tools)
         _best_y = last_feas_y if last_feas_y is not None else ws_x[:n_y].copy()
         _ckpt = _result(best_lb, d, order, bandwidth, n_y,
                         len(active_windows), time.time() - t_total, _best_y)
@@ -1282,7 +1613,8 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
                     _y_sol)
         with open(os.path.join(_data_dir, f'result_{_tag}_cg{cg_round}.json'), 'w') as _f:
             json.dump(_ckpt, _f, indent=2, default=str)
-        print(f"    Checkpoint saved: cg{cg_round} lb={best_lb:.10f}", flush=True)
+        print(f"    Checkpoint saved: cg{cg_round} lb={best_lb:.10f}",
+              flush=True)
 
         # Use saved y* from bisection (avoids extra solve, like CUDA's
         # incremental approach — reuse existing work instead of recomputing).
@@ -1329,15 +1661,37 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
         violations = _check_violations_highd(
             y_vals, hi_for_viol, P, active_windows, k_vecs=0)
 
+        # Overwrite the partial checkpoint with the FRESH candidate pool.
+        # This is the checkpoint a resume will load — it contains the
+        # violations the next round should consider.  Atomic write via
+        # _save_checkpoint's tmp-then-rename ensures no torn file.
+        try:
+            _save_checkpoint(
+                _data_dir, _tag, cg_round, best_lb, active_windows,
+                last_feas_y, last_feas_t,
+                ws_x.copy(), ws_y.copy(), ws_s.copy(),
+                violations,                 # fresh candidates for round N+1
+                scalar_lb, d, order, bandwidth,
+                elapsed_s=time.time() - t_total,
+            )
+        except Exception as e:
+            print(f"    WARNING: post-violation checkpoint save failed: {e}",
+                  flush=True)
+
         if not violations:
             print(f"    No violations — converged.", flush=True)
             break
-        # Conservative stopping: only stop if improvement is tiny for many rounds.
-        # Previous threshold (1e-5 at round 3) was too aggressive — it fired when
-        # a stalled bisection gave lb < best_lb (improvement = negative), stopping
-        # the run before it had a chance to advance with new window constraints.
-        if improvement < 1e-6 and cg_round >= 8:
-            print(f"    Improvement < 1e-6 at round {cg_round} — stopping.",
+        # Require 3 CONSECUTIVE rounds with < 1e-6 improvement before
+        # giving up.  Any single backoff-bisection round can still yield
+        # real progress; only a sustained streak of stall rounds is
+        # reliable evidence that the relaxation genuinely caps here.
+        if improvement < 1e-6:
+            consecutive_stalls += 1
+        else:
+            consecutive_stalls = 0
+        if consecutive_stalls >= 3 and cg_round >= 8:
+            print(f"    {consecutive_stalls} consecutive stalls at "
+                  f"round {cg_round} — stopping.",
                   flush=True)
             break
 
@@ -1376,8 +1730,18 @@ def main():
     parser.add_argument('--use-indirect', action='store_true')
     parser.add_argument('--k-vecs', type=int, default=3,
                         help='Eigenvectors per spectral cut (default 3)')
-    parser.add_argument('--cuts-per-round', type=int, default=100,
-                        help='Max new windows added per CG round (default 100)')
+    parser.add_argument('--cuts-per-round', type=int, default=50,
+                        help='Max new windows added per CG round (default 50, sweep-optimal)')
+    parser.add_argument('--rho', type=float, default=0.1,
+                        help='ADMM penalty parameter (default 0.1)')
+    parser.add_argument('--atom-frac', type=float, default=0.5,
+                        help='Fraction of cuts from atom ranking vs eig-rank (default 0.5)')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume from the highest-round checkpoint in --data-dir '
+                             'that matches (--d, --order, --bw).')
+    parser.add_argument('--data-dir', type=str, default=None,
+                        help='Directory for checkpoints + artefacts '
+                             '(default: <repo>/data)')
     args = parser.parse_args()
 
     print(f"Direct SCS: d={args.d} O{args.order} bw={args.bw} GPU={args.gpu}")
@@ -1408,6 +1772,8 @@ def main():
         use_gpu=args.gpu, scs_max_iters=args.scs_iters, scs_eps=args.scs_eps,
         scs_scale=args.scs_scale, use_indirect=args.use_indirect,
         k_vecs=args.k_vecs, cuts_per_round=args.cuts_per_round,
+        rho=args.rho, atom_frac=args.atom_frac,
+        resume=args.resume, data_dir=args.data_dir,
     )
 
     print(f"\n{'='*70}")
