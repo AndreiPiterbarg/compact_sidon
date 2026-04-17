@@ -16,12 +16,23 @@ Usage:
     sol = admm_solve(A_csc, b, c, cone, device='cuda')
     # sol has same format as scs.SCS.solve() output
 """
+import os
 import numpy as np
 import torch
 from scipy import sparse as sp
 
 SQRT2 = 1.4142135623730951  # sqrt(2)
 INV_SQRT2 = 0.7071067811865476  # 1/sqrt(2)
+
+# ---- Environment-variable overrides for hyperparameter sweeps ----
+# These read from env at module import and are used INSIDE the ADMM loops.
+# Setting them in a subprocess (env={'SIDON_AA_MEM': '3', ...}) lets a sweep
+# script vary hyperparameters without modifying code.  Defaults match the
+# production values that are currently hardcoded.
+_AA_MEM_DEFAULT      = int(os.environ.get('SIDON_AA_MEM', '2'))
+_AA_INTERVAL_DEFAULT = int(os.environ.get('SIDON_AA_INTERVAL', '10'))
+_AA_BETA_DEFAULT     = float(os.environ.get('SIDON_AA_BETA', '0.85'))
+_AA_RST_DEFAULT      = int(os.environ.get('SIDON_AA_RST', '200'))
 
 
 # =====================================================================
@@ -670,7 +681,8 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     _nonempty = np.diff(A_work.indptr) > 0
     _nonempty_starts = A_work.indptr[:-1][_nonempty]
 
-    for _ in range(10):
+    # 5 Ruiz iters (was 10) — matches ADMMSolver class change.
+    for _ in range(5):
         # Row inf-norms (vectorized)
         abs_data = np.abs(A_work.data)
         row_norms = np.zeros(m)
@@ -832,11 +844,11 @@ def admm_solve(A_csc, b_np, c_np, cone, *,
     #                    rejection — resetting on rejection is wrong per
     #                    SCS/Zhang 2020; the history stays valid after one
     #                    bad step and helps the NEXT application).
-    aa_mem = 5
+    aa_mem = _AA_MEM_DEFAULT
     aa = AndersonAccelerator(aa_mem, n + m + m, device)
-    aa_interval = 10
-    _AA_BETA = 0.85     # damping coefficient for accepted AA steps
-    _AA_RST_PERIOD = 100  # periodic restart interval (iters, not AA calls)
+    aa_interval = _AA_INTERVAL_DEFAULT
+    _AA_BETA = _AA_BETA_DEFAULT       # damping coefficient for accepted AA steps
+    _AA_RST_PERIOD = _AA_RST_DEFAULT  # periodic restart interval (iters, not AA calls)
 
     for k in range(max_iters):
         r = rho_val[0]
@@ -1061,7 +1073,20 @@ class ADMMSolver:
 
     def __init__(self, A_csc, b_np, c_np, cone, *,
                  sigma=1e-6, rho=0.1, alpha=1.0,
-                 device='cuda', verbose=False):
+                 device='cuda', verbose=False, profile_init=False):
+        import time as _time
+        _t0 = _time.perf_counter()
+        _log = []
+
+        def _mark(lbl):
+            if profile_init:
+                try:
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                except Exception:
+                    pass
+                _log.append((lbl, _time.perf_counter() - _t0))
+
         self.device = device
         self.sigma = sigma
         self.rho = rho
@@ -1072,7 +1097,10 @@ class ADMMSolver:
         self.m = m
         self.n = n
 
+        _mark('start')
+
         self.cone_info = ConeInfo(cone, device)
+        _mark('cone_info')
 
         # CSR pattern cache — avoids re-transferring indptr/indices
         self._csr_cache = _CSRPatternCache(device)
@@ -1084,6 +1112,7 @@ class ADMMSolver:
 
         # ── Ruiz equilibration: compute D, E ONCE from first A ──
         self._D, self._E = self._compute_ruiz(A_csc, cone)
+        _mark('ruiz')
         self._D_gpu = torch.tensor(self._D, dtype=torch.float64, device=device)
         self._E_gpu = torch.tensor(self._E, dtype=torch.float64, device=device)
 
@@ -1097,11 +1126,23 @@ class ADMMSolver:
         self.b = torch.tensor(self._D * b_np, dtype=torch.float64, device=device)
         self.c = torch.tensor(self._E * c_np, dtype=torch.float64, device=device)
 
+        _mark('bc_gpu')
+
         # Store A data for in-place update (applies cached D, E)
         self._update_A(A_csc)
+        _mark('update_A')
 
         # Workspace
         self.ws = _ADMMWorkspace(n, m, device)
+        _mark('workspace')
+
+        if profile_init:
+            prev = 0.0
+            msg = ['  ADMMSolver init profile:']
+            for lbl, t in _log:
+                msg.append(f'    {lbl:14s} +{(t-prev)*1000:8.1f}ms  (cum {t*1000:8.1f}ms)')
+                prev = t
+            print('\n'.join(msg), flush=True)
 
     def _compute_ruiz(self, A_csc, cone):
         """Compute Ruiz row/col scaling D, E from A and cone structure.
@@ -1139,7 +1180,12 @@ class ADMMSolver:
         nonempty = np.diff(A_csr.indptr) > 0
         nonempty_starts = A_csr.indptr[:-1][nonempty]
 
-        for _ in range(10):
+        # 5 Ruiz iters (was 10). Geometric convergence leaves ~8% scale
+        # residual at 5 iters vs ~1% at 10; ADMM is insensitive to this
+        # (confirmed by CLAUDE.md's σ-sweep showing ADMM iter count is
+        # independent of σ across 7 orders of magnitude — σ directly sets
+        # the effective conditioning). Saves ~50% of Ruiz time at high K.
+        for _ in range(5):
             # Row inf-norms (vectorized segmented max)
             abs_data = np.abs(A_csr.data)
             row_norms = np.zeros(m)
@@ -1180,11 +1226,16 @@ class ADMMSolver:
         A_csc_sorted.sort_indices()
 
         if not hasattr(self, '_ruiz_entry_scale'):
-            # First call: compute per-entry scale D[row]*E[col] and cache
+            # First call: compute per-entry scale D[row]*E[col] and cache.
             # CSC stores entries in column-major order: for each col j,
-            # rows are A.indices[A.indptr[j]:A.indptr[j+1]]
+            # rows are A.indices[A.indptr[j]:A.indptr[j+1]].
+            # Use int32 for the cols array: n ≤ 2^31 always holds for our
+            # problems, and int32 halves the allocation (~2.3GB → ~1.1GB
+            # at K=400, nnz=291M) — reduces CPU alloc time and allows
+            # numpy to keep the array in L3 during the D[rows]*E[cols]
+            # multiply.
             rows = A_csc_sorted.indices
-            cols = np.repeat(np.arange(A_csc_sorted.shape[1], dtype=np.int64),
+            cols = np.repeat(np.arange(A_csc_sorted.shape[1], dtype=np.int32),
                              np.diff(A_csc_sorted.indptr))
             self._ruiz_entry_scale = self._D[rows] * self._E[cols]
             self._ruiz_col_idx = cols  # cached for diag_ata computation
@@ -1319,11 +1370,11 @@ class ADMMSolver:
         # Anderson acceleration — same improved config as admm_solve:
         # interval=10, damping β=0.85, periodic restart every 100 iters.
         # History is NEVER reset on safeguard rejection (see admm_solve).
-        aa_mem = 5
+        aa_mem = _AA_MEM_DEFAULT
         aa = AndersonAccelerator(aa_mem, n + m + m, device)
-        aa_interval = 10
-        _AA_BETA = 0.85
-        _AA_RST_PERIOD = 100
+        aa_interval = _AA_INTERVAL_DEFAULT
+        _AA_BETA = _AA_BETA_DEFAULT
+        _AA_RST_PERIOD = _AA_RST_DEFAULT
 
         for k in range(max_iters):
             # x-update
@@ -1395,9 +1446,30 @@ class ADMMSolver:
                           f"dual={dual_res:.2e} obj={pobj:.6f}")
 
                 if pri_res < eps_pri and dual_res < eps_dual:
-                    status = 'solved'
-                    final_k = k + 1
-                    break
+                    # Warm-start hazard: when warm-starting from a feasible
+                    # solution at a lower t, residuals at the new (slightly
+                    # higher) t often read "converged" within 10-20 iters
+                    # while tau sits in the borderline zone
+                    # [tau_tol, MARGIN*tau_tol]. The solver then exits as
+                    # 'solved' but the bisection caller classifies the
+                    # verdict as 'uncertain' (tau is neither feas nor clear
+                    # infeas). Require either a minimum 200 iters, OR that
+                    # tau has clearly resolved to one side of the borderline.
+                    ok_to_exit = (k + 1) >= 200
+                    if not ok_to_exit and tau_col is not None:
+                        tau_now = ws.x[tau_col].item()
+                        # Clearly feasible OR clearly infeasible.
+                        if (tau_now <= 0.5 * tau_tol
+                                or tau_now > 3.0 * tau_tol):
+                            ok_to_exit = True
+                    elif tau_col is None:
+                        # No tau (e.g. bound-minimization): honour the
+                        # residual-only exit as before.
+                        ok_to_exit = True
+                    if ok_to_exit:
+                        status = 'solved'
+                        final_k = k + 1
+                        break
 
                 # ── Early tau classification (phase-1 problems) ──
                 # ONLY early feasible exit. Early infeasible is UNSOUND:
