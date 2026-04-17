@@ -111,7 +111,7 @@ family of nonnegative matrices encoding windowed autoconvolution test
 values.  We show $\val(d) \le C_{1a}$ for every $d$, then certify
 $\val(d)\ge 1.3$ at $d=16$ via the order-$3$ Lasserre
 hierarchy~\cite{Lasserre2001} combined with localizing
-matrices~\cite{HenrionLasserre2004}.  At higher resolutions we replace
+matrices~\cite{Lasserre2015}.  At higher resolutions we replace
 the full moment cone by its correlative-sparsity
 restriction~\cite{Waki2006}, which preserves soundness while permitting
 numerical computation up to $d=128$.  The external dependency of the
@@ -724,11 +724,11 @@ Infeasibility of~\eqref{eq:feasibility} certifies
 $\val(d)\ge c_{\mathrm{target}}$.  We locate the largest
 $c_{\mathrm{target}}$ for which~\eqref{eq:feasibility} becomes
 infeasible by bisection; this structure mirrors the feasibility cuts
-used in robust SDP~\cite[Section~2.4]{BenTalNemirovski2001}.
+used in conic optimization~\cite{BenTalNemirovski2001}.
 
 Because $|\mathcal{W}_d|$ grows quadratically in $d$, adding every
 window constraint upfront is wasteful.  Instead, we use
-\emph{constraint generation}~\cite{Gomory1960}: start with a small
+\emph{constraint generation}~\cite{Kelley1960}: start with a small
 subset of windows (typically the $\ell=2$ scalar windows), solve the
 restricted SDP, then add the most violated windows at the current
 optimum and repeat.  The procedure terminates when no window is
@@ -796,7 +796,7 @@ standard SDP post-processing:
 \end{enumerate}
 
 This recipe, standard in the rigorous SDP
-literature~\cite{JansonRump2008}, turns any approximate interior-point
+literature~\cite{JanssonChaykinKeil2008}, turns any approximate interior-point
 solution into a certified number.  Step~3 is fast because the dual
 objective is a linear function of the dual variables.
 
@@ -973,7 +973,7 @@ SDP route is the only one with a realistic asymptotic budget.
   \item \textbf{Finite-precision SDP.}
     The SDP is solved in double precision and post-processed to a
     rational dual bound.  While standard in rigorous
-    SDP~\cite{JansonRump2008}, the procedure imports trust in the
+    SDP~\cite{JanssonChaykinKeil2008}, the procedure imports trust in the
     arithmetic library used to evaluate the rational objective.  For
     a completely kernel-level formal proof this would need to be
     replaced by a Lean- or Coq-verified LP/SDP evaluator, in the
