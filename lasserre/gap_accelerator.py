@@ -177,13 +177,23 @@ def flat_extension_residual(
     Returns (rank M_k - rank M_{k-1}) / rank M_k. A value near 0 means
     the relaxation has reached flatness (val_L_k is likely val(d));
     a large value means lifting to L_{k+1} would tighten.
+
+    Works with both the old `_precompute` P-dict (with 'basis'/'loc_basis')
+    and the newer `_precompute_highd` P-dict (where bases must be
+    enumerated on the fly from 'd'/'order').
     """
     order = P['order']
     if order < 2:
         return float('nan')
 
-    basis = np.array(P['basis'], dtype=np.int64)
-    loc_basis = np.array(P['loc_basis'], dtype=np.int64)
+    d = P['d']
+    if 'basis' in P and 'loc_basis' in P:
+        basis = np.array(P['basis'], dtype=np.int64)
+        loc_basis = np.array(P['loc_basis'], dtype=np.int64)
+    else:
+        basis = np.array(enum_monomials(d, order), dtype=np.int64)
+        loc_basis = np.array(enum_monomials(d, order - 1), dtype=np.int64)
+
     bases = P['bases']
     prime = P.get('prime')
     sorted_h, sort_o = P['sorted_h'], P['sort_o']
@@ -195,20 +205,23 @@ def flat_extension_residual(
         AB_hash = _hash_add(B_hash[:, None], B_hash[None, :], prime)
         picks = _hash_lookup(AB_hash, sorted_h, sort_o)
         if np.any(picks < 0):
-            return -1
-        M = y_vals[picks]
+            safe = np.clip(picks, 0, len(y_vals) - 1)
+            M = y_vals[safe]
+            M[picks < 0] = 0.0
+        else:
+            M = y_vals[picks]
         M = 0.5 * (M + M.T)
-        eigvals = np.linalg.eigvalsh(M)
         trace = float(np.trace(M))
         if trace <= 0:
             return 0
+        eigvals = np.linalg.eigvalsh(M)
         cutoff = rank_tol * max(abs(trace), 1.0)
         return int(np.sum(eigvals > cutoff))
 
     r_km1 = _rank_of_Mk(loc_basis)
     r_k = _rank_of_Mk(basis)
 
-    if r_k <= 0 or r_km1 < 0 or r_k < 0:
+    if r_k <= 0 or r_km1 < 0:
         return float('nan')
 
     return max(0.0, r_k - r_km1) / r_k
