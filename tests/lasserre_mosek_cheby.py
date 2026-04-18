@@ -1,39 +1,29 @@
 #!/usr/bin/env python
-"""MOSEK-tuned full Lasserre solver — with Z/2 symmetry reductions.
+"""MOSEK full Lasserre solver — SHIFTED CHEBYSHEV BASIS.
 
-Solves the full Lasserre relaxation (all windows active from the start)
-using MOSEK Fusion with the tuning settings surveyed during the d=16 L3
-planning phase:
+Solves exactly the same SDP as ``tests/lasserre_mosek_tuned.py`` but
+with every moment, localizing, and window PSD cone re-expressed in the
+shifted-Chebyshev basis  T_k*(mu) = T_k(2 mu - 1).  The feasible set
+and optimal value are mathematically identical; only the numerical
+representation changes.
 
-    • MSK_IPAR_INTPNT_SOLVE_FORM = DUAL       (often 3-10× on Lasserre SDP)
-    • MSK_IPAR_INTPNT_BASIS = NEVER            (skip basis ID, meaningless
-                                                 for SDP)
-    • MSK_DPAR_INTPNT_CO_TOL_REL_GAP = 1e-6    (tolerance > bisection res)
-    • MSK_IPAR_PRESOLVE_LINDEP_USE = ON        (prune redundant equalities)
-    • MSK_IPAR_INTPNT_ORDER_METHOD = EXPERIMENTAL (graph-partitioned AMD)
-    • MSK_IPAR_NUM_THREADS                     (physical core count)
+The monomial moment matrix M_k(y) and the Chebyshev moment matrix
+M_k^{cheb}(c) satisfy  M_k(y) = V M_k^{cheb}(c) V^T  for a triangular
+integer/rational matrix V (change of basis from Chebyshev to
+monomials on ``basis``), so the two PSD cones are V-similar and thus
+equivalent.  Chebyshev entries are bounded |T_k*| <= 1 on [0, 1],
+giving a near-orthonormal parameterisation that dramatically reduces
+the condition number of the moment matrix compared with the
+Vandermonde-like monomial basis.
 
-Optional lossless symmetry modes (do NOT change the SDP value):
+Basis-change arithmetic uses ``fractions.Fraction`` so the derivation
+is integer-exact; float64 only appears when the final MOSEK sparse
+matrices are assembled.
 
-    z2_mode='off'        : baseline — no Z/2.
-    z2_mode='equalities' : add Z/2 equality constraints y_α = y_{σ(α)}.
-                           Post-presolve this roughly halves n_y.
-    z2_mode='blockdiag'  : Z/2 equalities + block-diagonalize the
-                           (σ-invariant) moment matrix M_k into its
-                           sym/anti pieces.  ~4× on the moment-matrix
-                           Schur contribution.
-
-All variants use the FULL formulation — every window is an active PSD
-cone, every localizing / upper-localizing / pairwise L3 constraint is
-present.  No constraint generation; no relaxation.
-
-USAGE
------
-
-    python tests/lasserre_mosek_tuned.py --d 4 --order 3 --mode baseline
-    python tests/lasserre_mosek_tuned.py --d 6 --order 3 --mode tuned
-    python tests/lasserre_mosek_tuned.py --d 8 --order 3 --mode z2_eq
-    python tests/lasserre_mosek_tuned.py --d 8 --order 3 --mode z2_bd
+Mode 'baseline' disables MOSEK tuning; mode 'tuned' applies the same
+parameter suite as ``lasserre_mosek_tuned.py``.  No Z/2 variant is
+exposed — that is an orthogonal reduction and can be re-introduced
+once the Chebyshev change of basis is locked in.
 """
 from __future__ import annotations
 
@@ -314,12 +304,13 @@ class SolverWatcher:
 from lasserre_fusion import (build_window_matrices, collect_moments,
                                enum_monomials)
 from lasserre_scalable import _precompute
-from lasserre.z2_symmetry import z2_symmetry_pairs
-from lasserre.z2_blockdiag import (build_blockdiag_picks,
-                                     orbit_decomposition,
-                                     localizing_sigma_reps,
-                                     window_sigma_reps)
-from lasserre.z2_elim import canonicalize_z2
+from lasserre.cheby_basis import (
+    build_B_matrix,
+    build_moment_matrix_map,
+    build_loc_matrix_map,
+    build_t_matrix_map,
+    build_window_Q_map,
+)
 
 
 # =====================================================================
@@ -447,34 +438,52 @@ def apply_baseline_params(mdl: Model, *, verbose: bool = True
 # Build the full Lasserre model (t as Variable — linear objective)
 # =====================================================================
 
+def _scipy_to_fusion(mat: sp.csr_matrix) -> Matrix:
+    """Convert a scipy CSR/COO sparse matrix to MOSEK Fusion Matrix."""
+    coo = mat.tocoo()
+    return Matrix.sparse(
+        int(coo.shape[0]), int(coo.shape[1]),
+        coo.row.astype(np.int32).tolist(),
+        coo.col.astype(np.int32).tolist(),
+        coo.data.astype(np.float64).tolist())
+
+
 def _build_full_model(
     P: Dict[str, Any], *,
-    z2_mode: str = 'off',
     add_upper_loc: bool = True,
-    pre_elim: bool = False,
     verbose: bool = True,
+    return_B: bool = False,
 ) -> Tuple[Model, Any, Any, Dict[str, Any]]:
-    """Construct the full Lasserre feasibility model with t as a MOSEK
-    Parameter.
+    """Construct the full Lasserre feasibility model IN THE SHIFTED
+    CHEBYSHEV BASIS.
 
-    Window PSD constraints `t·M_{k-1}(y) − Q_W(y) ⪰ 0` are bilinear in
-    (t, y); MOSEK (and any convex SDP solver) cannot handle that with t
-    as a variable.  So we keep t as a Parameter and bisect.  Bisection
-    REUSES the same Model, only changing t's value — no rebuild per
-    step, very little overhead.
+    Variable ``c`` of length ``n_y`` represents the Chebyshev moment
+    vector, indexed identically to the original monomial moment vector
+    ``y`` (both over ``P['mono_list']``).  The two are linked by
 
-    z2_mode:
-      'off'        — no Z/2.
-      'equalities' — add y_α = y_{σ(α)} constraints.
-      'blockdiag'  — add Z/2 equalities AND replace the moment PSD with
-                     its sym/anti blocks.
-      'full'       — blockdiag PLUS: drop one of every σ-paired localizing
-                     cone (and upper-localizing cone) and one of every
-                     σ-paired window PSD cone.  Under the Z/2 equalities
-                     on y the dropped cones are provably redundant
-                     (permutation-similar to the retained ones).
+        y_alpha = sum_gamma B[alpha, gamma] c_gamma        (exact)
 
-    Returns (model, y_var, t_param, stats_dict).
+    where B is the triangular change-of-basis matrix built by
+    ``build_B_matrix``.  ``B[alpha, gamma]`` equals
+    ``prod_i b[alpha_i][gamma_i]`` with ``b`` the integer-exact 1-D
+    table from ``lasserre.cheby_basis.compute_b_table``.
+
+    The SDP constraints become:
+
+      * y_0 = 1                         ->  c_0 = 1  (B[0,0] = 1).
+      * y_alpha >= 0 for all alpha      ->  (B @ c) >= 0 component-wise.
+      * Consistency A_con @ y = 0       ->  (A_con @ B) @ c = 0.
+      * Moment PSD M_k(y) >= 0          ->  M_k^cheb(c) >= 0  (V-similar).
+      * Localizing M_{k-1}(mu_i y) >= 0 ->  M_{k-1}^cheb(mu_i c) >= 0.
+      * Upper localizing                ->  M_{k-1}^cheb(c) - M_{k-1}^cheb(mu_i c) >= 0.
+      * Scalar window t >= f_W(y)       ->  t >= (F @ B) @ c.
+      * Window PSD t M_{k-1}(y) - Q_W(y) ->  t M_{k-1}^cheb(c) - Q_W^cheb(c) >= 0.
+
+    Every Chebyshev entry map is assembled in ``lasserre.cheby_basis``
+    using ``fractions.Fraction`` and converted to float64 only at the
+    very end when the sparse MOSEK matrices are created.
+
+    Returns (model, c_var, t_param, stats_dict [, B_sparse]).
     """
     d = P['d']
     n_y = P['n_y']
@@ -483,204 +492,147 @@ def _build_full_model(
     n_win = P['n_win']
     idx = P['idx']
     mono_list = P['mono_list']
+    basis = P['basis']
+    loc_basis = P['loc_basis']
 
     t0 = time.time()
 
-    # Change #6 — omit constraint names; Fusion autogenerates enough for
-    # diagnostics and dropping names removes the per-constraint setName
-    # allocation/copy overhead for the ~10^6 constraints at d=16 L3.
-    mdl = Model('lasserre_full')
-    y = mdl.variable(n_y, Domain.greaterThan(0.0))
+    # ---- Change-of-basis matrix B:  y = B c  -----------------------
+    B_sp = build_B_matrix(mono_list, idx)
+    if verbose:
+        print(f"  B matrix: shape {B_sp.shape}, nnz={B_sp.nnz}",
+              flush=True)
+
+    mdl = Model('lasserre_cheby')
+    c = mdl.variable(n_y, Domain.unbounded())
     t_var = mdl.parameter('t')
 
-    # y_0 = 1
+    # ---- c_0 = 1  (y_0 = B[0,0] c_0 + 0 = c_0, and y_0 = 1) -------
     zero = tuple(0 for _ in range(d))
-    mdl.constraint(y.index(idx[zero]), Domain.equalsTo(1.0))
+    mdl.constraint(c.index(idx[zero]), Domain.equalsTo(1.0))
 
-    # Moment consistency: sum over i of y_{α+e_i} = y_α  (as equalities
-    # when every child α+e_i is in the reduced moment set S).
-    #
-    # Under pre_elim the α-indexed and σ(α)-indexed equations collapse to
-    # the same reduced equation (Z/2 symmetry on consist_idx).  We dedup
-    # by canonical-ai and aggregate child coefficients when two children
-    # share a canonical orbit representative.
+    # ---- y >= 0 component-wise via (B @ c) >= 0  ------------------
+    B_mosek = _scipy_to_fusion(B_sp)
+    mdl.constraint(Expr.mul(B_mosek, c), Domain.greaterThan(0.0))
+
+    # ---- Consistency (A_con @ B) @ c = 0  -------------------------
     consist_idx = P['consist_idx']
     consist_ei_idx = P['consist_ei_idx']
     c_rows, c_cols, c_vals = [], [], []
     n_consist = 0
-    emitted_ai = set() if pre_elim else None
     for r in range(len(P['consist_mono'])):
         ai = int(consist_idx[r])
         if ai < 0:
             continue
-        if emitted_ai is not None:
-            if ai in emitted_ai:
-                continue  # σ-partner α already produced this equation
-            emitted_ai.add(ai)
         child_idx = consist_ei_idx[r]
         coef_by_col: Dict[int, float] = {}
         has_child = False
         for ci in range(d):
-            c = int(child_idx[ci])
-            if c >= 0:
-                coef_by_col[c] = coef_by_col.get(c, 0.0) + 1.0
+            cc = int(child_idx[ci])
+            if cc >= 0:
+                coef_by_col[cc] = coef_by_col.get(cc, 0.0) + 1.0
                 has_child = True
         if not has_child:
             continue
-        for c, coef in coef_by_col.items():
+        for cc, coef in coef_by_col.items():
             c_rows.append(n_consist)
-            c_cols.append(c)
+            c_cols.append(cc)
             c_vals.append(coef)
         c_rows.append(n_consist)
         c_cols.append(ai)
         c_vals.append(-1.0)
         n_consist += 1
     if n_consist > 0:
-        coo = sp.coo_matrix(
-            (c_vals, (c_rows, c_cols)), shape=(n_consist, n_y))
-        coo.sum_duplicates()
-        coo.eliminate_zeros()
-        A_con = Matrix.sparse(n_consist, n_y,
-                               coo.row.tolist(),
-                               coo.col.tolist(),
-                               coo.data.tolist())
-        mdl.constraint(Expr.mul(A_con, y), Domain.equalsTo(0.0))
+        A_con_y = sp.coo_matrix(
+            (c_vals, (c_rows, c_cols)), shape=(n_consist, n_y)).tocsr()
+        A_con_c = (A_con_y @ B_sp).tocoo()
+        A_con_c.sum_duplicates()
+        A_con_c.eliminate_zeros()
+        A_con_mosek = _scipy_to_fusion(A_con_c)
+        mdl.constraint(Expr.mul(A_con_mosek, c),
+                       Domain.equalsTo(0.0))
+    if verbose:
+        print(f"  Consistency: {n_consist} equations", flush=True)
 
-    # ---- Z/2 equality constraints (all Z/2 modes require these) ----
-    # Under pre_elim the equalities are implicit (y_α and y_{σα} are
-    # literally the same ỹ coordinate), so we skip injecting them.
-    n_z2_eq = 0
-    if z2_mode in ('equalities', 'blockdiag', 'full') and not pre_elim:
-        pairs = z2_symmetry_pairs(P)
-        n_z2_eq = len(pairs)
-        if n_z2_eq:
-            eq_rows = []
-            eq_cols = []
-            eq_vals = []
-            for r, (i, j) in enumerate(pairs):
-                eq_rows.extend([r, r])
-                eq_cols.extend([i, j])
-                eq_vals.extend([1.0, -1.0])
-            A_sym = Matrix.sparse(n_z2_eq, n_y, eq_rows, eq_cols, eq_vals)
-            # Z/2 equalities y_i − y_j = 0 where σ-pair (i, j) have the
-            # same |γ|, so under the rescale they remain ŷ_i − ŷ_j = 0
-            # with unchanged coefficients.
-            mdl.constraint(Expr.mul(A_sym, y), Domain.equalsTo(0.0))
+    # ---- Moment matrix PSD:  M_k^cheb(c) ⪰ 0  ---------------------
+    G_M = build_moment_matrix_map(basis, idx, n_y)
+    if verbose:
+        print(f"  Moment map G_M: shape {G_M.shape}, nnz={G_M.nnz}",
+              flush=True)
+    G_M_mosek = _scipy_to_fusion(G_M)
+    M_flat = Expr.mul(G_M_mosek, c)
+    M_mat = Expr.reshape(M_flat, n_basis, n_basis)
+    mdl.constraint(M_mat, Domain.inPSDCone(n_basis))
 
-    # ---- Precompute σ-representatives for localizing and windows ----
-    # For z2_mode == 'full', we only emit PSD constraints at these
-    # canonical positions.  Dropped cones are redundant under the
-    # σ-equalities on y (permutation-similar to retained cones).
-    if z2_mode == 'full':
-        loc_fixed, loc_pairs = localizing_sigma_reps(d)
-        loc_active = list(loc_fixed) + [p for (p, _) in loc_pairs]
-        win_fixed, win_pairs = window_sigma_reps(d, P['windows'])
-        # Only keep reps that are also in the nontrivial set.
-        nontriv = set(P['nontrivial_windows'])
-        win_active = [w for w in (list(win_fixed)
-                                   + [p for (p, _) in win_pairs])
-                       if w in nontriv]
-    else:
-        loc_active = list(range(d))
-        win_active = list(P['nontrivial_windows'])
-
-    # ---- Moment matrix PSD: full cone or sym+anti block-diag ----
-    if z2_mode in ('blockdiag', 'full'):
-        bd = build_blockdiag_picks(P['basis'], idx, n_y)
-        T_sym = bd['T_sym']
-        T_anti = bd['T_anti']
-        n_sym = bd['n_sym']
-        n_anti = bd['n_anti']
-
-        T_sym_coo = T_sym.tocoo()
-        if T_sym_coo.nnz:
-            M_sym_mat = Matrix.sparse(
-                T_sym.shape[0], n_y,
-                T_sym_coo.row.tolist(),
-                T_sym_coo.col.tolist(),
-                T_sym_coo.data.tolist())
-            sym_flat = Expr.mul(M_sym_mat, y)
-            sym_2d = Expr.reshape(sym_flat, n_sym, n_sym)
-            mdl.constraint(sym_2d, Domain.inPSDCone(n_sym))
-
-        if n_anti > 0:
-            T_anti_coo = T_anti.tocoo()
-            if T_anti_coo.nnz:
-                M_anti_mat = Matrix.sparse(
-                    T_anti.shape[0], n_y,
-                    T_anti_coo.row.tolist(),
-                    T_anti_coo.col.tolist(),
-                    T_anti_coo.data.tolist())
-                anti_flat = Expr.mul(M_anti_mat, y)
-                anti_2d = Expr.reshape(anti_flat, n_anti, n_anti)
-                mdl.constraint(anti_2d, Domain.inPSDCone(n_anti))
-    else:
-        M_mat = Expr.reshape(y.pick(P['moment_pick']), n_basis, n_basis)
-        mdl.constraint(M_mat, Domain.inPSDCone(n_basis))
-
-    # ---- Localizing PSD: μ_i ≥ 0 and optionally 1 - μ_i ≥ 0 ----
-    # In z2_full mode we emit only σ-representative cones.  Under the
-    # σ-equalities on y, the dropped cones are permutation-similar to
-    # the retained ones, so the constraint set is equivalent.
+    # ---- Localizing (mu_i c)  and  upper-localizing ---------------
+    #      and pre-build the T-matrix map shared with the window PSDs.
     if P['order'] >= 2:
-        for i_var in loc_active:
-            Li = Expr.reshape(y.pick(P['loc_picks'][i_var]), n_loc, n_loc)
-            mdl.constraint(Li, Domain.inPSDCone(n_loc))
+        G_T = build_t_matrix_map(loc_basis, idx, n_y)
+        G_T_mosek = _scipy_to_fusion(G_T)
+        T_flat = Expr.mul(G_T_mosek, c)
+
+        loc_maps: List[sp.csr_matrix] = []
+        for i_var in range(d):
+            G_L_i = build_loc_matrix_map(loc_basis, idx, n_y, i_var)
+            loc_maps.append(G_L_i)
+            G_L_mosek = _scipy_to_fusion(G_L_i)
+            L_flat = Expr.mul(G_L_mosek, c)
+            L_mat = Expr.reshape(L_flat, n_loc, n_loc)
+            mdl.constraint(L_mat, Domain.inPSDCone(n_loc))
+        if verbose:
+            avg_nnz = (sum(m.nnz for m in loc_maps) / len(loc_maps)
+                       if loc_maps else 0)
+            print(f"  Localizing maps: {len(loc_maps)} cones, "
+                  f"avg nnz={avg_nnz:.0f}", flush=True)
+
         if add_upper_loc:
-            for i_var in loc_active:
-                sub_moment = y.pick(P['t_pick'])
-                mu_i_loc = y.pick(P['loc_picks'][i_var])
-                diff_i = Expr.sub(sub_moment, mu_i_loc)
-                L_upper = Expr.reshape(diff_i, n_loc, n_loc)
-                mdl.constraint(L_upper, Domain.inPSDCone(n_loc))
+            for i_var in range(d):
+                G_diff = G_T - loc_maps[i_var]
+                G_diff_mosek = _scipy_to_fusion(G_diff)
+                diff_flat = Expr.mul(G_diff_mosek, c)
+                diff_mat = Expr.reshape(diff_flat, n_loc, n_loc)
+                mdl.constraint(diff_mat, Domain.inPSDCone(n_loc))
+    else:
+        G_T = None
+        G_T_mosek = None
+        loc_maps = []
 
-    # ---- Scalar window constraints: t ≥ f_W(y) for all W ----
-    F_mosek = Matrix.sparse(n_win, n_y, P['f_r'], P['f_c'], P['f_v'])
-    f_all = Expr.mul(F_mosek, y)
-    ones_col = Matrix.dense(n_win, 1, [1.0] * n_win)
-    t_rep = Expr.flatten(Expr.mul(ones_col, Expr.reshape(t_var, 1, 1)))
-    mdl.constraint(Expr.sub(t_rep, f_all), Domain.greaterThan(0.0))
+    # ---- Scalar window constraints:  t >= (F @ B) @ c  ------------
+    F_y = sp.csr_matrix(
+        (P['f_v'], (P['f_r'], P['f_c'])), shape=(n_win, n_y),
+        dtype=np.float64)
+    F_c = (F_y @ B_sp).tocoo()
+    F_c.sum_duplicates()
+    F_c.eliminate_zeros()
+    if F_c.nnz > 0:
+        F_mosek = _scipy_to_fusion(F_c)
+        f_all = Expr.mul(F_mosek, c)
+        ones_col = Matrix.dense(n_win, 1, [1.0] * n_win)
+        t_rep = Expr.flatten(Expr.mul(ones_col, Expr.reshape(t_var, 1, 1)))
+        mdl.constraint(Expr.sub(t_rep, f_all),
+                       Domain.greaterThan(0.0))
 
-    # ---- Window PSD cones: t·M_{k-1}(y) - Q_W(y) ⪰ 0 ----
-    # In z2_full mode we emit one PSD per σ-orbit (either the σ-fixed
-    # window itself or the canonical representative of a σ-pair).  The
-    # dropped σ-partner of each retained pair is redundant under the
-    # σ-equalities on y.
-    if P['order'] >= 2:
-        ab_eiej_idx = P['ab_eiej_idx']
-        ab_flat = P['ab_flat']
-        t_y = Expr.mul(t_var, y.pick(P['t_pick']))
-        n_win_psd_added = 0
+    # ---- Window PSD cones:  t M_{k-1}^cheb(c) - Q_W^cheb(c) ⪰ 0 ---
+    n_win_psd_added = 0
+    win_active = list(P['nontrivial_windows'])
+    if P['order'] >= 2 and G_T is not None:
+        # Reuse the same T-flat times t for every window.
+        t_T_flat = Expr.mul(t_var, Expr.mul(G_T_mosek, c))
         for w in win_active:
             Mw = P['M_mats'][w]
-            nz_i, nz_j = np.nonzero(Mw)
-            if len(nz_i) == 0 or ab_eiej_idx is None:
-                Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
+            G_Q = build_window_Q_map(loc_basis, idx, n_y, Mw)
+            if G_Q.nnz == 0:
+                # No mu_i mu_j terms: just t M_{k-1}^cheb(c) ⪰ 0.
+                Lw_mat = Expr.reshape(t_T_flat, n_loc, n_loc)
                 mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
                 n_win_psd_added += 1
                 continue
-            y_idx = ab_eiej_idx[:, :, nz_i, nz_j]
-            valid = y_idx >= 0
-            if not np.any(valid):
-                Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
-                mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
-                n_win_psd_added += 1
-                continue
-            ab_exp = np.broadcast_to(ab_flat[:, :, None], y_idx.shape)
-            mw_vals = Mw[nz_i, nz_j]
-            mw_exp = np.broadcast_to(mw_vals[None, None, :], y_idx.shape)
-            rows = ab_exp[valid].ravel().tolist()
-            cols = y_idx[valid].ravel().tolist()
-            vals = mw_exp[valid].ravel().tolist()
-            flat_size = n_loc * n_loc
-            Cw_mosek = Matrix.sparse(flat_size, n_y, rows, cols, vals)
-            cw_expr = Expr.mul(Cw_mosek, y)
-            Lw_flat = Expr.sub(t_y, cw_expr)
+            G_Q_mosek = _scipy_to_fusion(G_Q)
+            Q_flat = Expr.mul(G_Q_mosek, c)
+            Lw_flat = Expr.sub(t_T_flat, Q_flat)
             Lw_mat = Expr.reshape(Lw_flat, n_loc, n_loc)
             mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
             n_win_psd_added += 1
-    else:
-        n_win_psd_added = 0
 
     mdl.objective(ObjectiveSense.Minimize, Expr.constTerm(0.0))
 
@@ -691,29 +643,25 @@ def _build_full_model(
         'n_basis': n_basis,
         'n_loc': n_loc,
         'n_consist': n_consist,
-        'n_z2_eq': n_z2_eq,
         'n_win_psd': n_win_psd_added,
         'n_win_active': len(win_active),
         'n_win_original': len(P['nontrivial_windows']),
-        'n_loc_active': len(loc_active),
+        'n_loc_active': d,
         'n_loc_original': d,
-        'z2_mode': z2_mode,
+        'z2_mode': 'off',
         'add_upper_loc': add_upper_loc,
+        'B_nnz': int(B_sp.nnz),
+        'basis_kind': 'chebyshev',
     }
-    if z2_mode == 'blockdiag':
-        stats['n_moment_sym'] = n_sym
-        stats['n_moment_anti'] = n_anti
-        stats['n_moment_original'] = n_basis
     if verbose:
-        print(f"  Build: n_y={n_y}, n_basis={n_basis}, n_loc={n_loc}, "
-              f"n_consist={n_consist}, n_z2_eq={n_z2_eq}, "
-              f"n_win_psd={n_win_psd_added}, build_time={build_time:.2f}s",
+        print(f"  Build (cheby): n_y={n_y}, n_basis={n_basis}, "
+              f"n_loc={n_loc}, n_consist={n_consist}, "
+              f"n_win_psd={n_win_psd_added}, "
+              f"build_time={build_time:.2f}s",
               flush=True)
-        if z2_mode == 'blockdiag':
-            print(f"  Block-diag moment: {n_basis} "
-                  f"-> sym {stats['n_moment_sym']} + "
-                  f"anti {stats['n_moment_anti']}", flush=True)
-    return mdl, y, t_var, stats
+    if return_B:
+        return mdl, c, t_var, stats, B_sp
+    return mdl, c, t_var, stats
 
 
 # =====================================================================
@@ -801,69 +749,37 @@ def solve_mosek_tuned(
     t_lo: float = 0.5,
     t_hi: Optional[float] = None,
     proof_dir: Optional[str] = None,
-    pre_elim: bool = False,
     primary_tol: float = 1e-6,
     order_method: str = 'forceGraphpar',
     force_lindep_off: bool = False,
     watcher_interval_s: float = 15.0,
     verbose: bool = True,
 ) -> Dict[str, Any]:
-    """Solve the full d × L{order} Lasserre SDP via MOSEK Fusion and
-    bisection on t.  Reuses a single Model across bisection steps —
-    only t's value changes.
+    """Solve the full d × L{order} Lasserre SDP IN THE SHIFTED CHEBYSHEV
+    BASIS via MOSEK Fusion and bisection on t.  Reuses a single Model
+    across bisection steps — only t's value changes.
 
-    mode ∈ {baseline, tuned, z2_eq, z2_bd, z2_full}
-      baseline : solver defaults (no tuning, no Z/2)
-      tuned    : tuned params, no Z/2
-      z2_eq    : tuned params + Z/2 equalities
-      z2_bd    : tuned params + Z/2 block-diag (implies equalities)
-      z2_full  : z2_bd + σ-paired window / localizing drop
-
-    pre_elim : if True AND mode is a Z/2 mode, substitute out the Z/2
-               equalities in the Python precompute before handing the
-               SDP to MOSEK.  Reduces n_y by ~50%, eliminates the
-               expensive lindep presolve phase.  Losslessly equivalent.
+    mode ∈ {baseline, tuned}
+      baseline : solver defaults (no tuning)
+      tuned    : tuned params (same parameter suite as
+                 ``lasserre_mosek_tuned.py`` mode=tuned)
 
     Returns dict with lb, status, timings, per-solve wall times.
     """
-    if mode not in ('baseline', 'tuned', 'z2_eq', 'z2_bd', 'z2_full'):
+    if mode not in ('baseline', 'tuned'):
         raise ValueError(f"Unknown mode {mode!r}")
-
-    # pre_elim only makes sense for the Z/2 modes.
-    if pre_elim and mode in ('baseline', 'tuned'):
-        raise ValueError(
-            f"pre_elim requires a Z/2 mode (z2_eq / z2_bd / z2_full); "
-            f"got mode={mode!r}")
 
     if verbose:
         print(f"\n{'=' * 60}")
-        print(f"MOSEK-tuned full Lasserre: d={d} L{order} mode={mode}")
+        print(f"MOSEK Lasserre (CHEBYSHEV): d={d} L{order} mode={mode}")
         print(f"{'=' * 60}", flush=True)
 
     # --- Precompute ---
     P = _precompute(d, order, verbose=verbose)
 
-    # --- Optional Z/2 pre-elimination (Lever 1) ---
-    # Must happen BEFORE any SDP-structure counting since it changes n_y
-    # and every pick array, yet the formulation is mathematically
-    # identical (literal variable substitution on σ-orbits).
-    if pre_elim:
-        P = canonicalize_z2(P, verbose=verbose)
-
-    # --- Build model ---
-    z2_map = {
-        'baseline': 'off', 'tuned': 'off',
-        'z2_eq': 'equalities', 'z2_bd': 'blockdiag',
-        'z2_full': 'full',
-    }
-    z2_mode = z2_map[mode]
-
     t_build_start = time.time()
     mdl, y, t_param, build_stats = _build_full_model(
-        P, z2_mode=z2_mode,
-        add_upper_loc=add_upper_loc,
-        pre_elim=pre_elim,
-        verbose=verbose)
+        P, add_upper_loc=add_upper_loc, verbose=verbose)
     build_time = time.time() - t_build_start
 
     # --- Apply params ---
