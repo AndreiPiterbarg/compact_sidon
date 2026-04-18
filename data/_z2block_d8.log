@@ -258,3 +258,9 @@ MOSEK-tuned full Lasserre: d=8 L3 mode=z2block
 [WATCH:solve] t=   120s  rss=   8290MB  cpu= 271.9%  threads= 17  peak_rss=   8878MB
 [MOSEK] 4   1.2e-02  1.2e-02  1.3e-04  1.48e+00   0.000000000e+00   -8.311019805e-04  1.2e-02  132.79
 [MOSEK] ETA: iter 4, mu=1.20e-02, per-iter=33.2s, ~9 iters remain, eta=4.9 min
+[MOSEK] 5   5.5e-03  1.1e-02  6.0e-05  6.62e-01   0.000000000e+00   -5.575462338e-04  5.5e-03  147.16
+[MOSEK] ETA: iter 5, mu=5.50e-03, per-iter=29.4s, ~17 iters remain, eta=8.3 min
+[MOSEK] 6   8.0e-04  1.7e-02  2.1e-05  -9.25e-02  0.000000000e+00   -9.159932546e-05  8.0e-04  161.24
+[MOSEK] ETA: iter 6, mu=8.00e-04, per-iter=26.9s, ~6 iters remain, eta=2.6 min
+[MOSEK] 7   9.0e-07  2.0e-03  5.0e-07  -8.01e-01  0.000000000e+00   3.052881598e-01   9.0e-07  178.94
+[MOSEK] ETA: iter 7, mu=9.00e-07, per-iter=25.6s, ~1 iters remain, eta=0.3 min

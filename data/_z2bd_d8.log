@@ -451,3 +451,43 @@ MOSEK-tuned full Lasserre: d=8 L3 mode=z2_bd
 [MOSEK] 21  7.1e-15  1.2e-08  3.7e-13  -1.00e+00  0.000000000e+00   1.646909796e+06   7.5e-15  182.95
 [MOSEK] ETA: iter 21, mu=7.50e-15, per-iter=8.7s, ~0 iters remain, eta=0.0 min
 [MOSEK] 22  7.1e-15  1.2e-08  3.7e-13  -1.00e+00  0.000000000e+00   1.646909796e+06   7.5e-15  192.19
+[MOSEK] 23  1.6e-20  5.5e-14  2.5e-11  -1.00e+00  0.000000000e+00   6.501077587e+15   1.4e-25  198.69
+[MOSEK] ETA: iter 23, mu=1.40e-25, per-iter=8.6s, ~0 iters remain, eta=0.0 min
+[MOSEK] 24  1.1e-32  7.3e-14  2.7e-06  -1.00e+00  0.000000000e+00   9.849220634e+27   9.5e-38  205.61
+[MOSEK] ETA: iter 24, mu=9.50e-38, per-iter=8.6s, ~0 iters remain, eta=0.0 min
+[MOSEK] Optimizer terminated. Time: 211.83  
+[MOSEK] 
+[MOSEK] 
+[MOSEK] Interior-point solution summary
+[MOSEK]   Problem status  : PRIMAL_INFEASIBLE
+[MOSEK]   Solution status : PRIMAL_INFEASIBLE_CER
+[MOSEK]   Dual.    obj: 1.1266281599e-04    nrm: 2e+03    Viol.  con: 9e-19    var: 4e-12    acc: 0e+00  
+  [5/8] t=1.18389250  infeas Undefined/Certificate                    (212.01s)  [1.183893, 1.207475]
+[MOSEK] Problem
+[MOSEK]   Name                   : lasserre_full   
+[MOSEK]   Objective sense        : minimize        
+[MOSEK]   Type                   : CONIC (conic optimization problem)
+[MOSEK]   Constraints            : 2892            
+[MOSEK]   Affine conic cons.     : 138 (147655 rows)
+[MOSEK]   Disjunctive cons.      : 0               
+[MOSEK]   Cones                  : 0               
+[MOSEK]   Scalar variables       : 3004            
+[MOSEK]   Matrix variables       : 0               
+[MOSEK]   Integer variables      : 0               
+[MOSEK] 
+[MOSEK] Optimizer started.
+[MOSEK] Presolve started.
+[MOSEK] Linear dependency checker started.
+[MOSEK] Linear dependency checker terminated.
+[MOSEK] Eliminator started.
+[MOSEK] Freed constraints in eliminator : 1372
+[MOSEK] Eliminator terminated.
+[MOSEK] Eliminator started.
+[MOSEK] Freed constraints in eliminator : 0
+[MOSEK] Eliminator terminated.
+[MOSEK] Eliminator - tries                  : 2                 time                   : 0.00            
+[MOSEK] Lin. dep.  - tries                  : 1                 time                   : 0.19            
+[MOSEK] Lin. dep.  - primal attempts        : 1                 successes              : 1               
+[MOSEK] Lin. dep.  - dual attempts          : 0                 successes              : 0               
+[MOSEK] Lin. dep.  - primal deps.           : 636               dual deps.             : 0               
+[MOSEK] Presolve terminated. Time: 1.12    
