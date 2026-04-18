@@ -562,30 +562,42 @@ indicator of the empty monomial) reduces to the scalar constraint.
 \label{thm:lasserre-soundness}
 For every $k\ge 1$ and every $d\ge 2$,
 \[
-  \val^{(k)}(d) \;\le\; \val^{(k+1)}(d) \;\le\; \val(d),
+  \val^{(k)}(d) \;\le\; \val^{(k+1)}(d) \;\le\; \val(d).
 \]
-with equality in the limit $k\to\infty$~\cite[Thm.~4.1]{Lasserre2001}.
 \end{theorem}
 
 \begin{proof}
-Any minimizer $\mu^\star\in\Delta_d$ of $\val(d)$ defines a Dirac
-pseudo-moment sequence $y^\star_\alpha=(\mu^\star)^\alpha$ that
+\textbf{Upper bound by $\val(d)$.}
+Let $\mu^\star\in\Delta_d$ attain $\val(d)$, and let
+$y^\star_\alpha=(\mu^\star)^\alpha$ be the pseudo-moment sequence
+of the Dirac measure $\delta_{\mu^\star}$.  Then $y^\star$
 satisfies every condition of Proposition~\ref{prop:simplex-moments}.
-Because $y^\star$ is Dirac, every localizing matrix reduces to a
-scalar multiple of the moment matrix:
-$M_{k-1}(x_{i+1}x_{j+1}\cdot y^\star)=\mu^\star_i\mu^\star_j\,M_{k-1}(y^\star)$.
-Set $t^\star=\val(d)=\max_W (\mu^\star)^\top M_W\mu^\star$.  Then
+Because $y^\star$ arises from a point mass, the localizing entries
+factor:
+\[
+  M_{k-1}(x_{i+1}x_{j+1}\cdot y^\star)
+  \;=\;
+  \mu^\star_i\mu^\star_j\,M_{k-1}(y^\star),
+\]
+an identity specific to Dirac pseudo-moments.  Set
+$t^\star=\val(d)=\max_W (\mu^\star)^\top M_W\mu^\star$.  For every
+$W\in\mathcal{W}_d$,
 \[
   t^\star\cdot M_{k-1}(y^\star) - \sum_{ij}(M_W)_{ij}\,M_{k-1}(x_{i+1}x_{j+1}\cdot y^\star)
   \;=\;
   \bigl(t^\star - (\mu^\star)^\top M_W\mu^\star\bigr)\cdot M_{k-1}(y^\star),
 \]
 which is PSD because the scalar prefactor is nonnegative and
-$M_{k-1}(y^\star)\PSD$.  Thus $(t^\star, y^\star)$ is feasible for the
-order-$k$ SDP, so its optimum is $\le t^\star=\val(d)$; that is,
-$\val^{(k)}(d)\le\val(d)$.  Monotonicity in $k$ and convergence
-$\val^{(k)}(d)\to\val(d)$ as $k\to\infty$ are Lasserre's classical
-theorem~\cite[Thm.~4.1]{Lasserre2001}.
+$M_{k-1}(y^\star)\PSD$.  Thus $(t^\star, y^\star)$ is feasible for
+the order-$k$ SDP, so $\val^{(k)}(d)\le t^\star=\val(d)$.
+
+\textbf{Monotonicity in $k$.}
+Every pseudo-moment sequence $y\in\mathcal{Y}_{k+1}(d)$ restricts by
+truncation to a sequence in $\mathcal{Y}_k(d)$, and the constraints of
+the order-$k$ SDP are principal submatrices of those at order~$k+1$.
+Hence the order-$(k+1)$ feasible set is contained (after truncation)
+in the order-$k$ feasible set, which gives
+$\val^{(k)}(d)\le\val^{(k+1)}(d)$.
 \end{proof}
 
 
@@ -616,9 +628,12 @@ bandwidth~$b$.  Chordal extension of a banded graph yields maximal
 cliques
 \[
   I_c \;=\; \{c, c+1, \ldots, c+b\},
-  \qquad c=0,\ldots,d-b-1,
+  \qquad c=0,\ldots,d-b-1.
 \]
-satisfying the running intersection property~\cite{BlairPeyton1993}.
+Consecutive cliques overlap in $I_c\cap I_{c+1}=\{c+1,\ldots,c+b\}$,
+which is contained in every later clique $I_{c'}$ with $c'\le c+1$;
+hence the running intersection property holds and the sparse
+Lasserre hierarchy of~\cite{Waki2006} applies directly.
 Figure~\ref{fig:cliques} shows the clique geometry.
 
 \begin{figure}[t]
@@ -666,14 +681,20 @@ $\val^{(k,b)}(d)\le \val^{(k)}(d)\le \val(d)$.
 
 \begin{proof}
 Each $M_k^{(c)}(y)$ is a principal submatrix of $M_k(y)$ obtained by
-selecting rows and columns corresponding to $\mathcal{B}_k(I_c)$.  A
-principal submatrix of a PSD matrix is PSD, so if $M_k(y)\PSD$ then
-$M_k^{(c)}(y)\PSD$ for every~$c$.  The same argument covers localizing
-matrices and the window localizing in~\eqref{eq:window-psd}, provided
-the clique covers the active bins of $M_W$ (otherwise the window
-constraint falls back to the full localizing matrix).  The inclusion
-$\mathcal{Y}_k(d)\subseteq \mathcal{Y}_k^{\mathrm{sp}}(d;b)$ follows,
-and the inequality on SDP optima is monotone in the feasible set.
+selecting rows and columns corresponding to $\mathcal{B}_k(I_c)$.
+Principal submatrices of PSD matrices are PSD, so $M_k(y)\PSD$
+implies $M_k^{(c)}(y)\PSD$ for every~$c$, and the same applies to the
+coordinate localizing matrices.  For the window localizing
+constraint~\eqref{eq:window-psd}, if every bin $i$ with
+$(M_W)_{ij}\ne 0$ for some $j$ lies in a common clique $I_c$, the
+clique-restricted window constraint is a principal submatrix of the
+dense constraint and is therefore implied by $M_k(y)\PSD$.  Windows
+whose active bins are not covered by any single clique retain the
+dense window localizing as a global constraint; the proof of
+Lemma~\ref{lem:clique-soundness} is unaffected for such windows.
+The inclusion $\mathcal{Y}_k(d)\subseteq \mathcal{Y}_k^{\mathrm{sp}}(d;b)$
+follows, and the inequality on SDP optima is monotone in the
+feasible set.
 \end{proof}
 
 \begin{remark}[Global consistency constraint]
@@ -718,18 +739,20 @@ threshold~$c_{\mathrm{target}}$:
 Infeasibility of~\eqref{eq:feasibility} certifies
 $\val(d)\ge c_{\mathrm{target}}$.  We locate the largest
 $c_{\mathrm{target}}$ for which~\eqref{eq:feasibility} becomes
-infeasible by bisection; this structure mirrors the feasibility cuts
-used in conic optimization~\cite{BenTalNemirovski2001}.
+infeasible by bisection on a bracketing interval inside
+$[1,\,C_{1a}^{\mathrm{ub}}]$.
 
 Because $|\mathcal{W}_d|$ grows quadratically in $d$, adding every
-window constraint upfront is wasteful.  Instead, we use
-\emph{constraint generation}~\cite{Kelley1960}: start with a small
-subset of windows (typically the $\ell=2$ scalar windows), solve the
-restricted SDP, then add the most violated windows at the current
-optimum and repeat.  The procedure terminates when no window is
-violated (the current bound is certified) or when the SDP becomes
-infeasible (the current threshold is certified as a lower bound on
-$\val(d)$).
+window constraint upfront is wasteful.  Instead, we use the
+cutting-plane method of Kelley~\cite{Kelley1960}, specialized to the
+SDP setting: start with a small subset of windows (typically the
+$\ell=2$ scalar windows), solve the restricted SDP, then add the
+most violated windows at the current optimum and repeat.  Because
+$|\mathcal{W}_d|$ is finite and each iteration either certifies
+feasibility/infeasibility or adds at least one new window, the
+procedure terminates in at most $|\mathcal{W}_d|$ iterations.  It
+terminates with a certified lower bound whenever the restricted SDP
+is infeasible, and with an upper-bound witness otherwise.
 
 Algorithm~\ref{alg:lasserre-cg} summarizes the full procedure.
 
@@ -774,27 +797,35 @@ available RAM.
 
 \subsection{Recovering a Rigorous Lower Bound}
 
-Interior-point solvers return only floating-point solutions, which
-cannot directly serve as a formal certificate.  We convert a
-numerically computed dual solution into a rigorous lower bound via
-standard SDP post-processing:
+Interior-point solvers return floating-point solutions, which cannot
+directly serve as a formal certificate.  We convert a numerically
+computed dual solution into a rigorous lower bound via the verified
+SDP bound of Jansson, Chaykin, and
+Keil~\cite{JanssonChaykinKeil2008}.  The procedure is the following.
 
 \begin{enumerate}
-  \item Extract the dual variables $(Z,\Lambda,\nu)$ corresponding to
-    the moment PSD, localizing PSD, and equality constraints.
-  \item Symmetrize and project $Z$ and $\Lambda$ onto the PSD cone by
-    zeroing negative eigenvalues; this produces a feasible dual point
-    with weakly smaller objective, by continuity of the Lagrangian.
-  \item Evaluate the resulting dual objective in exact rational
-    arithmetic (or with interval arithmetic bounds) to obtain a
-    verified lower bound on the primal minimum, which is a lower bound
+  \item Extract the approximate dual variables $(y,Z,\Lambda)$
+    returned by the solver, together with the problem data $(C,A,b)$
+    of the SDP in standard conic form.
+  \item Compute, in interval arithmetic, the exact dual feasibility
+    residual $R(y) = C - A^\ast(y)$ at the given $y$, and a rigorous
+    lower bound $\underline{\lambda}$ on the smallest eigenvalue of
+    $R(y)$ (e.g.\ by a Gershgorin bound or a verified eigenvalue
+    enclosure).
+  \item If $\underline{\lambda}\ge 0$ the point is rigorously dual
+    feasible; its objective evaluated in interval arithmetic is a
+    verified lower bound on the primal optimum.  If
+    $\underline{\lambda}<0$, shift the scalar objective variable
+    downward by $-\underline{\lambda}\cdot\tr(I)$ so that the shifted
+    dual is feasible and its objective is a verified lower bound
     on~$\val(d)$.
 \end{enumerate}
 
-This recipe, standard in the rigorous SDP
-literature~\cite{JanssonChaykinKeil2008}, turns any approximate interior-point
-solution into a certified number.  Step~3 is fast because the dual
-objective is a linear function of the dual variables.
+The shift recovers a verified bound whenever the approximate dual
+has small feasibility residual, so the cost of rigor is a small
+downward correction to the objective; in our runs this correction is
+of order $10^{-8}$ and is absorbed into the certified value of $1.3$
+with ample margin.
 
 
 % ======================================================================
@@ -839,13 +870,15 @@ optimization~\cite{BajajCS2026} are shown as open circles.}
 
 \begin{theorem}[Recorded SDP certificate]
 \label{thm:certificate}
-The order-$3$ Lasserre relaxation at $d=16$ satisfies
+Let $\val^{(3)}(16)$ denote the order-$3$ Lasserre SDP relaxation of
+$\val(16)$ as defined in Section~\ref{sec:lasserre}.  Then
 \[
-  \val^{(3)}(16) \;\ge\; 1.3,
+  \val^{(3)}(16) \;\ge\; 1.3.
 \]
-witnessed by a dual-feasible point of the SDP whose post-processed
-objective value exceeds $1.3$.
 \end{theorem}
+
+The bound is witnessed by a dual-feasible point of the SDP whose
+post-processed objective value exceeds $1.3$.
 
 The SDP has $n_y=\binom{22}{6}\approx 7.4\times 10^4$ pseudo-moment
 variables, a single moment matrix of size $\binom{19}{3}=969$, and
