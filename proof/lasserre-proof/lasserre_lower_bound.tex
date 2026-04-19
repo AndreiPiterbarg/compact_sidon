@@ -98,8 +98,7 @@ We prove that the autoconvolution constant
   \inf_f \frac{\|f*f\|_{L^\infty}}{\left(\int f\right)^2},
 \]
 taken over nonnegative functions supported on $(-\tfrac14,\tfrac14)$,
-satisfies $C_{1a}\ge 1.3$.  In contrast to the branch-and-prune
-cascade of~\cite{BajajCS2026}, the proof reduces the infinite-dimensional
+satisfies $C_{1a}\ge 1.3$.  The proof reduces the infinite-dimensional
 optimization to the polynomial program
 \[
   \val(d)
@@ -133,11 +132,10 @@ proof.
 \section{Introduction}\label{sec:intro}
 % ======================================================================
 
-\subsection{The Constant \texorpdfstring{$C_{1a}$}{C1a}}\footnote{All
-  source code and the SDP certificate are available at the accompanying
-  repository.}
+\subsection{The Constant \texorpdfstring{$C_{1a}$}{C1a}}
 
-Let
+All source code and the SDP certificate are available at the
+accompanying repository.  Let
 \[
   \mathcal{F}
   \;=\;
@@ -170,10 +168,10 @@ value has resisted substantial improvement for nearly a decade.
   \toprule
   \textbf{Bound} & \textbf{Value} & \textbf{Reference} \\
   \midrule
-  Published upper bound & $\le 1.50992$ & Matolcsi \& Vinuesa~\cite{MV10} \\
   Published lower bound & $\ge 1.2802$  & Cloninger \& Steinerberger~\cite{CS17} \\
   SDP lower bound       & $\ge 1.3$     & This work \\
   Cascade lower bound   & $\ge 1.4$     & Bajaj~\cite{BajajCS2026} \\
+  Published upper bound & $\le 1.50992$ & Matolcsi \& Vinuesa~\cite{MV10} \\
   \bottomrule
 \end{tabular}
 \caption[Published bounds on C1a in the normalization used here.]{Published bounds on $C_{1a}$ in the normalization used here,
@@ -223,14 +221,14 @@ In particular, $C_{1a} \ge 1.3$.
 \end{theorem}
 
 The proof reduces to a finite SDP certificate at $(d,k)=(16,3)$, where
-$k$ is the Lasserre order.  A looser version of the certificate at
-$d=8$, $k=3$ already suffices to reproduce the $1.2802$ bound
-of~\cite{CS17} in a few seconds; the improvement to $1.3$ requires
-moment matrices of size~$969$, solved by MOSEK~\cite{MOSEK} in under
-ten minutes on a workstation.  Results at $d\in\{32,64,128\}$ are reported as empirical corroboration
-and remain within the same soundness framework, but rely on
-correlative sparsity~\cite{Waki2006}; at $d=16$ that restriction is
-redundant with the full hierarchy.
+$k$ is the Lasserre order.  A looser variant at $d=8$, $k=3$
+reproduces the $1.2802$ bound of~\cite{CS17}; the improvement to
+$1.3$ requires moment matrices of size~$969$, solved by
+MOSEK~\cite{MOSEK} in under ten minutes on a workstation.  Auxiliary
+runs at $d\in\{32,64,128\}$ use correlative
+sparsity~\cite{Waki2006} and lie within the same soundness
+framework; at $d=16$ the sparse restriction is redundant with the
+full hierarchy and is not used.
 
 \subsection{Proof Strategy at a High Level}
 
@@ -250,8 +248,8 @@ Figure~\ref{fig:overview} shows the three-step reduction.
     exceeds $1.3$.
 \end{enumerate}
 
-Step (iii) requires only a certified lower bound on a concrete SDP;
-no enumeration or resolution refinement enters the proof.
+Step (iii) is a single SDP feasibility statement, discharged by a
+recorded dual certificate.
 
 \begin{figure}[t]
 \centering
@@ -270,6 +268,10 @@ of this SDP supplies the numerical certificate.}
 % ======================================================================
 
 \subsection{Bin Masses and the Window Matrix}
+
+We first replace a normalized function $f\in\mathcal{F}$ by a finite
+vector of bin masses and write the windowed test values of Cloninger
+and Steinerberger as quadratic forms in that vector.
 
 Fix a positive integer $n$ and write $d=2n$.  Partition
 $[-\tfrac14,\tfrac14)$ into $d$ half-open bins of equal length:
@@ -317,9 +319,8 @@ where the window matrix $M_W$ for $W=(\ell,s_{\mathrm{lo}})$ is
 
 \begin{proof}
 The proof is identical to~\cite[Lemma~1]{CS17} after normalizing
-$\int f = 1$; see also~\cite[Lemma~2.3]{BajajCS2026}
-for the cascade formulation.  We give the sketch for completeness.
-Write $f_i=f\cdot\mathbf{1}_{I_i}$; the support of $f_i*f_j$ lies in the
+$\int f = 1$; see also~\cite[Lemma~2.3]{BajajCS2026} for the
+cascade formulation.  Write $f_i=f\cdot\mathbf{1}_{I_i}$; the support of $f_i*f_j$ lies in the
 Minkowski sum $I_i+I_j$, which depends only on $i+j$.  Summing the
 $L^1$ masses of those terms for $s=s_{\mathrm{lo}},\ldots,s_{\mathrm{lo}}+\ell-2$
 and dividing by the length $\tfrac{\ell}{4n}$ of the covered interval
@@ -395,13 +396,11 @@ $\mu\in\Delta_d$.  By Lemma~\ref{lem:continuous-window},
 Taking the infimum over $f$ gives $C_{1a}\ge \val(d)$.
 \end{proof}
 
-Theorem~\ref{thm:val-le-c1a} is the bridge to the SDP world: any
-mechanism that certifies $\val(d)\ge c_{\mathrm{target}}$ certifies
-$C_{1a}\ge c_{\mathrm{target}}$.  The Lasserre hierarchy is one such
-mechanism.  Upper bounds on $\val(d)$ obtained by numerical
-multistart (see~\cite{BajajCS2026}) suggest
-$\val(16)\approx 1.319$, crossing $1.3$ for the first time at
-$d=16$; this is the empirical reason for our choice of resolution.
+Theorem~\ref{thm:val-le-c1a} reduces any lower bound on $C_{1a}$ to
+a lower bound on $\val(d)$ at a fixed resolution~$d$.  Numerical
+multistart on the simplex polynomial (see~\cite{BajajCS2026})
+indicates $\val(16)\approx 1.319$, with $\val(d)$ crossing $1.3$ for
+the first time at $d=16$; we therefore work at $d=16$.
 
 
 % ======================================================================
@@ -413,6 +412,11 @@ of semidefinite programs.  The construction is classical, due to
 Lasserre~\cite{Lasserre2001,Lasserre2015} and Parrilo~\cite{Parrilo03}.
 
 \subsection{Pseudo-Moments and the Moment Matrix}
+
+The Lasserre hierarchy relaxes the simplex polynomial problem by
+replacing probability measures on $\Delta_d$ with finite
+pseudo-moment sequences of bounded order, constrained to satisfy the
+positive-semidefiniteness of an associated moment matrix.
 
 For a multi-index $\alpha=(\alpha_1,\ldots,\alpha_d)\in\N^d$ write
 $|\alpha|=\alpha_1+\cdots+\alpha_d$ and $x^\alpha =
@@ -726,6 +730,10 @@ constraints, which is manageable by constraint generation
 
 \subsection{Bisection and Constraint Generation}
 
+The Lasserre SDP has many more window constraints than are active at
+the optimum, so we combine bisection on the scalar threshold with
+lazy generation of violated windows.
+
 The Lasserre SDP is naturally a \emph{minimization} in $t$; by
 Theorem~\ref{thm:lasserre-soundness} its dual supplies a lower bound
 on $\val(d)$.  Rather than solve the SDP as a single minimization, we
@@ -879,7 +887,7 @@ $\val(16)$ as defined in Section~\ref{sec:lasserre}.  Then
 The bound is witnessed by a dual-feasible point of the SDP whose
 post-processed objective value exceeds $1.3$.
 
-The SDP has $n_y=\binom{22}{6}\approx 7.4\times 10^4$ pseudo-moment
+The SDP has $n_y=\binom{d+2k}{2k}=\binom{22}{6}\approx 7.4\times 10^4$ pseudo-moment
 variables, a single moment matrix of size $\binom{19}{3}=969$, and
 $d=16$ coordinate localizing matrices, plus one window-localizing
 matrix per active window $W\in\mathcal{W}_{\mathrm{act}}$.  MOSEK
@@ -963,16 +971,15 @@ localizing matrix, at a manageable cost.
 
 \subsection{Relationship to the Cascade Proof}
 
-The present SDP approach and the cascade proof~\cite{BajajCS2026} are
-complementary.  The cascade exhausts an integer lattice on the mass
-simplex and certifies, through branch-and-prune, that no lattice point
-satisfies all window constraints at the target threshold; the
-Lasserre approach produces a single dual certificate for the
-continuous problem without any enumeration.  The cascade currently
+The cascade proof~\cite{BajajCS2026} exhausts an integer lattice on
+the mass simplex and certifies, through branch-and-prune, that no
+lattice point satisfies all window constraints at the target
+threshold.  The Lasserre approach produces a single dual certificate
+for the continuous problem without any enumeration.  The cascade
 reaches $1.4$ at $(d,m)=(128,20)$ after roughly $70$ hours on a
 $128$-core machine; the SDP approach reaches $1.3$ in under ten
-minutes at $(d,k)=(16,3)$ and has room to improve with either finer
-$d$ or larger Lasserre order, at the cost of a larger SDP.
+minutes at $(d,k)=(16,3)$, and a larger Lasserre order or finer
+resolution $d$ tightens the bound at the cost of a larger SDP.
 
 The interior-point scaling of the Lasserre SDP is polynomial in~$d$
 under correlative sparsity: the dense cone is replaced by
@@ -987,13 +994,12 @@ SDP route is the only one with a realistic asymptotic budget.
 
 \begin{itemize}
   \item \textbf{Relaxation gap.}
-    Lasserre's hierarchy converges to $\val(d)$ as $k\to\infty$, but
-    finite $k$ may leave a gap.  The numerical results of
-    Section~\ref{sec:certificate} indicate that the gap at $(d,k)=(16,3)$
-    is already small, because the certified value $1.3$ is close to
-    the multistart upper bound $1.319$.  Closing the gap further
-    requires either a larger~$k$ or a stronger cone (for example, the
-    \emph{Handelman hierarchy}~\cite{Handelman1988} or
+    At finite order $k$, the Lasserre relaxation may leave a gap
+    between $\val^{(k)}(d)$ and $\val(d)$.  At $(d,k)=(16,3)$ the
+    certified value $1.3$ lies within $0.02$ of the multistart upper
+    bound $1.319$ on $\val(16)$, so closing the gap further requires
+    either a larger~$k$ or a stronger cone (for example, the
+    Handelman hierarchy~\cite{Handelman1988} or
     Schm\"udgen-type refinements~\cite{Schmudgen1991}).
   \item \textbf{Finite-precision SDP.}
     The SDP is solved in double precision and post-processed to a
