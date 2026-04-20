@@ -80,7 +80,7 @@ def blank_slide(prs, *, rail_color=None):
 def add_text(slide, left, top, width, height, text, *,
              size=18, bold=False, italic=False, color=INK,
              align=PP_ALIGN.LEFT,
-             anchor=MSO_ANCHOR.TOP, font=SANS, spacing=1.15):
+             anchor=MSO_ANCHOR.TOP, font=SANS, spacing=1.3):
     tb = slide.shapes.add_textbox(left, top, width, height)
     tf = tb.text_frame
     tf.word_wrap = True
@@ -106,7 +106,7 @@ def add_text(slide, left, top, width, height, text, *,
 
 
 def add_rich(slide, left, top, width, height, runs, *,
-             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, spacing=1.2):
+             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, spacing=1.35):
     """runs = list of paragraphs; each paragraph = list of (text, dict)."""
     tb = slide.shapes.add_textbox(left, top, width, height)
     tf = tb.text_frame
@@ -258,7 +258,7 @@ def slide_02_problem(prs, idx, total):
     slide_header(s, "§1 · The problem",
                  "How small can the peak of a normalized self-convolution be?")
 
-    add_rich(s, Inches(0.6), Inches(1.85), Inches(6.3), Inches(3.2), [
+    add_rich(s, Inches(0.6), Inches(1.85), Inches(6.3), Inches(3.5), [
         [("Given  ", {"size": 18}),
          ("f : ℝ → ℝ₊", {"size": 19, "italic": True, "color": NAVY,
                         "font": SERIF}),
@@ -268,11 +268,11 @@ def slide_02_problem(prs, idx, total):
         [("and  ", {"size": 18}),
          ("∫ f = 1", {"size": 18, "font": SERIF, "italic": True}),
          (",   define", {"size": 18})],
-        [("", {"size": 10})],
+        [("", {"size": 16})],
         [("C₁ₐ  =  inf  ‖ f ∗ f ‖∞",
           {"size": 34, "bold": False, "color": INK, "font": SERIF,
            "italic": True})],
-        [("", {"size": 10})],
+        [("", {"size": 18})],
         [("·  connected to Sidon  /  generalized Sidon set densities",
           {"size": 14, "color": STONE})],
         [("·  best published bounds  have not moved  since 2017",
@@ -320,22 +320,22 @@ def slide_03_prior_work(prs, idx, total):
          ("  by a step function  ", {"size": 14}),
          ("g", {"size": 14, "italic": True, "font": SERIF}),
          ("  with heights in  (1/m)ℕ", {"size": 14})],
-        [("", {"size": 6})],
+        [("", {"size": 12})],
         [("2.  Windowed test values",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
         [("for each window  W,  lower-bound  ‖f ∗ f‖∞  by a quadratic form in the bin heights",
           {"size": 14})],
-        [("", {"size": 6})],
+        [("", {"size": 12})],
         [("3.  Prune",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
         [("rule out any height vector whose test value exceeds the target threshold",
           {"size": 14})],
-        [("", {"size": 6})],
+        [("", {"size": 12})],
         [("4.  Exhaust",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
         [("if all grid points are pruned, the bound is proved",
           {"size": 14})],
-    ])
+    ], spacing=1.3)
 
     # right panel: editorial result card
     add_box(s, Inches(8.5), Inches(1.9), Inches(4.2), Inches(4.4),
@@ -412,7 +412,7 @@ def slide_05_cascade_method(prs, idx, total):
          ("c₀ · c_{d−1}", {"size": 14, "font": SERIF, "italic": True})],
         [("each bound proved, then compiled into the pruner",
           {"size": 12, "italic": True, "color": STONE})],
-        [("", {"size": 8})],
+        [("", {"size": 16})],
         [("Fused CUDA kernel",
           {"size": 17, "bold": True, "color": NAVY, "font": SERIF})],
         [("·  everything on-GPU;  no global-memory round trips",
@@ -476,16 +476,16 @@ def slide_06_cascade_result(prs, idx, total):
     add_rich(s, Inches(7.2), Inches(2.55), Inches(5.7), Inches(4.7), [
         [("What the cascade buys you",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
-        [("", {"size": 6})],
+        [("", {"size": 10})],
         [("·  sharp in principle — exhaustive enumeration rules out every surviving point",
           {"size": 13})],
         [("·  scales to  ", {"size": 13}),
          ("d = 128", {"size": 13, "font": SERIF, "italic": True}),
          ("  via symmetry reduction + GPU pruning", {"size": 13})],
-        [("", {"size": 10})],
+        [("", {"size": 16})],
         [("What it doesn't",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
-        [("", {"size": 6})],
+        [("", {"size": 10})],
         [("·  exponential in  ", {"size": 13}),
          ("d", {"size": 13, "font": SERIF, "italic": True}),
          ("  in the worst case", {"size": 13})],
@@ -505,7 +505,7 @@ def slide_07_sdp_method(prs, idx, total):
                  color=FOREST, eyebrow_color=FOREST)
 
     # Step 1
-    add_rich(s, Inches(0.6), Inches(1.8), Inches(12.1), Inches(0.5), [
+    add_rich(s, Inches(0.6), Inches(1.75), Inches(12.1), Inches(0.5), [
         [("1.  Reduce", {"size": 17, "bold": True, "color": FOREST,
                          "font": SERIF}),
          ("   the infinite-dimensional problem on  ",
@@ -514,29 +514,29 @@ def slide_07_sdp_method(prs, idx, total):
          ("  to a polynomial minimization on the simplex:",
           {"size": 16, "color": INK})],
     ])
-    add_box(s, Inches(0.6), Inches(2.38), Inches(12.1), Inches(0.75),
+    add_box(s, Inches(0.6), Inches(2.4), Inches(12.1), Inches(0.8),
             fill=HIGHLIGHT)
-    add_text(s, Inches(0.6), Inches(2.48), Inches(12.1), Inches(0.6),
+    add_text(s, Inches(0.6), Inches(2.5), Inches(12.1), Inches(0.6),
              "val(d)  =  minᵤ ∈ Δ_d    max_W    μᵀ M_W μ     ≤     C₁ₐ",
              size=22, bold=False, italic=True, color=INK, font=SERIF,
              align=PP_ALIGN.CENTER)
 
     # Step 2
-    add_rich(s, Inches(0.6), Inches(3.35), Inches(12.1), Inches(0.5), [
+    add_rich(s, Inches(0.6), Inches(3.5), Inches(12.1), Inches(0.5), [
         [("2.  Relax", {"size": 17, "bold": True, "color": FOREST,
                         "font": SERIF}),
          ("   via the Lasserre hierarchy with localizing matrices:",
           {"size": 16, "color": INK})],
     ])
-    add_box(s, Inches(0.6), Inches(3.93), Inches(12.1), Inches(0.75),
+    add_box(s, Inches(0.6), Inches(4.15), Inches(12.1), Inches(0.8),
             fill=HIGHLIGHT)
-    add_text(s, Inches(0.6), Inches(4.03), Inches(12.1), Inches(0.6),
+    add_text(s, Inches(0.6), Inches(4.25), Inches(12.1), Inches(0.6),
              "val⁽ᵏ⁾(d)    ≤    val⁽ᵏ⁺¹⁾(d)    ≤    val(d)",
              size=22, bold=False, italic=True, color=INK, font=SERIF,
              align=PP_ALIGN.CENTER)
 
     # Step 3
-    add_rich(s, Inches(0.6), Inches(4.9), Inches(12.1), Inches(0.5), [
+    add_rich(s, Inches(0.6), Inches(5.25), Inches(12.1), Inches(0.5), [
         [("3.  Certify", {"size": 17, "bold": True, "color": FOREST,
                           "font": SERIF}),
          ("   a dual-feasible point of the order-",
@@ -547,9 +547,9 @@ def slide_07_sdp_method(prs, idx, total):
     ])
 
     # Scaling lever
-    add_rule(s, Inches(0.6), Inches(5.85), Inches(12.1),
+    add_rule(s, Inches(0.6), Inches(6.05), Inches(12.1),
              color=HAIRLINE, thickness=0.75)
-    add_rich(s, Inches(0.6), Inches(5.95), Inches(12.1), Inches(1.2), [
+    add_rich(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(1.2), [
         [("Scaling lever",
           {"size": 14, "bold": True, "color": FOREST, "font": SERIF}),
          ("   —   correlative sparsity  (Waki–Kim–Kojima–Muramatsu 2006).",
@@ -600,6 +600,7 @@ def slide_08_sdp_result(prs, idx, total):
     add_rich(s, Inches(8.1), Inches(5.2), Inches(4.9), Inches(2.0), [
         [("What we record",
           {"size": 14, "bold": True, "color": FOREST, "font": SERIF})],
+        [("", {"size": 6})],
         [("·  a single dual-feasible point  (y, Z, Λ)",
           {"size": 12, "color": INK})],
         [("·  post-processed via Jansson–Chaykin–Keil",
@@ -611,7 +612,7 @@ def slide_08_sdp_result(prs, idx, total):
                                  "font": SERIF})],
         [("   under correlative sparsity",
           {"size": 12, "color": INK})],
-    ])
+    ], spacing=1.3)
 
     add_footer(s, idx, total, active_color=FOREST)
 
@@ -645,11 +646,11 @@ def slide_09_matlab_setup(prs, idx, total):
           {"size": 17, "color": INK})],
     ])
 
-    add_box(s, Inches(0.9), Inches(4.5), Inches(11.5), Inches(1.9),
+    add_box(s, Inches(0.9), Inches(4.5), Inches(11.5), Inches(2.0),
             fill=HIGHLIGHT)
     add_rule(s, Inches(0.9), Inches(4.5), Inches(11.5),
              color=BRICK, thickness=1.3)
-    add_rich(s, Inches(1.2), Inches(4.65), Inches(11.1), Inches(1.7), [
+    add_rich(s, Inches(1.2), Inches(4.7), Inches(11.1), Inches(1.7), [
         [("In the paper",
           {"size": 15, "bold": True, "color": INK, "font": SERIF}),
          (":    step-function  ", {"size": 15, "color": INK}),
@@ -657,7 +658,7 @@ def slide_09_matlab_setup(prs, idx, total):
          ("   quantized in steps of   ", {"size": 15, "color": INK}),
          ("1/m = 0.02",
           {"size": 15, "bold": True, "color": INK, "font": SERIF})],
-        [("", {"size": 5})],
+        [("", {"size": 12})],
         [("In the code",
           {"size": 15, "bold": True, "color": BRICK, "font": SERIF}),
          (":     bin  ", {"size": 15, "color": INK}),
@@ -684,9 +685,10 @@ def slide_10_matlab_gap(prs, idx, total):
                  "Lemma 3 needs the height step;  the code plugs in the mass step",
                  color=BRICK, eyebrow_color=BRICK)
 
-    add_rich(s, Inches(0.6), Inches(1.8), Inches(6.4), Inches(5.0), [
+    add_rich(s, Inches(0.6), Inches(1.8), Inches(6.4), Inches(5.2), [
         [("C&S Lemma 3  gives",
           {"size": 15, "bold": True, "color": INK, "font": SERIF})],
+        [("", {"size": 4})],
         [("(g ∗ g)(x)   ≤   (a ∗ a)(x)  +  2ε  +  ε²",
           {"size": 17, "color": INK, "font": SERIF, "italic": True})],
         [("where  ", {"size": 14}),
@@ -696,9 +698,10 @@ def slide_10_matlab_gap(prs, idx, total):
          ("   (a  ", {"size": 14}),
          ("height", {"size": 14, "italic": True, "font": SERIF}),
          ("   difference).", {"size": 14})],
-        [("", {"size": 8})],
+        [("", {"size": 14})],
         [("In the MATLAB code",
           {"size": 15, "bold": True, "color": BRICK, "font": SERIF})],
+        [("", {"size": 4})],
         [("ε = 0.02", {"size": 14, "italic": True, "font": SERIF}),
          ("  (mass step),  but heights  ", {"size": 14}),
          ("hᵢ = 2d · massᵢ",
@@ -713,7 +716,7 @@ def slide_10_matlab_gap(prs, idx, total):
          ("0.02",
           {"size": 14, "font": SERIF, "italic": True}),
          (".", {"size": 14})],
-        [("", {"size": 10})],
+        [("", {"size": 16})],
         [("The code's pruning budget is too small by a factor of  ",
           {"size": 15, "color": INK})],
         [("≈ 2d.",
@@ -732,9 +735,10 @@ def slide_11_smoking_gun(prs, idx, total):
                  'The code would "prove away" a known construction',
                  color=BRICK, eyebrow_color=BRICK)
 
-    add_rich(s, Inches(0.6), Inches(1.8), Inches(6.3), Inches(5.0), [
+    add_rich(s, Inches(0.6), Inches(1.8), Inches(6.3), Inches(5.2), [
         [("The check",
           {"size": 16, "bold": True, "color": INK, "font": SERIF})],
+        [("", {"size": 4})],
         [("Matolcsi–Vinuesa  (2010)  exhibit a continuous  ",
           {"size": 14}),
          ("f*", {"size": 14, "italic": True, "font": SERIF}),
@@ -746,7 +750,7 @@ def slide_11_smoking_gun(prs, idx, total):
          ("C₁ₐ ≤ 1.5029",
           {"size": 14, "italic": True, "font": SERIF}),
          (".", {"size": 14, "italic": True})],
-        [("", {"size": 8})],
+        [("", {"size": 14})],
         [("Point the MATLAB cascade at the threshold  ",
           {"size": 14}),
          ("1.51", {"size": 14, "font": SERIF, "italic": True}),
@@ -767,7 +771,7 @@ def slide_11_smoking_gun(prs, idx, total):
           {"size": 13}),
          ("C₁ₐ ≥ 1.51", {"size": 13, "font": SERIF, "italic": True,
                           "bold": True})],
-        [("", {"size": 8})],
+        [("", {"size": 14})],
         [("But  ", {"size": 15, "bold": True, "color": BRICK,
                      "font": SERIF}),
          ("1.51 > 1.5029 ≥ C₁ₐ",
@@ -801,7 +805,7 @@ def slide_12_what_this_means(prs, idx, total):
              size=11, bold=True, color=INK, font=SANS)
     add_rule(s, Inches(0.6), Inches(2.2), Inches(1.6),
              color=INK, thickness=1.3)
-    add_rich(s, Inches(0.6), Inches(2.4), Inches(5.9), Inches(4.2), [
+    add_rich(s, Inches(0.6), Inches(2.4), Inches(5.9), Inches(4.4), [
         [("C&S 2017 work on the fine height grid  ",
           {"size": 14, "color": INK}),
          ("B", {"size": 14, "italic": True, "font": SERIF}),
@@ -810,11 +814,11 @@ def slide_12_what_this_means(prs, idx, total):
         [("where Lemma 3's  ", {"size": 14, "color": INK}),
          ("2/m + 1/m²", {"size": 14, "italic": True, "font": SERIF}),
          ("   correction is legitimate.", {"size": 14, "color": INK})],
-        [("", {"size": 6})],
+        [("", {"size": 10})],
         [("The published bound  ", {"size": 14, "color": INK}),
          ("1.2802", {"size": 15, "bold": True, "color": INK, "font": SERIF}),
          ("  is not in doubt.", {"size": 14, "color": INK})],
-        [("", {"size": 10})],
+        [("", {"size": 14})],
         [("The MATLAB artifact is a different animal:",
           {"size": 14, "color": INK})],
         [("it enumerates a coarser mass grid, but ports the paper's",
@@ -833,25 +837,27 @@ def slide_12_what_this_means(prs, idx, total):
              size=11, bold=True, color=BRICK, font=SANS)
     add_rule(s, Inches(6.95), Inches(2.2), Inches(1.6),
              color=BRICK, thickness=1.3)
-    add_rich(s, Inches(6.95), Inches(2.4), Inches(5.9), Inches(4.2), [
+    add_rich(s, Inches(6.95), Inches(2.4), Inches(5.9), Inches(4.4), [
         [("(a)  They sent us an early prototype.",
           {"size": 14, "bold": True, "color": INK, "font": SERIF})],
+        [("", {"size": 4})],
         [("The published bound was run on a separate fine-grid",
           {"size": 13, "color": INK})],
         [("enumerator;  the coarse-mass file is a speed-oriented",
           {"size": 13, "color": INK})],
         [("variant never meant to be the proof vehicle.",
           {"size": 13, "color": INK})],
-        [("", {"size": 10})],
+        [("", {"size": 14})],
         [("(b)  A derivation we're missing.",
           {"size": 14, "bold": True, "color": INK, "font": SERIF})],
+        [("", {"size": 4})],
         [("A mass-space bound that avoids the  ",
           {"size": 13, "color": INK}),
          ("2d", {"size": 13, "italic": True, "font": SERIF}),
          ("  factor — ", {"size": 13, "color": INK})],
         [("unlikely, but worth asking about before we conclude.",
           {"size": 13, "color": INK})],
-        [("", {"size": 10})],
+        [("", {"size": 14})],
         [("Either way,  this is a narrow claim about one file.",
           {"size": 13, "italic": True, "color": STONE, "font": SERIF})],
     ])
@@ -912,13 +918,13 @@ def slide_13_summary(prs, idx, total):
           {"size": 14, "color": INK}),
          ("the published paper is unaffected.",
           {"size": 14, "color": INK, "italic": True})],
-        [("", {"size": 6})],
+        [("", {"size": 12})],
         [("Next:   formal write-ups for both proofs in  ",
           {"size": 13, "color": STONE}),
          ("proof/", {"size": 13, "color": STONE, "font": MONO}),
          (",   push cascade to  d ≥ 256,   close the gap toward 1.5029.",
           {"size": 13, "color": STONE, "italic": True})],
-    ])
+    ], spacing=1.45)
 
     add_footer(s, idx, total, active_color=INK)
 
