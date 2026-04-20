@@ -305,93 +305,55 @@ def slide_02_problem(prs, idx, total):
     add_footer(s, idx, total, active_color=INK)
 
 
-def slide_03_prior_work(prs, idx, total):
-    s = blank_slide(prs, rail_color=STONE)
-    slide_header(s, "§2 · Prior work",
-                 "Cloninger–Steinerberger 2017: branch-and-prune over Bₙ,ₘ")
+def slide_03_baseline_and_tracks(prs, idx, total):
+    s = blank_slide(prs)
+    slide_header(s, "§2 · Baseline and our three tracks",
+                 "Three independent attacks above the 2017 floor")
 
-    add_rich(s, Inches(0.6), Inches(1.8), Inches(7.5), Inches(5.0), [
-        [("1.  Discretize", {"size": 16, "bold": True, "color": INK,
-                             "font": SERIF})],
-        [("partition  [−¼, ¼]  into  ", {"size": 14, "color": INK}),
+    # PRIOR WORK row (left summary + right result card) ------------
+    add_text(s, Inches(0.6), Inches(1.75), Inches(8.0), Inches(0.35),
+             "PRIOR WORK  —  CLONINGER & STEINERBERGER 2017",
+             size=11, bold=True, color=STONE, font=SANS)
+    add_rich(s, Inches(0.6), Inches(2.1), Inches(8.0), Inches(1.0), [
+        [("Branch-and-prune over the fine height grid  ",
+          {"size": 14, "color": INK}),
+         ("B", {"size": 14, "italic": True, "font": SERIF}),
+         ("n,m", {"size": 10, "italic": True, "font": SERIF}),
+         (":   discretize  [−¼, ¼]  into  ", {"size": 14, "color": INK}),
          ("d = 2n", {"size": 14, "italic": True, "font": SERIF}),
-         ("  bins;  approximate  ", {"size": 14}),
-         ("f", {"size": 14, "italic": True, "font": SERIF}),
-         ("  by a step function  ", {"size": 14}),
-         ("g", {"size": 14, "italic": True, "font": SERIF}),
-         ("  with heights in  (1/m)ℕ", {"size": 14})],
-        [("", {"size": 12})],
-        [("2.  Windowed test values",
-          {"size": 16, "bold": True, "color": INK, "font": SERIF})],
-        [("for each window  W,  lower-bound  ‖f ∗ f‖∞  by a quadratic form in the bin heights",
-          {"size": 14})],
-        [("", {"size": 12})],
-        [("3.  Prune",
-          {"size": 16, "bold": True, "color": INK, "font": SERIF})],
-        [("rule out any height vector whose test value exceeds the target threshold",
-          {"size": 14})],
-        [("", {"size": 12})],
-        [("4.  Exhaust",
-          {"size": 16, "bold": True, "color": INK, "font": SERIF})],
-        [("if all grid points are pruned, the bound is proved",
-          {"size": 14})],
+         ("  bins,", {"size": 14, "color": INK})],
+        [("enumerate height vectors and prune any whose windowed test value exceeds the target;  correction term  ",
+          {"size": 14, "color": INK}),
+         ("2/m + 1/m²", {"size": 14, "italic": True, "font": SERIF}),
+         (".", {"size": 14, "color": INK})],
     ], spacing=1.3)
 
-    # right panel: editorial result card
-    add_box(s, Inches(8.5), Inches(1.9), Inches(4.2), Inches(4.4),
+    # Right: compact result card
+    add_box(s, Inches(8.9), Inches(1.75), Inches(3.8), Inches(1.45),
             fill=HIGHLIGHT)
-    add_rule(s, Inches(8.5), Inches(1.9), Inches(4.2),
+    add_rule(s, Inches(8.9), Inches(1.75), Inches(3.8),
              color=INK, thickness=1.3)
-    add_text(s, Inches(8.7), Inches(2.05), Inches(3.9), Inches(0.35),
+    add_text(s, Inches(9.05), Inches(1.87), Inches(3.5), Inches(0.3),
              "PUBLISHED RESULT",
              size=10, bold=True, color=STONE, font=SANS)
-    add_rich(s, Inches(8.7), Inches(2.5), Inches(3.9), Inches(1.3), [
-        [("C₁ₐ  ≥  1.2802",
-          {"size": 34, "bold": True, "color": INK, "font": SERIF})],
-    ])
-    add_rule(s, Inches(8.7), Inches(3.6), Inches(2.2),
+    add_text(s, Inches(9.05), Inches(2.2), Inches(3.5), Inches(0.6),
+             "C₁ₐ  ≥  1.2802",
+             size=26, bold=True, color=INK, font=SERIF)
+    add_text(s, Inches(9.05), Inches(2.8), Inches(3.5), Inches(0.3),
+             "(n, m) = (24, 50)   ·   ≈ 20,000 CPU-hours",
+             size=11, color=STONE, italic=True, font=SANS)
+
+    # Divider between prior work and our tracks
+    add_rule(s, Inches(0.6), Inches(3.4), Inches(12.1),
              color=HAIRLINE, thickness=0.75)
-    add_text(s, Inches(8.7), Inches(3.75), Inches(3.9), Inches(0.5),
-             "at  (n, m) = (24, 50),  d = 48",
-             size=13, color=INK, italic=True, font=SERIF)
-    add_text(s, Inches(8.7), Inches(4.2), Inches(3.9), Inches(0.5),
-             "≈ 20,000 CPU-hours",
-             size=13, color=INK, italic=True, font=SERIF)
-    add_rule(s, Inches(8.7), Inches(4.95), Inches(3.7),
-             color=HAIRLINE, thickness=0.75)
-    add_text(s, Inches(8.7), Inches(5.1), Inches(3.9), Inches(1.2),
-             "Correction term  2/m + 1/m²  controls the "
-             "step-function approximation error.",
-             size=12, color=STONE, italic=True, font=SANS)
 
-    add_footer(s, idx, total, active_color=INK)
-
-
-def slide_04_three_tracks(prs, idx, total):
-    s = blank_slide(prs)
-    slide_header(s, "§3 · Our contribution",
-                 "Three independent attacks on one problem — plus an audit")
+    # OUR CONTRIBUTION row --------------------------------------------
+    add_text(s, Inches(0.6), Inches(3.55), Inches(12.1), Inches(0.35),
+             "OUR CONTRIBUTION  —  THREE INDEPENDENT TRACKS",
+             size=11, bold=True, color=STONE, font=SANS)
 
     s.shapes.add_picture(str(FIG / "fig_three_tracks.png"),
-                         Inches(0.6), Inches(1.85), width=Inches(12.1))
-
-    add_rule(s, Inches(0.6), Inches(5.75), Inches(12.1),
-             color=HAIRLINE, thickness=0.75)
-    add_rich(s, Inches(0.6), Inches(5.95), Inches(12.1), Inches(1.1), [
-        [("Independently we implemented a branch-and-prune cascade on GPU  (",
-          {"size": 14, "color": INK}),
-         ("→ 1.4", {"size": 14, "bold": True, "color": NAVY}),
-         ("),  built a Lasserre SDP certificate  (",
-          {"size": 14, "color": INK}),
-         ("→ 1.3, certified", {"size": 14, "bold": True, "color": FOREST}),
-         ("),",
-          {"size": 14, "color": INK})],
-        [("and,  while reproducing the C&S baseline,  audited the MATLAB code the authors shared  (",
-          {"size": 14, "color": INK}),
-         ("→ this slide deck carries all three", {"size": 14, "bold": True,
-                                                  "color": BRICK}),
-         (").", {"size": 14, "color": INK})],
-    ])
+                         Inches(1.67), Inches(3.95), width=Inches(10.0))
 
     add_footer(s, idx, total, active_color=INK)
 
@@ -875,7 +837,7 @@ def slide_12_what_this_means(prs, idx, total):
 
 def slide_13_summary(prs, idx, total):
     s = blank_slide(prs)
-    slide_header(s, "§4 · Takeaways",
+    slide_header(s, "§3 · Takeaways",
                  "Where C₁ₐ stands after this project")
 
     s.shapes.add_picture(str(FIG / "fig_bounds_number_line.png"),
@@ -936,20 +898,19 @@ def slide_13_summary(prs, idx, total):
 def build():
     prs = new_prs()
     slide_01_title(prs)
-    TOTAL = 13
+    TOTAL = 12
 
     slide_02_problem(prs, 2, TOTAL)
-    slide_03_prior_work(prs, 3, TOTAL)
-    slide_04_three_tracks(prs, 4, TOTAL)
-    slide_05_cascade_method(prs, 5, TOTAL)
-    slide_06_cascade_result(prs, 6, TOTAL)
-    slide_07_sdp_method(prs, 7, TOTAL)
-    slide_08_sdp_result(prs, 8, TOTAL)
-    slide_09_matlab_setup(prs, 9, TOTAL)
-    slide_10_matlab_gap(prs, 10, TOTAL)
-    slide_11_smoking_gun(prs, 11, TOTAL)
-    slide_12_what_this_means(prs, 12, TOTAL)
-    slide_13_summary(prs, 13, TOTAL)
+    slide_03_baseline_and_tracks(prs, 3, TOTAL)
+    slide_05_cascade_method(prs, 4, TOTAL)
+    slide_06_cascade_result(prs, 5, TOTAL)
+    slide_07_sdp_method(prs, 6, TOTAL)
+    slide_08_sdp_result(prs, 7, TOTAL)
+    slide_09_matlab_setup(prs, 8, TOTAL)
+    slide_10_matlab_gap(prs, 9, TOTAL)
+    slide_11_smoking_gun(prs, 10, TOTAL)
+    slide_12_what_this_means(prs, 11, TOTAL)
+    slide_13_summary(prs, 12, TOTAL)
 
     prs.save(OUT)
     print("wrote", OUT)
