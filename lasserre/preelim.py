@@ -448,11 +448,33 @@ def build_preelim_transform(
     tol: float = PIVOT_TOL,
     max_fill_ratio: float = DEFAULT_MAX_FILL_RATIO,
     forbidden_cols: Optional[Set[int]] = None,
+    protect_degrees: Optional[Set[int]] = None,
     verbose: bool = True,
 ) -> PreElimTransform:
     """End-to-end: assemble consistency+simplex equalities, run Gauss-Jordan,
     materialise T and offset, and wrap in a ``PreElimTransform``.
+
+    ``protect_degrees``: set of monomial TOTAL DEGREES that must not be
+    pivoted (stay as free ỹ coordinates).  For the Lasserre SDP the "backbone"
+    moment variables are degrees 1 and 2 — they appear in the moment matrix
+    diagonal and in window Q_W as single-entry coefficients.  Pivoting them
+    replaces a single-variable pick with a ~d-term linear combination,
+    degrading Schur-complement conditioning near rank-deficient primals.
+    Default: {1, 2}.  Pass ``set()`` to disable.
     """
+    if protect_degrees is None:
+        protect_degrees = {1, 2}
+
+    mono_list = P['mono_list']
+    protected_from_deg: Set[int] = set()
+    if protect_degrees:
+        for j, alpha in enumerate(mono_list):
+            if int(sum(alpha)) in protect_degrees:
+                protected_from_deg.add(j)
+    # Merge with any user-supplied forbidden_cols.
+    all_forbidden: Set[int] = set(forbidden_cols or set())
+    all_forbidden |= protected_from_deg
+
     A, b, _tags = assemble_consistency_equalities(P)
     n_y = P['n_y']
     n_eq = A.shape[0]
@@ -462,9 +484,14 @@ def build_preelim_transform(
             A, b,
             tol=tol,
             max_fill_ratio=max_fill_ratio,
-            forbidden_cols=forbidden_cols,
+            forbidden_cols=all_forbidden,
             verbose=verbose,
         )
+
+    if verbose and protect_degrees:
+        print(f"  protect_degrees={sorted(protect_degrees)} — "
+              f"{len(protected_from_deg)} moment indices protected from pivoting",
+              flush=True)
 
     free_cols = sorted(set(range(n_y)) - set(pivot_cols))
     new_idx = {j: k for k, j in enumerate(free_cols)}

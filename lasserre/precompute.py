@@ -14,16 +14,28 @@ from lasserre.core import (
     enum_monomials, _make_hash_bases, _hash_monos, _hash_add,
     _build_hash_table, _hash_lookup,
     build_window_matrices, collect_moments,
+    get_ab_eiej_slice,
 )
+
+import os as _os
+_LAZY_DEFAULT = _os.environ.get('SIDON_LAZY_ABEIEJ', '1') == '1'
 
 
 # =====================================================================
 # Precompute all index arrays + window COO data
 # =====================================================================
 
-def _precompute(d, order, verbose=True):
-    """Precompute monomials, hash tables, index arrays, and window COO."""
+def _precompute(d, order, verbose=True, lazy_ab_eiej=None):
+    """Precompute monomials, hash tables, index arrays, and window COO.
+
+    lazy_ab_eiej: if True, skip the full (n_loc, n_loc, d, d) ab_eiej_idx
+    materialisation.  Downstream callers must use lasserre.core.
+    get_ab_eiej_slice / get_ab_eiej_ij for access.  Default follows env
+    SIDON_LAZY_ABEIEJ (default "1" → lazy).
+    """
     t0 = time.time()
+    if lazy_ab_eiej is None:
+        lazy_ab_eiej = _LAZY_DEFAULT
 
     windows, M_mats = build_window_matrices(d)
     n_win = len(windows)
@@ -68,10 +80,18 @@ def _precompute(d, order, verbose=True):
             assert np.all(picks >= 0), f"Missing moments in mu_{i_var} loc"
             loc_picks.append(picks.ravel())
 
-        EE_hash = _hash_add(bases[:, None], bases[None, :], prime)
-        ABIJ_hash = _hash_add(AB_loc_hash[:, :, None, None],
-                              EE_hash[None, None, :, :], prime)
-        ab_eiej_idx = _hash_lookup(ABIJ_hash, sorted_h, sort_o)
+        if lazy_ab_eiej:
+            ab_eiej_idx = None
+            if verbose:
+                sz_gb = (n_loc * n_loc * d * d) * 8 / 1e9
+                print(f"  ab_eiej_idx: LAZY (would have been "
+                      f"({n_loc},{n_loc},{d},{d}) = {sz_gb:.2f}GB)",
+                      flush=True)
+        else:
+            EE_hash = _hash_add(bases[:, None], bases[None, :], prime)
+            ABIJ_hash = _hash_add(AB_loc_hash[:, :, None, None],
+                                  EE_hash[None, None, :, :], prime)
+            ab_eiej_idx = _hash_lookup(ABIJ_hash, sorted_h, sort_o)
 
         ab_flat = (np.arange(n_loc)[:, None] * n_loc
                    + np.arange(n_loc)[None, :])
@@ -146,6 +166,7 @@ def _precompute(d, order, verbose=True):
         't_pick_np': t_pick,
         'AB_loc_hash': AB_loc_hash, 'ab_eiej_idx': ab_eiej_idx,
         'ab_flat': ab_flat,
+        'lazy_ab_eiej': bool(lazy_ab_eiej),
         'idx_ij': idx_ij,
         'consist_mono': consist_mono,
         'consist_idx': consist_idx, 'consist_ei_idx': consist_ei_idx,
@@ -238,55 +259,82 @@ def _eval_all_windows(y_vals, P):
 
 
 def _check_window_violations(y_vals, t_val, P, active_windows, tol=1e-6):
-    """Batch-check all non-active windows for localizing matrix violations."""
+    """Batch-check all non-active windows for localizing matrix violations.
+
+    Lazy-aware: when P['ab_eiej_idx'] is None, computes per-window slices
+    on demand from AB_loc_hash.
+    """
     n_loc = P['n_loc']
     ab_eiej_idx = P['ab_eiej_idx']
 
-    if n_loc == 0 or ab_eiej_idx is None:
+    if n_loc == 0:
+        return []
+    if ab_eiej_idx is None and P.get('AB_loc_hash') is None:
         return []
 
     t_pick_arr = np.array(P['t_pick'])
     L_t = t_val * y_vals[t_pick_arr].reshape(n_loc, n_loc)
-
-    safe_idx = np.clip(ab_eiej_idx, 0, len(y_vals) - 1)
-    y_abij = y_vals[safe_idx]
-    y_abij[ab_eiej_idx < 0] = 0.0
 
     check_ws = [w for w in P['nontrivial_windows'] if w not in active_windows]
     if not check_ws:
         return []
 
     violations = []
-    for w in check_ws:
-        Mw = P['M_mats'][w]
-        L_q = np.einsum('ij,abij->ab', Mw, y_abij)
-        L_w = L_t - L_q
-        L_w = 0.5 * (L_w + L_w.T)
-        min_eig = np.linalg.eigvalsh(L_w)[0]
-        if min_eig < -tol:
-            violations.append((w, float(min_eig)))
+    if ab_eiej_idx is not None:
+        safe_idx = np.clip(ab_eiej_idx, 0, len(y_vals) - 1)
+        y_abij = y_vals[safe_idx]
+        y_abij[ab_eiej_idx < 0] = 0.0
+        for w in check_ws:
+            Mw = P['M_mats'][w]
+            L_q = np.einsum('ij,abij->ab', Mw, y_abij)
+            L_w = L_t - L_q
+            L_w = 0.5 * (L_w + L_w.T)
+            min_eig = np.linalg.eigvalsh(L_w)[0]
+            if min_eig < -tol:
+                violations.append((w, float(min_eig)))
+    else:
+        for w in check_ws:
+            Mw = P['M_mats'][w]
+            nz_i, nz_j = np.nonzero(Mw)
+            if len(nz_i) == 0:
+                continue
+            y_idx = get_ab_eiej_slice(P, nz_i, nz_j)
+            safe = np.clip(y_idx, 0, len(y_vals) - 1)
+            y_abk = y_vals[safe]
+            y_abk[y_idx < 0] = 0.0
+            mw_vals = Mw[nz_i, nz_j]
+            L_q = np.tensordot(y_abk, mw_vals, axes=([2], [0]))
+            L_w = L_t - L_q
+            L_w = 0.5 * (L_w + L_w.T)
+            min_eig = np.linalg.eigvalsh(L_w)[0]
+            if min_eig < -tol:
+                violations.append((w, float(min_eig)))
 
     violations.sort(key=lambda x: x[1])
     return violations
 
 
 def _add_psd_window(mdl, y, t_param, w, P):
-    """Add PSD localizing constraint for window w (on-demand COO)."""
+    """Add PSD localizing constraint for window w (on-demand COO).
+
+    Lazy-aware: uses get_ab_eiej_slice so neither the full 4D array
+    nor a materialised slice hierarchy is required.
+    """
     n_loc = P['n_loc']
     n_y = P['n_y']
-    ab_eiej_idx = P['ab_eiej_idx']
     ab_flat = P['ab_flat']
     Mw = P['M_mats'][w]
 
     t_y = Expr.mul(t_param, y.pick(P['t_pick']))
 
     nz_i, nz_j = np.nonzero(Mw)
-    if len(nz_i) == 0 or ab_eiej_idx is None:
+    if len(nz_i) == 0 or (
+            P.get('ab_eiej_idx') is None and P.get('AB_loc_hash') is None):
         Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
         mdl.constraint(f"w_psd_{w}", Lw_mat, Domain.inPSDCone(n_loc))
         return
 
-    y_idx = ab_eiej_idx[:, :, nz_i, nz_j]
+    y_idx = get_ab_eiej_slice(P, nz_i, nz_j)
     valid = y_idx >= 0
     if not np.any(valid):
         Lw_mat = Expr.reshape(t_y, n_loc, n_loc)

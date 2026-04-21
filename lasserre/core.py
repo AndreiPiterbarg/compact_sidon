@@ -135,6 +135,140 @@ def _hash_lookup(query_hashes, sorted_hashes, sort_order):
 
 
 # =====================================================================
+# Lazy ab_eiej_idx slicing — avoids materialising the (n_loc, n_loc, d, d)
+# index array.  At d=32 L=3 this array is ~351 GB; eager construction
+# triggers disk paging and dominates Phase-1 wall clock.  The reduced
+# SDP only ever reads thin slices ab_eiej_idx[:, :, nz_i, nz_j], so we
+# compute each slice on demand from AB_loc_hash + bases.
+# =====================================================================
+
+def ab_eiej_slice_ij(AB_loc_hash, bases, sorted_h, sort_o, i, j, prime=None):
+    """Compute ab_eiej_idx[:, :, i, j] on demand.
+
+    Returns int64 array of shape (n_loc, n_loc).  Equivalent to
+    full_ab_eiej_idx[:, :, i, j] but never materialises the full 4D
+    array.  Memory use: 8 * n_loc^2 bytes (e.g. 342 MB at d=32 L=3).
+    """
+    h = _hash_add(AB_loc_hash, bases[i] + bases[j], prime)
+    return _hash_lookup(h, sorted_h, sort_o)
+
+
+def ab_eiej_slice_batch(AB_loc_hash, bases, sorted_h, sort_o,
+                        nz_i, nz_j, prime=None):
+    """Compute ab_eiej_idx[:, :, nz_i, nz_j] on demand.
+
+    nz_i, nz_j: 1-D integer arrays of equal length k (the nonzero
+    (i, j) positions of a window matrix).  Returns int64 array of
+    shape (n_loc, n_loc, k), exactly matching NumPy's advanced
+    fancy-indexing semantics.
+
+    Memory use: 8 * n_loc^2 * k bytes — typically k <= ~40 for window
+    support, keeping this well under 2 GB even at d=32 L=3.
+    """
+    nz_i = np.asarray(nz_i, dtype=np.int64)
+    nz_j = np.asarray(nz_j, dtype=np.int64)
+    # EE_hash[i, j] = bases[i] + bases[j].  We only need the K entries.
+    ee = _hash_add(bases[nz_i], bases[nz_j], prime)  # (k,)
+    # shape (n_loc, n_loc, k): broadcast AB_loc_hash + ee.
+    h = _hash_add(AB_loc_hash[:, :, None], ee[None, None, :], prime)
+    return _hash_lookup(h, sorted_h, sort_o)
+
+
+def _remap_signed_local(arr, old_to_new):
+    """Remap index array preserving the -1 sentinel.  Mirrors the helper
+    in lasserre/z2_elim.py but defined here to avoid an import cycle."""
+    a = np.asarray(arr, dtype=np.int64)
+    return np.where(a < 0, -1, old_to_new[np.maximum(a, 0)])
+
+
+def get_ab_eiej_slice(P, nz_i, nz_j):
+    """Return ab_eiej_idx[:, :, nz_i, nz_j] from precompute P.
+
+    Works in:
+      * eager mode (P['ab_eiej_idx'] is a materialised array; canonicalize_z2
+        already remapped it in place if Z/2 pre-elim ran),
+      * lazy mode (P['ab_eiej_idx'] is None — the slice is computed from
+        P['AB_loc_hash'], P['bases'], P['sorted_h'], P['sort_o'] — in the
+        ORIGINAL y-indexing, then remapped through P['old_to_new'] if
+        canonicalize_z2 ran).
+    """
+    eager = P.get('ab_eiej_idx')
+    if eager is not None:
+        return eager[:, :, np.asarray(nz_i), np.asarray(nz_j)]
+    out = ab_eiej_slice_batch(
+        P['AB_loc_hash'], P['bases'], P['sorted_h'], P['sort_o'],
+        nz_i, nz_j, prime=P.get('prime'))
+    old_to_new = P.get('old_to_new')
+    if old_to_new is not None:
+        out = _remap_signed_local(out, old_to_new)
+    return out
+
+
+def get_ab_eiej_ij(P, i, j):
+    """Return ab_eiej_idx[:, :, i, j] from precompute P (lazy-aware;
+    applies P['old_to_new'] if canonicalize_z2 ran)."""
+    eager = P.get('ab_eiej_idx')
+    if eager is not None:
+        return np.asarray(eager[:, :, int(i), int(j)])
+    out = ab_eiej_slice_ij(
+        P['AB_loc_hash'], P['bases'], P['sorted_h'], P['sort_o'],
+        int(i), int(j), prime=P.get('prime'))
+    old_to_new = P.get('old_to_new')
+    if old_to_new is not None:
+        out = _remap_signed_local(out, old_to_new)
+    return out
+
+
+# ---------------------------------------------------------------------
+# Numba-parallel _hash_lookup — used when SIDON_HASH_LOOKUP_NUMBA=1.
+# Falls back silently to the numpy version if numba is missing.
+# ---------------------------------------------------------------------
+
+_NUMBA_HASH_LOOKUP = None
+try:
+    import os as _os
+    if _os.environ.get('SIDON_HASH_LOOKUP_NUMBA', '0') == '1':
+        import numba as _nb  # type: ignore
+
+        @_nb.njit(parallel=True, cache=True)
+        def _numba_hash_lookup_1d(flat, sorted_hashes, sort_order):
+            n = flat.shape[0]
+            out = np.empty(n, dtype=np.int64)
+            m = sorted_hashes.shape[0]
+            for k in _nb.prange(n):
+                q = flat[k]
+                lo = 0
+                hi = m
+                while lo < hi:
+                    mid = (lo + hi) >> 1
+                    if sorted_hashes[mid] < q:
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                if lo < m and sorted_hashes[lo] == q:
+                    out[k] = sort_order[lo]
+                else:
+                    out[k] = -1
+            return out
+
+        _NUMBA_HASH_LOOKUP = _numba_hash_lookup_1d
+except Exception:
+    _NUMBA_HASH_LOOKUP = None
+
+
+def _hash_lookup_fast(query_hashes, sorted_hashes, sort_order):
+    """Drop-in replacement for _hash_lookup using numba-parallel search
+    when enabled, numpy otherwise.  Returns the same shape / semantics."""
+    if _NUMBA_HASH_LOOKUP is None:
+        return _hash_lookup(query_hashes, sorted_hashes, sort_order)
+    flat = np.ascontiguousarray(query_hashes.ravel(), dtype=np.int64)
+    out = _NUMBA_HASH_LOOKUP(flat,
+                             np.ascontiguousarray(sorted_hashes, np.int64),
+                             np.ascontiguousarray(sort_order, np.int64))
+    return out.reshape(query_hashes.shape)
+
+
+# =====================================================================
 # Window matrices
 # =====================================================================
 
