@@ -293,11 +293,13 @@ def build_problem_at_target(d, order, bandwidth, target,
 
 def solve_clarabel_feasibility(d, order, bandwidth, target,
                                 add_upper_loc=True, use_z2=True,
-                                tol_gap_abs=1e-7, tol_gap_rel=1e-7,
-                                tol_feas=1e-7, tol_infeas_abs=1e-8,
-                                tol_infeas_rel=1e-8,
+                                tol_gap_abs=1e-6, tol_gap_rel=1e-6,
+                                tol_feas=1e-6, tol_infeas_abs=1e-7,
+                                tol_infeas_rel=1e-7,
                                 max_iter=5000,
                                 max_threads=0,
+                                time_limit_s=0.0,
+                                direct_solve_method='auto',
                                 data_dir=None, tag=None,
                                 verbose=True):
     """Prove lb > target via a single Clarabel feasibility solve."""
@@ -327,8 +329,11 @@ def solve_clarabel_feasibility(d, order, bandwidth, target,
     P = sp.csc_matrix((n_var, n_var))
     q = np.zeros(n_var)
 
-    # A must be CSC double.
+    # A must be CSC double, sorted indices (Clarabel REQUIRES sorted CSC;
+    # scipy's tocsc() usually returns sorted but not guaranteed).
     A = A.tocsc().astype(np.float64)
+    A.sort_indices()
+    A.eliminate_zeros()
     b = np.asarray(b, dtype=np.float64)
 
     # Settings (Clarabel 0.11+ naming).
@@ -342,8 +347,16 @@ def solve_clarabel_feasibility(d, order, bandwidth, target,
     settings.tol_infeas_rel = float(tol_infeas_rel)
     if max_threads:
         settings.max_threads = int(max_threads)
-    # Presolve + chordal decomposition: big wins for problems with many
-    # small PSD blocks (our 496 window blocks fit this shape).
+    # time_limit is critical: if the solver is going to spend 50 h on
+    # a single problem we'd rather know at hour 10 and give up cleanly
+    # than have the pod budget swallow the rest.
+    if time_limit_s and time_limit_s > 0 and hasattr(settings, 'time_limit'):
+        settings.time_limit = float(time_limit_s)
+
+    # Presolve + chordal decomposition.  Our 496 window PSDs are all
+    # size 153 — chordal decomposition cannot split them further (they
+    # are already small), but presolve can still eliminate redundant
+    # equalities produced by the Z/2 injection and partial consistency.
     if hasattr(settings, 'presolve_enable'):
         settings.presolve_enable = True
     if hasattr(settings, 'chordal_decomposition_enable'):
@@ -352,6 +365,72 @@ def solve_clarabel_feasibility(d, order, bandwidth, target,
         settings.chordal_decomposition_compact = True
     if hasattr(settings, 'chordal_decomposition_merge_method'):
         settings.chordal_decomposition_merge_method = 'clique_graph'
+
+    # Ruiz equilibration: essential for moment matrices (ill-conditioned
+    # by design — each row coefficient is a multinomial in the moments).
+    # Default max_iter is 10; 20 tolerates tighter row/col balance at
+    # negligible cost (O(nnz) per sweep).
+    if hasattr(settings, 'equilibrate_enable'):
+        settings.equilibrate_enable = True
+    if hasattr(settings, 'equilibrate_max_iter'):
+        settings.equilibrate_max_iter = 20
+
+    # Iterative refinement on the KKT solve: mitigates floating-point
+    # drift when the moment matrix is nearly-rank-deficient (typical
+    # near the feasibility boundary where certificates live).
+    if hasattr(settings, 'iterative_refinement_enable'):
+        settings.iterative_refinement_enable = True
+    if hasattr(settings, 'iterative_refinement_max_iter'):
+        settings.iterative_refinement_max_iter = 10
+
+    # Static KKT regularisation: handles near-singular Hessians.
+    if hasattr(settings, 'static_regularization_enable'):
+        settings.static_regularization_enable = True
+
+    # Direct linear solver.  QDLDL (Clarabel's default) is a pure-Rust
+    # sparse LDLᵀ.  MKL Pardiso (via mkl-pardiso feature) can be 2-10×
+    # faster on large KKT systems IF Clarabel was built with MKL
+    # support.  Try 'mkl' / 'pardiso' / 'cudss' in order; fall back
+    # silently to 'qdldl' if the build doesn't expose them.
+    if direct_solve_method and direct_solve_method != 'auto' \
+            and hasattr(settings, 'direct_solve_method'):
+        try:
+            settings.direct_solve_method = direct_solve_method
+            if verbose:
+                print(f"  direct_solve_method set to "
+                      f"{direct_solve_method}", flush=True)
+        except Exception as exc:
+            if verbose:
+                print(f"  direct_solve_method '{direct_solve_method}' "
+                      f"not supported ({exc}); using default", flush=True)
+    elif direct_solve_method == 'auto' \
+            and hasattr(settings, 'direct_solve_method'):
+        # Robust probe: try creating a tiny solver with each
+        # candidate; if DefaultSolver() fails we know that method
+        # isn't compiled in.  Fall through silently to QDLDL default.
+        for cand in ('mkl', 'pardiso'):
+            try:
+                probe = clarabel.DefaultSettings()
+                probe.verbose = False
+                probe.direct_solve_method = cand
+                # Minimal 1x1 problem to force solver construction
+                tiny_A = sp.csc_matrix(np.array([[1.0]]))
+                tiny_b = np.array([0.0])
+                clarabel.DefaultSolver(
+                    sp.csc_matrix((1, 1)), np.zeros(1),
+                    tiny_A, tiny_b,
+                    [clarabel.ZeroConeT(1)], probe)
+                settings.direct_solve_method = cand
+                if verbose:
+                    print(f"  direct_solve_method=auto selected "
+                          f"{cand}", flush=True)
+                break
+            except Exception:
+                continue
+        else:
+            if verbose:
+                print("  direct_solve_method=auto -> using Clarabel "
+                      "default (qdldl)", flush=True)
 
     if verbose:
         print(f"\n{'=' * 70}")
@@ -438,14 +517,28 @@ def main():
                         help='t value at which to check feasibility.')
     parser.add_argument('--no-upper-loc', action='store_true')
     parser.add_argument('--no-z2', action='store_true')
-    parser.add_argument('--tol-gap-abs', type=float, default=1e-7)
-    parser.add_argument('--tol-gap-rel', type=float, default=1e-7)
-    parser.add_argument('--tol-feas', type=float, default=1e-7)
-    parser.add_argument('--tol-infeas-abs', type=float, default=1e-8)
-    parser.add_argument('--tol-infeas-rel', type=float, default=1e-8)
+    # Tolerance defaults are LOOSENED vs Clarabel's own defaults because
+    # we only care about the infeasibility verdict, not optimality gap.
+    # tol_infeas_* gates the quality of the primal-infeasibility
+    # certificate; tol_gap_* and tol_feas gate the KKT IPM residuals.
+    # 1e-6 / 1e-7 keeps the certificate rigorous while cutting the IPM
+    # iteration count roughly in half vs 1e-7 / 1e-8.
+    parser.add_argument('--tol-gap-abs', type=float, default=1e-6)
+    parser.add_argument('--tol-gap-rel', type=float, default=1e-6)
+    parser.add_argument('--tol-feas', type=float, default=1e-6)
+    parser.add_argument('--tol-infeas-abs', type=float, default=1e-7)
+    parser.add_argument('--tol-infeas-rel', type=float, default=1e-7)
     parser.add_argument('--max-iter', type=int, default=5000)
     parser.add_argument('--max-threads', type=int, default=0,
                         help='0 = use all available cores (Clarabel default)')
+    parser.add_argument('--time-limit-s', type=float, default=0.0,
+                        help='Hard wall-clock limit for the solve (0 = no limit).  '
+                             'Clarabel will exit cleanly if exceeded.')
+    parser.add_argument('--direct-solve-method', type=str, default='auto',
+                        choices=('auto', 'qdldl', 'mkl', 'pardiso'),
+                        help='Sparse direct LDLᵀ backend.  "auto" tries MKL Pardiso '
+                             'first and falls back silently to Clarabel default (QDLDL) '
+                             'if MKL support was not compiled in.')
     parser.add_argument('--data-dir', type=str, default=None)
     args = parser.parse_args()
 
@@ -468,6 +561,8 @@ def main():
         tol_infeas_abs=args.tol_infeas_abs,
         tol_infeas_rel=args.tol_infeas_rel,
         max_iter=args.max_iter, max_threads=args.max_threads,
+        time_limit_s=args.time_limit_s,
+        direct_solve_method=args.direct_solve_method,
         data_dir=data_dir, verbose=True,
     )
 

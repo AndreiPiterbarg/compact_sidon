@@ -81,25 +81,42 @@ def test_reconstruct_roundtrip(d, order):
 
 @pytest.mark.parametrize('d,order', [(4, 2), (4, 3), (6, 2), (6, 3), (8, 2)])
 def test_original_equalities_preserved(d, order):
-    """Reconstructed y must satisfy all original equalities, which means
-    ỹ-space *is* exactly the fixed-point subspace of the equality system."""
+    """The equality system A y = b factors into:
+      1. Pivoted rows — automatically satisfied by reconstruct (for any ỹ).
+      2. Residual rows — must be imposed on ỹ.
+    With protect_degrees left at default, some rows may be residual.  We
+    verify both halves on valid moment vectors derived from a Dirac at
+    μ ∈ Δ_d (which satisfy A y = b by construction)."""
     P = _precompute(d, order, verbose=False)
     xf = build_preelim_transform(P, verbose=False)
-
     A, b, _tags = assemble_consistency_equalities(P)
 
+    # Part 1: pivoted-only check with no-protect preelim (must be zero for
+    # arbitrary ỹ).
+    xf_no_protect = build_preelim_transform(
+        P, protect_degrees=set(), verbose=False)
     rng = np.random.default_rng(seed=54321 + d * 10 + order)
     for trial in range(3):
-        # Random ỹ (no validity guarantee) — we only need to check that
-        # reconstruct(ỹ) satisfies the equalities (which must hold for ANY
-        # ỹ if the transform is consistent with the equality system).
-        y_red = rng.standard_normal(xf.n_y_red)
-        y_full = xf.reconstruct(y_red)
+        y_red = rng.standard_normal(xf_no_protect.n_y_red)
+        y_full = xf_no_protect.reconstruct(y_red)
         residual = np.asarray(A @ y_full).ravel() - b
         err = np.max(np.abs(residual))
         assert err < 1e-9, (
-            f"reconstruct does not satisfy original equalities: "
-            f"d={d} order={order} trial={trial}, max|A y - b| = {err:.3e}")
+            f"(no-protect) reconstruct fails A y = b: "
+            f"d={d} order={order} trial={trial}, max|Δ| = {err:.3e}")
+
+    # Part 2: with default protection, valid y (from Dirac at μ ∈ Δ_d)
+    # projected then reconstructed must STILL satisfy A y = b — because
+    # reconstruct(project(valid_y)) = valid_y and valid_y satisfies A y = b.
+    for trial in range(3):
+        mu = _random_mu(d, rng)
+        y_valid = _monomial_eval(P['mono_list'], mu)
+        y_back = xf.reconstruct(xf.project(y_valid))
+        residual = np.asarray(A @ y_back).ravel() - b
+        err = np.max(np.abs(residual))
+        assert err < 1e-9, (
+            f"(default-protect) reconstruct(project(valid_y)) fails A y = b: "
+            f"d={d} order={order} trial={trial}, max|Δ| = {err:.3e}")
 
 
 @pytest.mark.parametrize('d,order', [(4, 2), (6, 2)])

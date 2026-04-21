@@ -1111,9 +1111,7 @@ def _main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--d', type=int, required=True)
     p.add_argument('--order', type=int, default=3)
-    p.add_argument('--mode',
-                    choices=('baseline', 'tuned', 'z2_eq', 'z2_bd',
-                              'z2_full'),
+    p.add_argument('--mode', choices=('baseline', 'tuned'),
                     default='tuned')
     p.add_argument('--no-upper-loc', action='store_true',
                     help='Omit (1-μ_i) upper-localizing cones.')
@@ -1127,32 +1125,18 @@ def _main() -> int:
                          'MOSEK task file, primal/dual vectors, meta '
                          'JSON — one bundle per certified bisection '
                          'step.')
-    p.add_argument('--pre-elim', action='store_true',
-                    help='Substitute out Z/2 equalities in Python '
-                         'before handing the problem to MOSEK.  '
-                         'Losslessly halves n_y and skips MOSEK lindep '
-                         'presolve.  Requires a Z/2 mode.')
     p.add_argument('--primary-tol', type=float, default=1e-6,
-                    help='Primary MOSEK IPM tolerance.  Default 1e-6.  '
-                         'For feasibility probes far from val(d) you '
-                         'can safely loosen to 1e-4 (Lever 1).  Retry '
-                         'ladder tightens or loosens as needed.')
+                    help='Primary MOSEK IPM tolerance.  Default 1e-6.')
     p.add_argument('--order-method', type=str, default='forceGraphpar',
                     choices=('free', 'none', 'appminloc',
                               'experimental', 'tryGraphpar',
                               'forceGraphpar'),
-                    help='MOSEK AMD ordering method.  Default '
-                         'forceGraphpar uses ParMETIS which is '
-                         'genuinely parallel (unlike experimental/AMD '
-                         'which stalled for 22+ min at d=16 L3).')
+                    help='MOSEK AMD ordering method.')
     p.add_argument('--watcher-interval', type=float, default=15.0,
                     help='Seconds between watcher status rows.  '
                          'Reduce for short debug runs.')
     p.add_argument('--lindep-off', action='store_true',
-                    help='Disable MOSEK lindep presolve (Lever 4).  '
-                         'Safe under --pre-elim but often SLOWER on '
-                         'small d.  Try at large d if build time '
-                         'dominates.')
+                    help='Disable MOSEK lindep presolve.')
     args = p.parse_args()
 
     r = solve_mosek_tuned(
@@ -1163,7 +1147,6 @@ def _main() -> int:
         t_lo=args.t_lo,
         t_hi=args.t_hi,
         proof_dir=args.proof_dir,
-        pre_elim=args.pre_elim,
         primary_tol=args.primary_tol,
         order_method=args.order_method,
         force_lindep_off=args.lindep_off,

@@ -67,6 +67,18 @@ from lasserre.z2_blockdiag import (build_blockdiag_picks,
                                      localizing_sigma_reps,
                                      window_sigma_reps)
 from lasserre.z2_elim import canonicalize_z2
+from lasserre.core import (
+    ab_eiej_slice_ij as _lazy_ab_eiej_slice_ij,
+    get_ab_eiej_ij as _get_ab_eiej_ij,
+)
+
+# Parallelism knob for the per-(i,j) substitute_pick loop that dominates
+# Phase-1 wall-clock at d>=16 L=3.  Threads (not processes): scipy.sparse
+# and NumPy both release the GIL on the big ops (searchsorted, csr matmul,
+# reindex), so threads scale without the 342 MB × n_workers spawn cost.
+import concurrent.futures as _futures
+_IJ_WORKERS = int(os.environ.get(
+    'SIDON_IJ_WORKERS', str(max(1, (os.cpu_count() or 2)))))
 
 # Reuse shared utilities from the tuned file — DO NOT modify that file.
 from lasserre_mosek_tuned import (
@@ -84,12 +96,25 @@ from lasserre_mosek_tuned import (
 # =====================================================================
 
 def _mosek_sparse(M: sp.spmatrix) -> Matrix:
-    """Convert a scipy sparse matrix to a MOSEK Fusion Matrix.sparse."""
+    """Convert a scipy sparse matrix to a MOSEK Fusion Matrix.sparse.
+
+    Performance: avoids ``.tolist()`` — the numpy→list conversion allocates
+    one Python int/float object per nnz and was the dominant cost at large
+    d.  MOSEK Fusion accepts ndarray directly (jpype handles the copy into
+    the Java int[] / double[] in a single bulk call).  We ensure contiguous
+    int32 / float64 — MOSEK's Java API expects 32-bit indices; 64-bit row
+    indices would be down-cast internally so we do it here once.
+    """
     coo = M.tocoo()
-    return Matrix.sparse(int(coo.shape[0]), int(coo.shape[1]),
-                          coo.row.astype(np.int64).tolist(),
-                          coo.col.astype(np.int64).tolist(),
-                          coo.data.astype(np.float64).tolist())
+    r = np.ascontiguousarray(coo.row, dtype=np.int32)
+    c = np.ascontiguousarray(coo.col, dtype=np.int32)
+    v = np.ascontiguousarray(coo.data, dtype=np.float64)
+    return Matrix.sparse(int(coo.shape[0]), int(coo.shape[1]), r, c, v)
+
+
+def _const_term(c: np.ndarray):
+    """``Expr.constTerm`` with numpy support and no per-element Python cast."""
+    return Expr.constTerm(np.ascontiguousarray(c, dtype=np.float64))
 
 
 def _affine_expr(C: sp.csr_matrix, c: np.ndarray, y_red):
@@ -99,9 +124,8 @@ def _affine_expr(C: sp.csr_matrix, c: np.ndarray, y_red):
     """
     C = C.tocsr()
     if C.nnz == 0:
-        return Expr.constTerm(c.astype(np.float64).tolist())
-    return Expr.add(Expr.mul(_mosek_sparse(C), y_red),
-                    Expr.constTerm(c.astype(np.float64).tolist()))
+        return _const_term(c)
+    return Expr.add(Expr.mul(_mosek_sparse(C), y_red), _const_term(c))
 
 
 def _scaled_vec_by_param(const_vec: np.ndarray, t_var) -> Any:
@@ -112,7 +136,8 @@ def _scaled_vec_by_param(const_vec: np.ndarray, t_var) -> Any:
     pattern used elsewhere in the tuned file.
     """
     n = int(const_vec.shape[0])
-    c_col = Matrix.dense(n, 1, const_vec.astype(np.float64).tolist())
+    c_col = Matrix.dense(n, 1,
+                          np.ascontiguousarray(const_vec, dtype=np.float64))
     return Expr.flatten(Expr.mul(c_col, Expr.reshape(t_var, 1, 1)))
 
 
@@ -240,21 +265,24 @@ def _build_full_model_preelim(
 
     # ---- Localising PSD: μ_i ≥ 0 and optionally (1 - μ_i) ≥ 0 ----
     # Precompute t_pick substitution once — reused for upper-loc and window PSD.
+    # Cache per-i_var pick subs so the upper-loc loop below does not re-compute
+    # them (the original call site computed each one twice).
     C_tpick = c_tpick = None
+    loc_subs: Dict[int, Tuple[sp.csr_matrix, np.ndarray]] = {}
     if P['order'] >= 2:
         C_tpick, c_tpick = xf.substitute_pick(np.asarray(P['t_pick']))
 
         for i_var in loc_active:
             C_loc, c_loc = xf.substitute_pick(
                 np.asarray(P['loc_picks'][i_var]))
+            loc_subs[i_var] = (C_loc, c_loc)
             L_flat = _affine_expr(C_loc, c_loc, y_red)
             Li = Expr.reshape(L_flat, n_loc, n_loc)
             mdl.constraint(Li, Domain.inPSDCone(n_loc))
 
         if add_upper_loc:
             for i_var in loc_active:
-                C_loc, c_loc = xf.substitute_pick(
-                    np.asarray(P['loc_picks'][i_var]))
+                C_loc, c_loc = loc_subs[i_var]
                 C_diff = (C_tpick - C_loc).tocsr()
                 c_diff = c_tpick - c_loc
                 U_flat = _affine_expr(C_diff, c_diff, y_red)
@@ -278,91 +306,179 @@ def _build_full_model_preelim(
 
     # ---- Window PSD cones: t · M_{k-1}(y) - Q_W(y) ⪰ 0 ----
     # M_{k-1}(y)_flat = C_tpick ỹ + c_tpick.
-    # Q_W(y)_flat     = C_W ỹ + c_W  with C_W = Cw_scipy @ xf.T.
-    # Cone:  t (C_tpick ỹ + c_tpick) - (C_W ỹ + c_W)
-    #      = (t C_tpick) ỹ + t·c_tpick - C_W ỹ - c_W
-    # So:
-    #     linear_in_yred = Expr.mul(t, C_tpick ỹ) - Expr.mul(C_W ỹ)
-    #     const_part     = t·c_tpick - c_W     (bilinear in t; handled by
-    #                                            Expr.mul(const_vec_col, t)).
+    # Q_W(y)_flat     = C_W ỹ + c_W.
+    #
+    # PERFORMANCE.  Each Q_W is a linear combination of SHARED (i,j)
+    # picks:
+    #       Q_W[a,b] = Σ_{i,j: Mw[i,j]≠0} Mw[i,j] · y[ab_eiej_idx[a,b,i,j]]
+    # i.e.  Q_W = Σ Mw[i,j] · Y_{ij}  where Y_{ij}[a,b] = y[ab_eiej_idx[a,b,i,j]]
+    # is INDEPENDENT of W.
+    #
+    # We precompute  C_ij, c_ij  via xf.substitute_pick ONCE PER (i,j) —
+    # i.e. d² pick substitutions total, independent of n_win.  Per-window
+    # we merely do a weighted sparse sum in reduced space, skipping both
+    # the per-window Cw allocation and the per-window Cw @ T composition.
+    #
+    # At d=16 L3 this turns ~500 × O(230k × 26)-op sparse mat-muls into
+    # 256 O(23k × 26)-op pick substitutions + ~500 × ~10 scaled sparse
+    # additions — ~11× fewer arithmetic ops and ~20× fewer scipy calls.
     n_win_psd_added = 0
     if P['order'] >= 2:
         ab_eiej_idx = P['ab_eiej_idx']
-        ab_flat = P['ab_flat']
+        lazy_mode = ab_eiej_idx is None and P.get('AB_loc_hash') is not None
+        flat_size = n_loc * n_loc
 
-        # Convenience MOSEK objects for t_pick expr.
         C_tpick_mat = _mosek_sparse(C_tpick) if C_tpick.nnz else None
+        # t · c_tpick expression (vector of length flat_size) — SHARED across
+        # all windows.
+        t_const_tpick = _scaled_vec_by_param(c_tpick, t_var)
 
-        # The "M_{k-1}(y) scaled by t" part — constant in y_red but scaled
-        # by t; plus the C_tpick · y_red part scaled by t.
-        # We compose both per-window because Q_W varies per W.
+        # Precompute (i,j) pick substitutions AND cache their COO triples
+        # for fast per-window assembly (avoids pairwise sparse additions).
+        #
+        # Parallelised across (i,j) via a thread pool — each task computes
+        # one (n_loc^2,) pick vector and one xf.substitute_pick call.  Both
+        # searchsorted (inside the lazy slice) and scipy's sparse indexing
+        # release the GIL on the large arrays, so threads give near-linear
+        # speed-up without the spawn memory cost of multiprocessing.
+        #
+        # At d=32 L=3 this turns ~1024 sequential O(n_loc^2 × T_nnz) ops
+        # into ~1024/N_CPU parallel batches.  Memory stays at the single
+        # AB_loc_hash (~342 MB) rather than N_CPU copies.
+        ij_C: Dict[Tuple[int, int], sp.csr_matrix] = {}
+        ij_c: Dict[Tuple[int, int], np.ndarray] = {}
+        ij_coo: Dict[Tuple[int, int],
+                     Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        if ab_eiej_idx is not None or lazy_mode:
+            # Local closure keeps P / ab_eiej_idx on the heap once; workers
+            # reuse the same references.
+            AB_loc_hash = P.get('AB_loc_hash')
+            bases = P.get('bases')
+            sorted_h = P.get('sorted_h')
+            sort_o = P.get('sort_o')
+            prime = P.get('prime')
 
+            def _pick_for_ij(i_: int, j_: int) -> np.ndarray:
+                # _get_ab_eiej_ij handles both eager/lazy AND applies the
+                # Z/2 old_to_new remap when canonicalize_z2 has run.
+                return _get_ab_eiej_ij(
+                    P, i_, j_).astype(np.int64, copy=False).ravel()
+
+            def _job(ij: Tuple[int, int]):
+                i_, j_ = ij
+                pick = _pick_for_ij(i_, j_)
+                C_ij, c_ij = xf.substitute_pick(pick)
+                if C_ij.nnz or np.any(c_ij != 0.0):
+                    coo = C_ij.tocoo()
+                    return (i_, j_, C_ij, c_ij,
+                            coo.row.astype(np.int64, copy=False),
+                            coo.col.astype(np.int64, copy=False),
+                            coo.data.astype(np.float64, copy=False))
+                return None
+
+            ij_pairs = [(i_, j_) for i_ in range(d) for j_ in range(d)]
+            n_workers = max(1, min(_IJ_WORKERS, len(ij_pairs)))
+            t_ij_start = time.time()
+            if n_workers == 1:
+                results = [_job(ij) for ij in ij_pairs]
+            else:
+                with _futures.ThreadPoolExecutor(
+                        max_workers=n_workers) as pool:
+                    results = list(pool.map(_job, ij_pairs))
+            for r in results:
+                if r is None:
+                    continue
+                i_, j_, C_ij, c_ij, rr, cc, dd = r
+                ij_C[(i_, j_)] = C_ij
+                ij_c[(i_, j_)] = c_ij
+                ij_coo[(i_, j_)] = (rr, cc, dd)
+            if verbose:
+                kept = len(ij_coo)
+                print(f"  ij-pick loop: {len(ij_pairs)} pairs, kept "
+                      f"{kept}, {n_workers} threads, "
+                      f"{time.time() - t_ij_start:.2f}s "
+                      f"(lazy={lazy_mode})", flush=True)
+
+        def _cone_tM_only() -> None:
+            """Handle Q_W = 0: cone is simply t · M_{k-1}(y) ⪰ 0."""
+            if C_tpick_mat is not None:
+                lhs_linear = Expr.mul(t_var, Expr.mul(C_tpick_mat, y_red))
+                Lw_flat = Expr.add(lhs_linear, t_const_tpick)
+            else:
+                Lw_flat = t_const_tpick
+            mdl.constraint(Expr.reshape(Lw_flat, n_loc, n_loc),
+                            Domain.inPSDCone(n_loc))
+
+        # ij_coo is populated whenever the eager 4D array exists OR lazy_mode
+        # is active (AB_loc_hash available).  In either case we still have
+        # the full Q_W contribution for every window — the fall-through to
+        # _cone_tM_only() below must only fire when Mw is literally zero.
+        have_qw_data = (ab_eiej_idx is not None) or lazy_mode
         for w in win_active:
             Mw = P['M_mats'][w]
             nz_i, nz_j = np.nonzero(Mw)
-            flat_size = n_loc * n_loc
 
-            if len(nz_i) == 0 or ab_eiej_idx is None:
-                # Q_W = 0.  Cone:  t · (C_tpick ỹ + c_tpick) ⪰ 0.
-                if C_tpick_mat is not None:
-                    lhs_linear = Expr.mul(
-                        t_var, Expr.mul(C_tpick_mat, y_red))
-                else:
-                    lhs_linear = Expr.constTerm([0.0] * flat_size)
-                t_const = _scaled_vec_by_param(c_tpick, t_var)
-                Lw_flat = Expr.add(lhs_linear, t_const)
-                Lw_mat = Expr.reshape(Lw_flat, n_loc, n_loc)
-                mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
+            if len(nz_i) == 0 or not have_qw_data:
+                _cone_tM_only()
                 n_win_psd_added += 1
                 continue
 
-            # Build Q_W as a sparse (flat_size, n_y) matrix on the original y.
-            y_idx = ab_eiej_idx[:, :, nz_i, nz_j]  # (n_loc, n_loc, n_nz)
-            valid = y_idx >= 0
-            if not np.any(valid):
-                if C_tpick_mat is not None:
-                    lhs_linear = Expr.mul(
-                        t_var, Expr.mul(C_tpick_mat, y_red))
-                else:
-                    lhs_linear = Expr.constTerm([0.0] * flat_size)
-                t_const = _scaled_vec_by_param(c_tpick, t_var)
-                Lw_flat = Expr.add(lhs_linear, t_const)
-                Lw_mat = Expr.reshape(Lw_flat, n_loc, n_loc)
-                mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
+            # Concatenate per-window COO triples weighted by Mw[i,j], then
+            # build a single CSR in one shot (avoids pairwise sparse adds).
+            row_chunks: List[np.ndarray] = []
+            col_chunks: List[np.ndarray] = []
+            dat_chunks: List[np.ndarray] = []
+            cw_off = np.zeros(flat_size, dtype=np.float64)
+            for ii, jj in zip(nz_i.tolist(), nz_j.tolist()):
+                key = (int(ii), int(jj))
+                if key not in ij_coo:
+                    continue
+                w_ij = float(Mw[ii, jj])
+                if w_ij == 0.0:
+                    continue
+                rr, cc, dd = ij_coo[key]
+                if dd.size:
+                    row_chunks.append(rr)
+                    col_chunks.append(cc)
+                    dat_chunks.append(w_ij * dd)
+                cw_off = cw_off + w_ij * ij_c[key]
+
+            if row_chunks:
+                Cw_red = sp.csr_matrix(
+                    (np.concatenate(dat_chunks),
+                     (np.concatenate(row_chunks),
+                      np.concatenate(col_chunks))),
+                    shape=(flat_size, xf.n_y_red),
+                    dtype=np.float64,
+                )
+                Cw_red.sum_duplicates()
+                Cw_red.eliminate_zeros()
+            else:
+                Cw_red = None
+
+            if Cw_red is None and not np.any(cw_off != 0.0):
+                # Entire Q_W was zero in the reduced space — same as Q=0.
+                _cone_tM_only()
                 n_win_psd_added += 1
                 continue
 
-            ab_exp = np.broadcast_to(ab_flat[:, :, None], y_idx.shape)
-            mw_vals = Mw[nz_i, nz_j]
-            mw_exp = np.broadcast_to(mw_vals[None, None, :], y_idx.shape)
-            rows = ab_exp[valid].ravel().astype(np.int64)
-            cols = y_idx[valid].ravel().astype(np.int64)
-            vals = mw_exp[valid].ravel().astype(np.float64)
-            Cw = sp.csr_matrix(
-                (vals, (rows, cols)),
-                shape=(flat_size, n_y),
-                dtype=np.float64,
-            )
-            Cw.sum_duplicates()
-            Cw.eliminate_zeros()
-            Cw_red, cw_off = xf.substitute_matrix(Cw)
-
-            # Compose the expression:
-            #   (t · C_tpick ỹ)  +  (t · c_tpick)  -  (Cw_red ỹ)  -  (cw_off).
-            terms = []
+            # Compose the PSD expression:
+            #   t·C_tpick ỹ  +  t·c_tpick  -  C_W ỹ  -  c_W
+            terms: List[Any] = []
             if C_tpick_mat is not None:
                 terms.append(Expr.mul(t_var, Expr.mul(C_tpick_mat, y_red)))
-            terms.append(_scaled_vec_by_param(c_tpick, t_var))
-            if Cw_red.nnz:
+            terms.append(t_const_tpick)
+            if Cw_red is not None and Cw_red.nnz:
                 terms.append(Expr.neg(Expr.mul(
                     _mosek_sparse(Cw_red), y_red)))
-            terms.append(Expr.constTerm((-cw_off).tolist()))
+            if np.any(cw_off != 0.0):
+                terms.append(_const_term(-cw_off))
 
             Lw_flat = terms[0]
             for term in terms[1:]:
                 Lw_flat = Expr.add(Lw_flat, term)
-            Lw_mat = Expr.reshape(Lw_flat, n_loc, n_loc)
-            mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
+            mdl.constraint(Expr.reshape(Lw_flat, n_loc, n_loc),
+                            Domain.inPSDCone(n_loc))
             n_win_psd_added += 1
 
     mdl.objective(ObjectiveSense.Minimize, Expr.constTerm(0.0))
@@ -412,10 +528,13 @@ def solve_mosek_preelim(
     proof_dir: Optional[str] = None,
     pre_elim_z2: bool = False,
     max_fill_ratio: float = 10.0,
+    protect_degrees: Optional[set] = None,
     primary_tol: float = 1e-6,
     order_method: str = 'forceGraphpar',
     force_lindep_off: bool = False,
     watcher_interval_s: float = 15.0,
+    lazy_ab_eiej: Optional[bool] = None,
+    single_t: Optional[float] = None,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """Solve the Lasserre SDP via MOSEK Fusion with consistency-equality
@@ -445,7 +564,7 @@ def solve_mosek_preelim(
               f"pre_elim_z2={pre_elim_z2} fill_cap={max_fill_ratio}")
         print(f"{'=' * 60}", flush=True)
 
-    P = _precompute(d, order, verbose=verbose)
+    P = _precompute(d, order, verbose=verbose, lazy_ab_eiej=lazy_ab_eiej)
 
     if pre_elim_z2:
         P = canonicalize_z2(P, verbose=verbose)
@@ -453,7 +572,9 @@ def solve_mosek_preelim(
     # --- Build the pre-elim transform FIRST ---
     t_pre = time.time()
     xf = build_preelim_transform(
-        P, max_fill_ratio=max_fill_ratio, verbose=verbose)
+        P, max_fill_ratio=max_fill_ratio,
+        protect_degrees=protect_degrees,
+        verbose=verbose)
     preelim_time = time.time() - t_pre
     if verbose:
         print(f"  preelim build: {preelim_time:.2f}s", flush=True)
@@ -525,7 +646,16 @@ def solve_mosek_preelim(
         return 'uncertain'
 
     def _make_ladder(primary: float) -> List[Tuple[float, str]]:
-        candidate_tols = (1e-4, 1e-5, 1e-6, 1e-7, 1e-3)
+        # Drop the loose 1e-3 / 1e-4 rungs.  The pre-elim model has denser
+        # PSD-cone dependencies (each entry couples through T to ~d reduced
+        # moments), so "feas" verdicts at tolerance ≥ 1e-4 are unreliable
+        # near val_L3(d) — the primal violations at that slack dominate the
+        # sub-1e-4 precision we're bisecting at.  A "feas" at 1e-3 can
+        # falsely collapse hi below a true-infeas t and weaken lb.
+        # Retry only at 1e-5 and 1e-6 (and 1e-7) — return "uncertain"
+        # otherwise, which preserves bisection soundness (lb = lo advances
+        # only on certified infeas).
+        candidate_tols = (1e-5, 1e-6, 1e-7)
         rungs: List[Tuple[float, str]] = []
         for tol in candidate_tols:
             if abs(tol - primary) < primary * 0.01:
@@ -607,6 +737,36 @@ def solve_mosek_preelim(
                 proof_dir, tag,
                 d=d, order=order, mode=mode, verbose=verbose)
             proof_records.append(rec)
+
+    # ---- Single-t feasibility mode (parallel-bisection launchers) ----
+    # When --single-t X.XX is passed, skip the whole bisection; run ONE
+    # _check_feasible(X.XX) and return early with a structured verdict.
+    # Used by tests/parallel_bisect.py to fan out N solves across processes.
+    if single_t is not None:
+        verdict, dt, stat = _check_feasible(float(single_t))
+        per_solve_times.append(dt)
+        _maybe_export(f'single_t{single_t:.6f}', single_t, verdict, stat)
+        try:
+            mdl.dispose()
+        except Exception:
+            pass
+        gc.collect()
+        # Machine-parseable line — parallel_bisect.py greps for it.
+        print(f"SINGLE_T_VERDICT t={float(single_t):.10f} "
+              f"verdict={verdict} status={stat} wall_s={dt:.3f}",
+              flush=True)
+        return {
+            'd': d, 'order': order, 'mode': mode,
+            'single_t': float(single_t),
+            'verdict': verdict,
+            'status': stat,
+            'wall_s': dt,
+            'build_time_s': build_time,
+            'preelim_time_s': preelim_time,
+            'params': params,
+            'build_stats': build_stats,
+            'ok': True,
+        }
 
     lo, hi = float(t_lo), float(t_hi)
     v_hi, dt_hi, stat_hi = _check_feasible(hi)
@@ -751,6 +911,11 @@ def _main() -> int:
                     help='Fill-control cap for consistency pre-elim.  '
                          'A pivot is rejected if (col_count-1)*(row_nnz-1) '
                          '> ratio * row_nnz.  Default 10.0.')
+    p.add_argument('--protect-degrees', type=str, default='1,2',
+                    help='Comma-separated list of monomial TOTAL degrees '
+                         'protected from pivoting.  Default "1,2" — keeps '
+                         'backbone moments free for conditioning.  Pass '
+                         '"" to disable protection.')
     p.add_argument('--primary-tol', type=float, default=1e-6)
     p.add_argument('--order-method', type=str, default='forceGraphpar',
                     choices=('free', 'none', 'appminloc',
@@ -758,7 +923,29 @@ def _main() -> int:
                               'forceGraphpar'))
     p.add_argument('--watcher-interval', type=float, default=15.0)
     p.add_argument('--lindep-off', action='store_true')
+    p.add_argument('--lazy-ab-eiej', dest='lazy_ab_eiej',
+                    action='store_true', default=None,
+                    help='Force lazy ab_eiej slicing (skips the '
+                         '(n_loc, n_loc, d, d) materialisation). '
+                         'Needed for d>=24 L=3 where the full array '
+                         'exceeds RAM.  Default follows env '
+                         'SIDON_LAZY_ABEIEJ (default on).')
+    p.add_argument('--no-lazy-ab-eiej', dest='lazy_ab_eiej',
+                    action='store_false', default=None,
+                    help='Force eager ab_eiej materialisation '
+                         '(regression test against old behaviour).')
+    p.add_argument('--single-t', type=float, default=None,
+                    help='Skip bisection; run one _check_feasible(t) and '
+                         'print a SINGLE_T_VERDICT line.  Used by '
+                         'tests/parallel_bisect.py to fan out across '
+                         'subprocesses.')
     args = p.parse_args()
+
+    pd_str = args.protect_degrees.strip()
+    if pd_str:
+        protect_degrees = {int(x) for x in pd_str.split(',') if x.strip()}
+    else:
+        protect_degrees = set()
 
     r = solve_mosek_preelim(
         args.d, args.order,
@@ -770,10 +957,13 @@ def _main() -> int:
         proof_dir=args.proof_dir,
         pre_elim_z2=args.pre_elim_z2,
         max_fill_ratio=args.max_fill_ratio,
+        protect_degrees=protect_degrees,
         primary_tol=args.primary_tol,
         order_method=args.order_method,
         force_lindep_off=args.lindep_off,
         watcher_interval_s=args.watcher_interval,
+        lazy_ab_eiej=args.lazy_ab_eiej,
+        single_t=args.single_t,
         verbose=True)
 
     if args.json:

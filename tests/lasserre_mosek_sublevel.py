@@ -1330,18 +1330,29 @@ def _verify_basis_closed(P: Dict[str, Any],
     }
 
 
-def _build_sublevel_model(
-    P: Dict[str, Any], active_mask: np.ndarray, *,
+def _build_sublevel_base_model(
+    P: Dict[str, Any], *,
     add_upper_loc: bool = True,
     verbose: bool = True,
 ) -> Tuple[Model, Any, Any, Dict[str, Any]]:
-    """Construct the Lasserre SDP whose moment matrix PSD is the
-    principal submatrix of M_k(y) on active_mask, while every other
-    L{order} constraint is added in full.
+    """Build the Lasserre SDP SKELETON — every constraint EXCEPT the
+    moment-matrix PSD cone.
 
-    Returns (model, y_var, t_param, stats_dict).  No Z/2 options here —
-    the sublevel loop is correctness-first; Z/2 layering can be bolted
-    on later (orthogonal to basis growth).
+    Why skeleton?  Across sublevel steps only the moment-matrix basis
+    B_k changes; every other constraint (consistency, localising,
+    upper-localising, scalar window, window PSD) is fixed at full
+    L{order} size and stays structurally identical.  By building the
+    skeleton ONCE and using ``constraint.remove() + add`` to swap the
+    moment PSD each step, we avoid re-incurring the ~15-min Fusion
+    construction at every sublevel step — save 15 min × N steps.
+
+    OPTIMISATION (window-PSD loop):
+      • Preserve numpy dtypes all the way to Matrix.sparse (Fusion 11
+        accepts int32/float64 numpy arrays directly; .tolist() on
+        multi-million-element arrays is ~5 min of pure Python object
+        churn at d=16, entirely avoidable).
+
+    Returns (model, y_var, t_param, stats).
     """
     d = P['d']
     n_y = P['n_y']
@@ -1350,63 +1361,58 @@ def _build_sublevel_model(
     idx = P['idx']
     order = P['order']
 
-    active_idx = np.nonzero(active_mask)[0]
-    n_active = int(active_idx.size)
-    assert n_active >= 1, "active_mask must contain at least one basis entry"
-
     t0 = time.time()
     mdl = Model('lasserre_sublevel')
     y = mdl.variable(n_y, Domain.greaterThan(0.0))
     t_var = mdl.parameter('t')
 
-    # y_0 = 1 — constant monomial is always present in the full basis,
-    # hence always referenced by the L{order} moment vector (not by the
-    # active moment matrix submask, but by the base y vector).
+    # y_0 = 1
     zero = tuple(0 for _ in range(d))
     mdl.constraint(y.index(idx[zero]), Domain.equalsTo(1.0))
 
-    # ---- Consistency (unchanged from full model) ----
-    consist_idx = P['consist_idx']
-    consist_ei_idx = P['consist_ei_idx']
-    c_rows, c_cols, c_vals = [], [], []
-    n_consist = 0
-    for r in range(len(P['consist_mono'])):
-        ai = int(consist_idx[r])
-        if ai < 0:
-            continue
-        child_idx = consist_ei_idx[r]
-        has_child = False
-        coef_by_col: Dict[int, float] = {}
-        for ci in range(d):
-            c = int(child_idx[ci])
-            if c >= 0:
-                coef_by_col[c] = coef_by_col.get(c, 0.0) + 1.0
-                has_child = True
-        if not has_child:
-            continue
-        for c, coef in coef_by_col.items():
-            c_rows.append(n_consist)
-            c_cols.append(c)
-            c_vals.append(coef)
-        c_rows.append(n_consist)
-        c_cols.append(ai)
-        c_vals.append(-1.0)
-        n_consist += 1
+    # ---- Consistency (vectorised COO assembly) ----
+    consist_idx_arr = np.asarray(P['consist_idx'], dtype=np.int64)
+    consist_ei_arr = np.asarray(P['consist_ei_idx'], dtype=np.int64)
+    # Row r is kept iff consist_idx[r] >= 0 AND at least one child is valid.
+    valid_r_mask = consist_idx_arr >= 0
+    if valid_r_mask.any():
+        kept_r = np.nonzero(valid_r_mask)[0]
+        kept_ai = consist_idx_arr[kept_r]
+        kept_children = consist_ei_arr[kept_r]  # (n_kept, d)
+        # Some rows still have no valid child.  Skip those.
+        has_child_row = (kept_children >= 0).any(axis=1)
+        kept_r = kept_r[has_child_row]
+        kept_ai = kept_ai[has_child_row]
+        kept_children = kept_children[has_child_row]
+        n_consist = int(kept_r.size)
+    else:
+        n_consist = 0
     if n_consist > 0:
+        # Children coefficients: +1 per valid child.  Aggregate by
+        # scatter-add across row-local child slots.
+        row_idx_rep = np.repeat(
+            np.arange(n_consist, dtype=np.int64), kept_children.shape[1])
+        children_flat = kept_children.ravel()
+        child_valid = children_flat >= 0
+        row_rows = row_idx_rep[child_valid]
+        row_cols = children_flat[child_valid]
+        row_vals = np.ones(row_rows.size, dtype=np.float64)
+        # Append the -y_{alpha_i} diagonal entry for each row.
+        ai_rows = np.arange(n_consist, dtype=np.int64)
+        ai_cols = kept_ai
+        ai_vals = -np.ones(n_consist, dtype=np.float64)
+        all_rows = np.concatenate([row_rows, ai_rows])
+        all_cols = np.concatenate([row_cols, ai_cols])
+        all_vals = np.concatenate([row_vals, ai_vals])
         coo = sp.coo_matrix(
-            (c_vals, (c_rows, c_cols)), shape=(n_consist, n_y))
+            (all_vals, (all_rows, all_cols)), shape=(n_consist, n_y))
         coo.sum_duplicates()
         coo.eliminate_zeros()
         A_con = Matrix.sparse(n_consist, n_y,
-                              coo.row.tolist(),
-                              coo.col.tolist(),
-                              coo.data.tolist())
+                              coo.row.astype(np.int32),
+                              coo.col.astype(np.int32),
+                              coo.data.astype(np.float64))
         mdl.constraint(Expr.mul(A_con, y), Domain.equalsTo(0.0))
-
-    # ---- Moment matrix PSD: principal submatrix on B_k ----
-    sub_pick = _sub_moment_pick_list(P, active_idx)
-    M_sub = Expr.reshape(y.pick(sub_pick), n_active, n_active)
-    mdl.constraint(M_sub, Domain.inPSDCone(n_active))
 
     # ---- Localising PSD: FULL L{order} — μ_i ≥ 0 and 1 - μ_i ≥ 0 ----
     if order >= 2:
@@ -1423,20 +1429,24 @@ def _build_sublevel_model(
 
     # ---- Scalar windows: t ≥ f_W(y) ----
     n_win = P['n_win']
-    F_mosek = Matrix.sparse(n_win, n_y,
-                            np.asarray(P['f_r']).tolist(),
-                            np.asarray(P['f_c']).tolist(),
-                            np.asarray(P['f_v']).tolist())
+    f_r_np = np.asarray(P['f_r'], dtype=np.int32)
+    f_c_np = np.asarray(P['f_c'], dtype=np.int32)
+    f_v_np = np.asarray(P['f_v'], dtype=np.float64)
+    F_mosek = Matrix.sparse(n_win, n_y, f_r_np, f_c_np, f_v_np)
     f_all = Expr.mul(F_mosek, y)
     ones_col = Matrix.dense(n_win, 1, [1.0] * n_win)
     t_rep = Expr.flatten(Expr.mul(ones_col, Expr.reshape(t_var, 1, 1)))
     mdl.constraint(Expr.sub(t_rep, f_all), Domain.greaterThan(0.0))
 
     # ---- Window PSD: FULL L{order} cones — t·M_{k-1}(y) - Q_W(y) ⪰ 0 ----
+    # Pass numpy arrays directly to Matrix.sparse — Fusion 11 accepts
+    # int32 / float64 arrays, no .tolist() needed.  This alone is a
+    # ~3-5 min build-time cut at d=16 (496 windows × ~1M entries each).
     n_win_psd = 0
     if order >= 2:
         ab_eiej_idx = P['ab_eiej_idx']
-        ab_flat = P['ab_flat']
+        ab_flat = P['ab_flat']  # (n_loc, n_loc) int
+        flat_size = n_loc * n_loc
         t_y = Expr.mul(t_var, y.pick(P['t_pick']))
         for w in P['nontrivial_windows']:
             Mw = P['M_mats'][w]
@@ -1446,7 +1456,7 @@ def _build_sublevel_model(
                 mdl.constraint(Lw_mat, Domain.inPSDCone(n_loc))
                 n_win_psd += 1
                 continue
-            y_idx = ab_eiej_idx[:, :, nz_i, nz_j]
+            y_idx = ab_eiej_idx[:, :, nz_i, nz_j]        # (nL, nL, k)
             valid = y_idx >= 0
             if not np.any(valid):
                 Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
@@ -1455,11 +1465,12 @@ def _build_sublevel_model(
                 continue
             ab_exp = np.broadcast_to(ab_flat[:, :, None], y_idx.shape)
             mw_vals = Mw[nz_i, nz_j]
-            mw_exp = np.broadcast_to(mw_vals[None, None, :], y_idx.shape)
-            rows = ab_exp[valid].ravel().tolist()
-            cols = y_idx[valid].ravel().tolist()
-            vals = mw_exp[valid].ravel().tolist()
-            flat_size = n_loc * n_loc
+            mw_exp = np.broadcast_to(
+                mw_vals[None, None, :], y_idx.shape)
+            # Keep numpy dtypes; Matrix.sparse accepts int32/float64.
+            rows = ab_exp[valid].ravel().astype(np.int32, copy=False)
+            cols = y_idx[valid].ravel().astype(np.int32, copy=False)
+            vals = mw_exp[valid].ravel().astype(np.float64, copy=False)
             Cw_mosek = Matrix.sparse(flat_size, n_y, rows, cols, vals)
             cw_expr = Expr.mul(Cw_mosek, y)
             Lw_flat = Expr.sub(t_y, cw_expr)
@@ -1474,16 +1485,45 @@ def _build_sublevel_model(
         'build_time_s': build_time,
         'n_y': n_y,
         'n_basis': n_basis,
-        'n_active_basis': n_active,
         'n_loc': n_loc,
         'n_consist': n_consist,
         'n_win_psd': n_win_psd,
     }
     if verbose:
-        print(f"  [sublevel build] |B_k|={n_active}/{n_basis}  "
-              f"n_y={n_y}  n_loc={n_loc}  "
+        print(f"  [sublevel base build] n_y={n_y}  n_loc={n_loc}  "
               f"n_consist={n_consist}  n_win_psd={n_win_psd}  "
               f"build={build_time:.2f}s", flush=True)
+    return mdl, y, t_var, stats
+
+
+def _add_moment_psd(mdl: Model, y: Any, P: Dict[str, Any],
+                     active_mask: np.ndarray) -> Any:
+    """Add the moment-matrix PSD cone on the principal submatrix of
+    M_k(y) indexed by ``active_mask``.  Returns the constraint handle
+    so callers can ``.remove()`` it before adding the next step's cone.
+    """
+    active_idx = np.nonzero(active_mask)[0]
+    n_active = int(active_idx.size)
+    assert n_active >= 1, "active_mask must contain at least one entry"
+    sub_pick = _sub_moment_pick_list(P, active_idx)
+    M_sub = Expr.reshape(y.pick(sub_pick), n_active, n_active)
+    cons = mdl.constraint(M_sub, Domain.inPSDCone(n_active))
+    return cons
+
+
+def _build_sublevel_model(
+    P: Dict[str, Any], active_mask: np.ndarray, *,
+    add_upper_loc: bool = True,
+    verbose: bool = True,
+) -> Tuple[Model, Any, Any, Dict[str, Any]]:
+    """Back-compat wrapper: build skeleton + moment PSD.  Prefer
+    ``_build_sublevel_base_model`` + ``_add_moment_psd`` in the
+    sublevel loop so the skeleton is reused across steps.
+    """
+    mdl, y, t_var, stats = _build_sublevel_base_model(
+        P, add_upper_loc=add_upper_loc, verbose=verbose)
+    _add_moment_psd(mdl, y, P, active_mask)
+    stats['n_active_basis'] = int(active_mask.sum())
     return mdl, y, t_var, stats
 
 
@@ -1573,6 +1613,7 @@ def solve_mosek_sublevel(
     proof_dir: Optional[str] = None,
     progress_path: Optional[str] = None,
     initial_active_mask: Optional[np.ndarray] = None,
+    z2_pre_elim: bool = False,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """Sublevel Lasserre driver.  See module docstring.
@@ -1611,6 +1652,26 @@ def solve_mosek_sublevel(
 
     # --- Precompute full L{order} structure.  Shared across every step. ---
     P = _precompute(d, order, verbose=verbose)
+
+    # --- Optional Z/2 pre-elimination (Lever 1 from the full solver) ---
+    # Halves n_y losslessly by substituting the Z/2 equalities into the
+    # moment vector before the SDP is ever built.  The basis list is
+    # UNCHANGED (still all degree-≤-order multi-indices), only the
+    # y-indexing shrinks — so active_mask / pool_mask (defined by basis
+    # degree) remain meaningful, and all picks already point into the
+    # canonicalised (smaller) y.  Downstream sublevel code, including
+    # Schur scoring, is agnostic to whether Z/2 is applied.
+    if z2_pre_elim:
+        if verbose:
+            print(f"\n  [Z/2 pre-elim] applying canonicalize_z2 ...",
+                  flush=True)
+        from lasserre.z2_elim import canonicalize_z2
+        t_z2 = time.time()
+        P = canonicalize_z2(P, verbose=verbose)
+        if verbose:
+            print(f"  [Z/2 pre-elim] n_y = {P['n_y']}  "
+                  f"(elapsed {time.time() - t_z2:.2f}s)", flush=True)
+
     basis = P['basis']
     n_basis = P['n_basis']
     degrees = _basis_degrees(basis)
@@ -1663,6 +1724,44 @@ def solve_mosek_sublevel(
     lo = float(t_lo)
     hi = float(t_hi)
 
+    # --- Build the SKELETON model ONCE.  The skeleton contains every
+    # constraint EXCEPT the moment-matrix PSD cone — i.e. consistency,
+    # y_0 = 1, localising + upper-localising PSDs, scalar windows,
+    # window PSDs.  At every sublevel step we only .remove() the prior
+    # moment-matrix PSD and add a fresh one on the expanded basis,
+    # saving the full Python-side Fusion build cost (~15 min at d=16
+    # L3) on every step after step 0.
+    if verbose:
+        print(f"\n  [skeleton] building base model ONCE (reused "
+              f"across sublevel steps) ...", flush=True)
+    t_skel = time.time()
+    mdl, y, t_param, skel_stats = _build_sublevel_base_model(
+        P, add_upper_loc=add_upper_loc, verbose=verbose)
+    skeleton_build_time = time.time() - t_skel
+    if verbose:
+        print(f"  [skeleton] build complete in "
+              f"{skeleton_build_time:.2f}s", flush=True)
+
+    # Apply tuned params ONCE on the shared model.
+    lindep = 'off' if force_lindep_off else 'on'
+    params = apply_tuned_params(
+        mdl, tol=primary_tol,
+        order_method=order_method,
+        presolve_lindep=lindep,
+        verbose=verbose)
+
+    # MOSEK log stream — re-attached before each solve with a per-step
+    # prefix so ``tail -f`` readers can distinguish sublevel steps.
+    log_stream = MosekLogStream(prefix='[MOSEK] ')
+    try:
+        mdl.setLogHandler(log_stream)
+        mdl.setSolverParam('log', 10)
+        mdl.setSolverParam('logIntpnt', 10)
+    except Exception:
+        pass
+
+    moment_psd_cons: Optional[Any] = None  # current moment-PSD handle
+
     for step in range(n_basis + 1):  # safety upper bound
         elapsed_total = time.time() - t_start
         if elapsed_total > time_budget_s:
@@ -1685,30 +1784,31 @@ def solve_mosek_sublevel(
                 f"At step {step}, active_mask references "
                 f"{closed['missing_moment']} moments not in y")
 
-        # --- Build model for this step (fresh, no Fusion remove()) ---
+        # --- Swap the moment-matrix PSD cone on the shared skeleton ---
+        # Remove the prior step's cone (if any) and add a fresh one on
+        # the current active_mask.  This is the O(|B_k|²)-rows amendment
+        # we make per step — vs the O(n_y) rebuild we'd otherwise need.
         t_build = time.time()
-        mdl, y, t_param, build_stats = _build_sublevel_model(
-            P, active_mask,
-            add_upper_loc=add_upper_loc,
-            verbose=verbose)
+        if moment_psd_cons is not None:
+            try:
+                moment_psd_cons.remove()
+            except Exception as exc:
+                if verbose:
+                    print(f"  WARNING: could not remove prior "
+                          f"moment-PSD cons: {exc}", flush=True)
+        moment_psd_cons = _add_moment_psd(mdl, y, P, active_mask)
         build_time = time.time() - t_build
+        build_stats = dict(skel_stats)
+        build_stats['n_active_basis'] = n_active
+        build_stats['moment_psd_swap_s'] = build_time
+        if step == 0:
+            build_stats['skeleton_build_s'] = skeleton_build_time
+        if verbose:
+            print(f"  [moment-PSD swap] |B_k|={n_active}  "
+                  f"swap_time={build_time:.2f}s", flush=True)
 
-        # Apply tuned params — always tuned (no baseline at sublevel)
-        lindep = 'off' if force_lindep_off else 'on'
-        params = apply_tuned_params(
-            mdl, tol=primary_tol,
-            order_method=order_method,
-            presolve_lindep=lindep,
-            verbose=verbose)
-
-        # Log streaming (per-step prefix so tail -f is readable)
-        log_stream = MosekLogStream(prefix=f'[MOSEK s{step}] ')
-        try:
-            mdl.setLogHandler(log_stream)
-            mdl.setSolverParam('log', 10)
-            mdl.setSolverParam('logIntpnt', 10)
-        except Exception:
-            pass
+        # Rebind the MOSEK log stream to this step's prefix.
+        log_stream.prefix = f'[MOSEK s{step}] '
 
         watcher = SolverWatcher(
             interval_s=watcher_interval_s, tag=f's{step}')
@@ -1718,6 +1818,12 @@ def solve_mosek_sublevel(
 
         def _solve_at(tv: float) -> Tuple[str, float, str,
                                           Optional[np.ndarray]]:
+            """Solve once at t = tv; on 'uncertain' try ONE retry with
+            the opposite solve form (primal ↔ dual) — MOSEK's Schur
+            complement is built on opposite sides so one often
+            certifies where the other stalls.  Mirrors the retry
+            ladder in solve_mosek_tuned, minus the tolerance sweeps.
+            """
             t_param.setValue(tv)
             ts = time.time()
             try:
@@ -1735,6 +1841,27 @@ def solve_mosek_sublevel(
             except Exception as exc:
                 return 'uncertain', time.time() - ts, \
                        f'error:{type(exc).__name__}', None
+            if verdict == 'uncertain':
+                try:
+                    mdl.setSolverParam('intpntSolveForm', 'primal')
+                    mdl.solve()
+                    ps2 = mdl.getPrimalSolutionStatus()
+                    ds2 = mdl.getDualSolutionStatus()
+                    v2 = _classify_sdp(ps2, ds2)
+                    stat = (f"{stat} -> primal:"
+                            f"{str(ps2).split('.')[-1]}/"
+                            f"{str(ds2).split('.')[-1]}")
+                    if v2 != 'uncertain':
+                        verdict = v2
+                        ps = ps2
+                        ds = ds2
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        mdl.setSolverParam('intpntSolveForm', 'dual')
+                    except Exception:
+                        pass
             yv: Optional[np.ndarray] = None
             if verdict == 'feas':
                 try:
@@ -1799,12 +1926,18 @@ def solve_mosek_sublevel(
                     y_primal_at_feas = y_tgt
 
         # -- Regular bisection (bounded by n_bisect_per_step) --
+        # Perturb on uncertain to avoid hammering the same t, and
+        # break out after two consecutive uncertain verdicts (the
+        # boundary is fuzzy, more bisections won't help).
+        consec_unc = 0
+        pending_perturb = 0.0
         for bstep in range(n_bisect_per_step):
             if time.time() - t_start > time_budget_s:
                 break
             if hi - lo < 1e-4:
                 break
-            mid = 0.5 * (lo + hi)
+            mid = 0.5 * (lo + hi) + pending_perturb
+            mid = max(lo + 1e-9, min(hi - 1e-9, mid))
             v_m, dt_m, stat_m, y_m = _solve_at(mid)
             step_bisect_history.append({'t': mid, 'verdict': v_m,
                                         'stat': stat_m, 'wall_s': dt_m,
@@ -1816,11 +1949,24 @@ def solve_mosek_sublevel(
                 hi = mid
                 if y_m is not None:
                     y_primal_at_feas = y_m
+                consec_unc = 0
+                pending_perturb = 0.0
             elif v_m == 'infeas':
                 lo = mid
+                consec_unc = 0
+                pending_perturb = 0.0
             else:
-                # 'uncertain' — don't shrink bracket; leave hi/lo alone
-                pass
+                # 'uncertain' — don't shrink bracket; perturb next t
+                # off the midpoint so we don't re-hit the same number.
+                consec_unc += 1
+                width = hi - lo
+                sign = 1.0 if (consec_unc % 2) else -1.0
+                pending_perturb = sign * 0.20 * width
+                if consec_unc >= 2:
+                    if verbose:
+                        print(f"    2 consecutive uncertain; stopping "
+                              f"bisection at this sublevel", flush=True)
+                    break
 
         lb_k = lo
         cur_lb = lb_k
@@ -1889,11 +2035,10 @@ def solve_mosek_sublevel(
 
         lb_prev = lb_k
 
-        try:
-            mdl.dispose()
-        except Exception:
-            pass
-        gc.collect()
+        # Note: we DO NOT dispose the model here — it's reused across
+        # sublevel steps.  The Fusion-level PSD swap at the top of the
+        # next iteration removes the prior step's moment PSD cone.  A
+        # single dispose at the end of the run releases everything.
 
         # -- Termination checks --
         if target_probe_infeas or lb_k > target_lb + 1e-8:
@@ -1940,6 +2085,13 @@ def solve_mosek_sublevel(
             final_status = 'no_progress'
             break
         active_mask = new_mask
+
+    # Dispose the shared skeleton model once at the end of the run.
+    try:
+        mdl.dispose()
+    except Exception:
+        pass
+    gc.collect()
 
     total_wall = time.time() - t_start
     gap_closure = None
@@ -2014,6 +2166,14 @@ def _main() -> int:
                     help='Bisection halvings per sublevel step.')
     p.add_argument('--time-budget-s', type=float, default=7200.0,
                     help='Wall-clock budget for the sublevel driver.')
+    p.add_argument('--z2-pre-elim', action='store_true',
+                    help='Losslessly halve n_y via Z/2 time-reversal '
+                         'canonicalisation of the moment vector before '
+                         'the SDP is built.  At d=16 L3 this cuts '
+                         'n_y from 74613 to ~37K, roughly halving the '
+                         'per-solve MOSEK cost.  The sublevel scheme '
+                         '(basis growth via degree) is orthogonal to '
+                         'Z/2 and remains sound.')
     p.add_argument('--progress', type=str, default=None,
                     help='Path to a JSON file receiving an updated '
                          'trajectory snapshot after every sublevel '
@@ -2074,6 +2234,7 @@ def _main() -> int:
             watcher_interval_s=args.watcher_interval,
             proof_dir=args.proof_dir,
             progress_path=args.progress,
+            z2_pre_elim=args.z2_pre_elim,
             verbose=True)
     else:
         r = solve_mosek_tuned(

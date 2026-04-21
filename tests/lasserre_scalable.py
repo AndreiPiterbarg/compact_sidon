@@ -42,20 +42,43 @@ import os
 import gc
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..'))
 from lasserre_fusion import (
     enum_monomials, _make_hash_bases, _hash_monos,
     _build_hash_table, _hash_lookup,
     build_window_matrices, collect_moments,
 )
+# Lazy ab_eiej slicing — avoids materialising the (n_loc^2, d^2) index array.
+# Critical at d=32 L=3 where the full array is ~351 GB and triggers swap.
+from lasserre.core import (
+    ab_eiej_slice_batch as _ab_eiej_slice_batch,
+    ab_eiej_slice_ij as _ab_eiej_slice_ij,
+    get_ab_eiej_slice, get_ab_eiej_ij,
+)
+
+# Default: lazy mode (no 4D materialisation).  Can be forced off via env
+# SIDON_LAZY_ABEIEJ=0 for regression comparison.
+_LAZY_DEFAULT = os.environ.get('SIDON_LAZY_ABEIEJ', '1') == '1'
 
 
 # =====================================================================
 # Precompute all index arrays + window COO data
 # =====================================================================
 
-def _precompute(d, order, verbose=True):
-    """Precompute monomials, hash tables, index arrays, and window COO."""
+def _precompute(d, order, verbose=True, lazy_ab_eiej=None):
+    """Precompute monomials, hash tables, index arrays, and window COO.
+
+    lazy_ab_eiej: if True, skip building the full (n_loc, n_loc, d, d)
+    ab_eiej_idx array; downstream consumers must call
+    lasserre.core.get_ab_eiej_slice / get_ab_eiej_ij to read slices on
+    demand.  At d=32 L=3 the full array is ~351 GB — lazy mode is the
+    only way that size is feasible.  Default follows env SIDON_LAZY_ABEIEJ
+    (default "1" → lazy).  Pass False to force eager materialisation.
+    """
     t0 = time.time()
+    if lazy_ab_eiej is None:
+        lazy_ab_eiej = _LAZY_DEFAULT
 
     windows, M_mats = build_window_matrices(d)
     n_win = len(windows)
@@ -102,11 +125,23 @@ def _precompute(d, order, verbose=True):
             loc_picks.append(picks.ravel().tolist())
 
         # ab_eiej_idx[a,b,i,j] = idx[loc[a]+loc[b]+e_i+e_j]
-        # via hash linearity: hash(ab+ei+ej) = AB_loc_hash[a,b] + EE_hash[i,j]
-        EE_hash = bases[:, None] + bases[None, :]  # (d, d)
-        ABIJ_hash = (AB_loc_hash[:, :, None, None]
-                     + EE_hash[None, None, :, :])   # (n_loc, n_loc, d, d)
-        ab_eiej_idx = _hash_lookup(ABIJ_hash, sorted_h, sort_o)
+        # via hash linearity: hash(ab+ei+ej) = AB_loc_hash[a,b] + EE_hash[i,j].
+        # Lazy mode: skip materialising the full (n_loc, n_loc, d, d) array.
+        # Consumers compute slices on demand via get_ab_eiej_slice /
+        # get_ab_eiej_ij using AB_loc_hash + bases from P.
+        if lazy_ab_eiej:
+            ab_eiej_idx = None
+            if verbose:
+                n_loc_sq_d_sq = n_loc * n_loc * d * d
+                sz_gb = n_loc_sq_d_sq * 8 / 1e9
+                print(f"  ab_eiej_idx: LAZY (would have been "
+                      f"({n_loc},{n_loc},{d},{d}) = {sz_gb:.2f}GB)",
+                      flush=True)
+        else:
+            EE_hash = bases[:, None] + bases[None, :]  # (d, d)
+            ABIJ_hash = (AB_loc_hash[:, :, None, None]
+                         + EE_hash[None, None, :, :])   # (n_loc, n_loc, d, d)
+            ab_eiej_idx = _hash_lookup(ABIJ_hash, sorted_h, sort_o)
 
         # Precompute flat (a,b) indices for COO — reused by all windows
         ab_flat = (np.arange(n_loc)[:, None] * n_loc
@@ -164,7 +199,10 @@ def _precompute(d, order, verbose=True):
             valid_ct = int((ab_eiej_idx >= 0).sum())
             print(f"  ab_eiej_idx: {ab_eiej_idx.shape}, "
                   f"{valid_ct}/{ab_eiej_idx.size} valid")
-        print(f"  Precompute: {elapsed:.2f}s", flush=True)
+        print(f"  Precompute: {elapsed:.2f}s"
+              + (f"  (lazy_ab_eiej={lazy_ab_eiej})"
+                 if loc_basis else ""),
+              flush=True)
 
     return {
         'd': d, 'order': order,
@@ -173,6 +211,8 @@ def _precompute(d, order, verbose=True):
         'loc_basis': loc_basis, 'n_loc': n_loc,
         'mono_list': mono_list, 'idx': idx, 'n_y': n_y,
         'bases': bases, 'sorted_h': sorted_h, 'sort_o': sort_o,
+        'prime': None,  # lasserre_fusion pipeline uses non-modular hashing
+        'lazy_ab_eiej': bool(lazy_ab_eiej),
         'moment_pick': moment_pick,
         'loc_picks': loc_picks, 't_pick': t_pick,
         'AB_loc_hash': AB_loc_hash, 'ab_eiej_idx': ab_eiej_idx,
@@ -278,42 +318,63 @@ def _eval_all_windows(y_vals, P):
 def _check_window_violations(y_vals, t_val, P, active_windows, tol=1e-6):
     """Batch-check all non-active windows for localizing matrix violations.
 
-    Uses precomputed ab_eiej_idx, nontrivial_windows, vectorized einsum,
-    and symmetrization for numerical stability.
+    Uses precomputed ab_eiej_idx when eager, or on-demand lazy slices
+    when P['ab_eiej_idx'] is None.  Lazy path computes per-window slices
+    of shape (n_loc, n_loc, k) for k = nnz(Mw), bounding peak memory at
+    O(n_loc^2 * max_nnz) instead of O(n_loc^2 * d^2).
+
     Returns sorted list of (window_index, min_eigenvalue) for violated windows.
     """
     n_loc = P['n_loc']
     ab_eiej_idx = P['ab_eiej_idx']
 
-    if n_loc == 0 or ab_eiej_idx is None:
+    if n_loc == 0:
+        return []
+    if ab_eiej_idx is None and P.get('AB_loc_hash') is None:
         return []
 
     t_pick_arr = np.array(P['t_pick'])
-
-    # T-part: shared across all windows
     L_t = t_val * y_vals[t_pick_arr].reshape(n_loc, n_loc)
 
-    # Precompute y values at all ab_eiej positions — done ONCE per CG round
-    safe_idx = np.clip(ab_eiej_idx, 0, len(y_vals) - 1)
-    y_abij = y_vals[safe_idx]               # (n_loc, n_loc, d, d)
-    y_abij[ab_eiej_idx < 0] = 0.0
-
-    # Filter to nontrivial, non-active windows (precomputed set)
     check_ws = [w for w in P['nontrivial_windows'] if w not in active_windows]
     if not check_ws:
         return []
 
-    # Per-window eigenvalue check (avoids O(n_check * n_loc^2) allocation)
-    violations = []
-    for w in check_ws:
-        Mw = P['M_mats'][w]
-        L_q = np.einsum('ij,abij->ab', Mw, y_abij)
-        L_w = L_t - L_q
-        # Symmetrize for numerical safety (should be symmetric by construction)
-        L_w = 0.5 * (L_w + L_w.T)
-        min_eig = np.linalg.eigvalsh(L_w)[0]
-        if min_eig < -tol:
-            violations.append((w, float(min_eig)))
+    if ab_eiej_idx is not None:
+        # Eager: precompute y at all (a,b,i,j) positions once — O(n_loc^2*d^2).
+        safe_idx = np.clip(ab_eiej_idx, 0, len(y_vals) - 1)
+        y_abij = y_vals[safe_idx]
+        y_abij[ab_eiej_idx < 0] = 0.0
+
+        violations = []
+        for w in check_ws:
+            Mw = P['M_mats'][w]
+            L_q = np.einsum('ij,abij->ab', Mw, y_abij)
+            L_w = L_t - L_q
+            L_w = 0.5 * (L_w + L_w.T)
+            min_eig = np.linalg.eigvalsh(L_w)[0]
+            if min_eig < -tol:
+                violations.append((w, float(min_eig)))
+    else:
+        # Lazy: per-window (n_loc, n_loc, k) slice with k = nnz(Mw).
+        violations = []
+        for w in check_ws:
+            Mw = P['M_mats'][w]
+            nz_i, nz_j = np.nonzero(Mw)
+            if len(nz_i) == 0:
+                continue
+            y_idx = get_ab_eiej_slice(P, nz_i, nz_j)  # (n_loc, n_loc, k)
+            safe = np.clip(y_idx, 0, len(y_vals) - 1)
+            y_abk = y_vals[safe]
+            y_abk[y_idx < 0] = 0.0
+            mw_vals = Mw[nz_i, nz_j]
+            # L_q[a, b] = sum_k mw_vals[k] * y_abk[a, b, k]
+            L_q = np.tensordot(y_abk, mw_vals, axes=([2], [0]))
+            L_w = L_t - L_q
+            L_w = 0.5 * (L_w + L_w.T)
+            min_eig = np.linalg.eigvalsh(L_w)[0]
+            if min_eig < -tol:
+                violations.append((w, float(min_eig)))
 
     violations.sort(key=lambda x: x[1])  # most negative first
     return violations
@@ -328,20 +389,21 @@ def _add_psd_window(mdl, y, t_param, w, P):
     """
     n_loc = P['n_loc']
     n_y = P['n_y']
-    ab_eiej_idx = P['ab_eiej_idx']
     ab_flat = P['ab_flat']
     Mw = P['M_mats'][w]
 
     t_y = Expr.mul(t_param, y.pick(P['t_pick']))
 
     nz_i, nz_j = np.nonzero(Mw)
-    if len(nz_i) == 0 or ab_eiej_idx is None:
+    # Lazy-aware: either eager full array exists, or we need AB_loc_hash.
+    if len(nz_i) == 0 or (
+            P.get('ab_eiej_idx') is None and P.get('AB_loc_hash') is None):
         Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
         mdl.constraint(f"w_psd_{w}", Lw_mat, Domain.inPSDCone(n_loc))
         return
 
     # Streaming COO construction (same math as lasserre_fusion.py)
-    y_idx = ab_eiej_idx[:, :, nz_i, nz_j]   # (n_loc, n_loc, n_nz)
+    y_idx = get_ab_eiej_slice(P, nz_i, nz_j)   # (n_loc, n_loc, n_nz)
     valid = y_idx >= 0
     if not np.any(valid):
         Lw_mat = Expr.reshape(t_y, n_loc, n_loc)
