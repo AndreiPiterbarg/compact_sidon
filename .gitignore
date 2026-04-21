@@ -47,6 +47,11 @@ prompts_IGNORE/
 # RunPod secrets and session state
 .env
 gpupod/.session.json
+cpupod/.session*.json
+
+# Private keys (never commit)
+*.pem
+*.key
 
 # Large data files (exceed GitHub 100MB limit)
 data/*.npy
