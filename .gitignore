@@ -42,6 +42,7 @@ next_steps_cloud.md
 # Folders not part of deliverable
 exploration/
 cloud_results/
+pod_results/
 prompts_IGNORE/
 
 # RunPod secrets and session state
