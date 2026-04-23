@@ -1,0 +1,373 @@
+"""Best-first branch-and-bound driver.
+
+Certifies val(d) >= target_c by partitioning the half-simplex H_d into
+closed boxes and proving that every box B has
+    max_W  lb(W, B)  >=  target_c.
+
+Pruning uses a batched tensor evaluation of natural + autoconv +
+McCormick bounds over ALL windows in a single vectorised pass (one
+argsort and one cumsum per box, operating on a (W, d, d) adjacency
+tensor). Every certified leaf is re-verified in fractions.Fraction
+arithmetic with the same formula.
+
+Termination:
+  SUCCESS: queue empty, every leaf certified.
+  FAIL:    some box reached min_box_width without certifying.
+"""
+from __future__ import annotations
+
+import itertools
+import time
+from dataclasses import dataclass, field
+from fractions import Fraction
+from typing import Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from .bound_eval import (
+    batch_bounds,
+    batch_bounds_full,
+    batch_bounds_rank1_hi,
+    batch_bounds_rank1_lo,
+    bound_autoconv_exact,
+    bound_autoconv_int_ge,
+    bound_mccormick_exact_nosym,
+    bound_mccormick_joint_face_dual_cert_int_ge,
+    bound_mccormick_joint_face_lp,
+    bound_mccormick_ne_exact_nosym,
+    bound_mccormick_ne_int_ge,
+    bound_mccormick_sw_int_ge,
+    bound_natural_exact,
+    bound_natural_int_ge,
+    gap_weighted_split_axis,
+    window_tensor,
+)
+from .box import Box
+from .symmetry import half_simplex_cuts
+from .windows import WindowMeta, build_windows
+
+
+def rigor_replay(
+    B: Box, w: WindowMeta, d: int, which: str, target_q: Fraction,
+    *, try_joint: bool = False,
+) -> bool:
+    """Exact integer-arithmetic rigor gate.
+
+    Mathematically equivalent to the Fraction-based replay but runs on
+    lo_int/hi_int (shared-denominator ints at scale 2**D_SHIFT=60),
+    avoiding per-operation GCD. Bit-exact for dyadic-rational endpoints,
+    which is always the case for our Box (midpoint splits preserve
+    dyadicity).
+
+    Short-circuits on the first of (natural, autoconv, SW-McCormick,
+    NE-McCormick) that clears target_q. If `try_joint` is True, ALSO
+    attempts the joint-face McCormick dual-certificate bound as a final
+    fallback. Joint-cert is strictly >= max(SW, NE) so it closes some
+    boxes the greedy bounds cannot; but each call runs scipy.linprog so
+    it is only worth attempting on deep, hard-to-close boxes. The caller
+    controls the gate (typically depth >= JOINT_DEPTH_THRESHOLD or
+    max_width < JOINT_WIDTH_THRESHOLD).
+    """
+    lo_int, hi_int = B.to_ints()
+    tn = target_q.numerator
+    td = target_q.denominator
+    if bound_natural_int_ge(lo_int, hi_int, w, tn, td):
+        return True
+    if bound_autoconv_int_ge(lo_int, hi_int, w, d, tn, td):
+        return True
+    if bound_mccormick_sw_int_ge(lo_int, hi_int, w, d, tn, td):
+        return True
+    if bound_mccormick_ne_int_ge(lo_int, hi_int, w, d, tn, td):
+        return True
+    if try_joint:
+        return bound_mccormick_joint_face_dual_cert_int_ge(
+            lo_int, hi_int, w, d, tn, td,
+        )
+    return False
+
+
+def rigor_replay_fraction(
+    B: Box, w: WindowMeta, d: int, which: str, target_q: Fraction,
+) -> bool:
+    """Legacy Fraction-based rigor gate. Retained for cross-check tests
+    that the integer path is mathematically identical. Not used on the
+    hot path."""
+    lo_q, hi_q = B.to_fractions()
+    lb_rat = bound_natural_exact(lo_q, hi_q, w)
+    if lb_rat >= target_q:
+        return True
+    lb_rat = bound_autoconv_exact(lo_q, hi_q, w, d)
+    if lb_rat >= target_q:
+        return True
+    lb_rat = bound_mccormick_exact_nosym(lo_q, hi_q, w)
+    if lb_rat >= target_q:
+        return True
+    lb_rat = bound_mccormick_ne_exact_nosym(lo_q, hi_q, w)
+    return lb_rat >= target_q
+
+
+@dataclass
+class BnBStats:
+    nodes_processed: int = 0
+    leaves_certified: int = 0
+    leaves_split: int = 0
+    max_depth: int = 0
+    window_usage: Dict[int, int] = field(default_factory=dict)
+    wall_time_s: float = 0.0
+    worst_lb_seen: float = float("inf")
+    max_queue: int = 0
+    rigor_retries: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "nodes_processed": self.nodes_processed,
+            "leaves_certified": self.leaves_certified,
+            "leaves_split": self.leaves_split,
+            "max_depth": self.max_depth,
+            "window_usage": dict(self.window_usage),
+            "wall_time_s": self.wall_time_s,
+            "worst_lb_seen": self.worst_lb_seen,
+            "max_queue": self.max_queue,
+            "rigor_retries": self.rigor_retries,
+        }
+
+
+@dataclass
+class BnBResult:
+    success: bool
+    target_q: Fraction
+    target_float: float
+    d: int
+    stats: BnBStats
+    failing_box: Optional[Box] = None
+    failing_lb: Optional[float] = None
+
+
+_UID = itertools.count()
+
+
+def branch_and_bound(
+    d: int,
+    target_c: float,
+    *,
+    max_nodes: int = 10_000_000,
+    min_box_width: float = 1e-10,
+    use_symmetry: bool = True,
+    log_every: int = 10_000,
+    time_budget_s: Optional[float] = None,
+    method: str = "combined",  # kept for API; batch path always = "combined"
+    verbose: bool = True,
+) -> BnBResult:
+    """Run BnB. Returns BnBResult with stats."""
+    sym_cuts = half_simplex_cuts(d) if use_symmetry else []
+    initial = Box.initial(d, sym_cuts)
+    if not initial.intersects_simplex():
+        raise RuntimeError("initial box does not intersect simplex (bug)")
+    return branch_and_bound_from_box(
+        d, target_c, initial,
+        max_nodes=max_nodes, min_box_width=min_box_width,
+        log_every=log_every, time_budget_s=time_budget_s,
+        verbose=verbose,
+    )
+
+
+def branch_and_bound_from_box(
+    d: int,
+    target_c: float,
+    initial: Box,
+    *,
+    max_nodes: int = 10_000_000,
+    min_box_width: float = 1e-10,
+    log_every: int = 10_000,
+    time_budget_s: Optional[float] = None,
+    verbose: bool = True,
+    joint_depth_threshold: int = 20,
+    tighten_depth_threshold: int = 15,
+) -> BnBResult:
+    """Run BnB restricted to the given initial box. Used both as the
+    single-shot entry point and as the per-worker driver in
+    interval_bnb.parallel.
+    """
+    t0 = time.time()
+    target_q = _to_fraction(target_c)
+    target_f = float(target_c)
+    windows = build_windows(d)
+    A_tensor, scales = window_tensor(windows, d)
+
+    stats = BnBStats()
+
+    # DFS stack entries: (box, depth, parent_cache, changed_axis, which_end)
+    # where `which_end` is 'lo' (right child), 'hi' (left child), or None
+    # for the root. When parent_cache is None, we do a full recompute;
+    # otherwise we apply a rank-1 update.
+    stack: List[Tuple[Box, int, Optional[tuple], int, Optional[str]]] = []
+    stack.append((initial, 0, None, -1, None))
+
+    last_log = time.time()
+
+    while stack:
+        if stats.nodes_processed >= max_nodes:
+            if verbose:
+                print(f"[bnb] max_nodes={max_nodes} reached; aborting")
+            return BnBResult(
+                success=False, target_q=target_q, target_float=target_f,
+                d=d, stats=_finalise(stats, t0),
+            )
+        if time_budget_s is not None and time.time() - t0 > time_budget_s:
+            if verbose:
+                print(f"[bnb] time_budget_s={time_budget_s} exceeded; aborting")
+            return BnBResult(
+                success=False, target_q=target_q, target_float=target_f,
+                d=d, stats=_finalise(stats, t0),
+            )
+
+        B, depth, parent_cache, changed_k, which_end = stack.pop()
+        stats.nodes_processed += 1
+        if depth > stats.max_depth:
+            stats.max_depth = depth
+        if len(stack) > stats.max_queue:
+            stats.max_queue = len(stack)
+
+        if not B.intersects_simplex():
+            continue
+
+        # T3 re-enabled at depth threshold: tightens hi via simplex
+        # sum-constraint, which lifts the autoconv bound (binding on
+        # d=16 stall boxes). The invalidation below forces a full
+        # recompute, losing the rank-1 cache, so we only pay the cost
+        # at deep depth where the stall matters.
+        if depth >= tighten_depth_threshold:
+            if B.tighten_to_simplex():
+                parent_cache = None
+                if not B.intersects_simplex():
+                    continue
+
+        # T3 (simplex box tightening) was REVERTED: benchmark on pod
+        # showed +40% wall-clock (75.3s vs 53.8s) at d=10 t=1.22 with
+        # IDENTICAL tree size. The McCormick LP already uses the
+        # simplex constraint implicitly, so tightening lo/hi didn't
+        # change the binding bound on hard boxes. Per-box O(d)
+        # overhead + rank-1 cache invalidation outweighed the (zero)
+        # tree shrink.
+        # Re-enable only if a tighter bound formulation makes the
+        # box-lo/hi actually binding -- e.g. a future RLT LP that
+        # reads lo/hi as coefficients (not just constraints).
+
+        # Bounds (with rank-1 update if possible).
+        if parent_cache is None:
+            lb_fast, w_idx, which, _mu, my_cache = batch_bounds_full(
+                B.lo, B.hi, A_tensor, scales, target_f,
+            )
+        elif which_end == "lo":
+            lb_fast, w_idx, which, _mu, my_cache = batch_bounds_rank1_lo(
+                A_tensor, scales, parent_cache, B.lo, changed_k, target_f,
+            )
+        else:  # "hi"
+            lb_fast, w_idx, which, _mu, my_cache = batch_bounds_rank1_hi(
+                A_tensor, scales, parent_cache, B.hi, changed_k, target_f,
+            )
+
+        if lb_fast < stats.worst_lb_seen:
+            stats.worst_lb_seen = lb_fast
+
+        # T1 (dual-face joint LP) was REVERTED: float-path tightening
+        # delivered no tree shrink because the integer-rigor gate still
+        # uses separate SW/NE bounds, so every joint-certified box
+        # becomes a rigor retry and is split anyway. Measured 20k-30x
+        # slowdown on d=10/d=4. Re-enable only if integer-rigor joint
+        # LP is implemented (requires a rational LP simplex).
+
+        if lb_fast >= target_f:
+            w = windows[w_idx]
+            certified = rigor_replay(
+                B, w, d, which, target_q,
+                try_joint=(depth >= joint_depth_threshold),
+            )
+            if certified:
+                stats.leaves_certified += 1
+                stats.window_usage[w_idx] = stats.window_usage.get(w_idx, 0) + 1
+                if verbose and stats.leaves_certified % max(1, log_every // 10) == 0 \
+                        and time.time() - last_log > 1.0:
+                    _log_progress(stats, stack, lb_fast, target_f, t0)
+                    last_log = time.time()
+                continue
+            stats.rigor_retries += 1
+
+        if B.max_width() < min_box_width:
+            stats.wall_time_s = time.time() - t0
+            if verbose:
+                print(f"[bnb] FAIL: box at depth {depth} width<{min_box_width} could not certify")
+                print(f"       lb_fast={lb_fast:.6f}  target={target_f:.6f}")
+                print(f"       {B.shape_summary()}")
+            return BnBResult(
+                success=False, target_q=target_q, target_float=target_f,
+                d=d, stats=_finalise(stats, t0),
+                failing_box=B, failing_lb=lb_fast,
+            )
+        # Reverted to widest-axis: gap-weighted branching measured
+        # NET NEGATIVE -- extra matmul per box more than offsets any
+        # tree-shrink (rank-1 cache reuse and simple data locality
+        # favour widest-axis splits empirically at d<=10). See
+        # `gap_weighted_split_axis` in bound_eval for the alternative.
+        axis = B.widest_axis()
+        left, right = B.split(axis)
+        stats.leaves_split += 1
+        # Push RIGHT first so LEFT is processed first (LIFO). Both share
+        # `my_cache` -- they will apply rank-1 updates from it.
+        if right.intersects_simplex():
+            stack.append((right, depth + 1, my_cache, axis, "lo"))
+        if left.intersects_simplex():
+            stack.append((left, depth + 1, my_cache, axis, "hi"))
+
+        if verbose and stats.nodes_processed % log_every == 0 \
+                and time.time() - last_log > 1.0:
+            _log_progress(stats, stack, lb_fast, target_f, t0)
+            last_log = time.time()
+
+    stats.wall_time_s = time.time() - t0
+    return BnBResult(
+        success=True, target_q=target_q, target_float=target_f,
+        d=d, stats=_finalise(stats, t0),
+    )
+
+
+def _finalise(stats: BnBStats, t0: float) -> BnBStats:
+    stats.wall_time_s = time.time() - t0
+    return stats
+
+
+def _log_progress(stats: BnBStats, queue, lb_fast, target_c, t0):
+    n_queue = len(queue)
+    t = time.time() - t0
+    rate = stats.nodes_processed / max(t, 1e-9)
+    print(
+        f"[bnb] t={t:6.1f}s  nodes={stats.nodes_processed:>8d}  "
+        f"queue={n_queue:>7d}  cert={stats.leaves_certified:>7d}  "
+        f"depth={stats.max_depth:>3d}  rate={rate:.0f}/s  "
+        f"lb_fast={lb_fast:.6f}/{target_c:.6f}"
+    )
+
+
+def _to_fraction(x) -> Fraction:
+    if isinstance(x, Fraction):
+        return x
+    if isinstance(x, bool):
+        # bool is a subclass of int; reject to avoid silent coercion.
+        raise TypeError(
+            "_to_fraction does not accept bool; pass a str like \"1.2802\" "
+            "or a Fraction to make the decimal intent explicit."
+        )
+    if isinstance(x, float):
+        raise TypeError(
+            "_to_fraction refuses float input to avoid silent rounding that "
+            "could strengthen the certified target beyond the declared value. "
+            "Pass a str (e.g. \"1.2802\") or a Fraction instead."
+        )
+    if isinstance(x, str):
+        return Fraction(x)
+    if isinstance(x, int):
+        return Fraction(x)
+    raise TypeError(
+        f"_to_fraction: unsupported type {type(x).__name__}; "
+        "pass a str (e.g. \"1.2802\"), a Fraction, or an int."
+    )

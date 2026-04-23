@@ -1472,14 +1472,26 @@ def solve_scs_direct(d, order, bandwidth, c_target=1.28,
             # is preserved.  Only if ALL backoffs are also uncertain do we
             # truly give up.
             if verdict == _VERDICT_UNCERTAIN:
-                backoff_alphas = [0.5, 0.25, 0.125]
+                # Seven exponential-halving alphas span 50% down to
+                # 0.78% of (mid-lo) above lo — seven chances to land
+                # outside whatever uncertain zone surrounds `mid`.  Plus
+                # an adaptive floor: any probe within 1e-4 of lo is
+                # skipped (matches the bisection convergence threshold —
+                # finer resolution than that is numerical noise).
+                # Rationale for not using a fixed 3- or 5-step ladder:
+                # R1 step 7 already required backoff 2/3 to certify,
+                # and a 0.01-wide uncertain zone at cone count 500+
+                # would defeat anything shorter than ~7 alphas.
+                backoff_alphas = [0.5, 0.25, 0.125, 0.0625,
+                                  0.03125, 0.015625, 0.0078125]
                 for bo_i, alpha in enumerate(backoff_alphas):
                     new_mid = lo + alpha * (mid - lo)
-                    # Stop if the backoff point is numerically too close to lo
-                    # (we already know lo is infeas; probing essentially the
-                    # same point gains nothing).
-                    if new_mid - lo < 1e-6:
-                        break
+                    # Skip probes within the bisection convergence threshold
+                    # of lo.  Anything closer than 1e-4 to a known-infeas
+                    # point is within solver noise — probing adds no
+                    # information.  Adaptive across any bracket width.
+                    if new_mid - lo < 1e-4:
+                        continue
                     t_bo = time.time()
                     v_bo, sol_bo, tau_bo, bt_bo = check_feasible(
                         new_mid, max_iters_override=adaptive_iters,
