@@ -271,11 +271,13 @@ def _solve_epigraph_lp(lo, hi, windows, d):
     # (C4) Midpoint tangent RHS: m_i²
     b_ub[tan_row_start:tan_row_start + d] = m * m
 
-    # A_eq: Σμ = 1, plus RLT row-sum equalities Σ_j Y_{ij} = μ_i for each i.
-    # Total rows: 1 + d.
-    # Eq 0 (Σμ=1): coefs +1 on n_y..n_y+d-1.
-    # Eq 1+i (Σ_j Y_{i,j} = μ_i): coefs +1 on Y_{i,*} (i.e., yi(i,0)..yi(i,d-1)),
-    #                              coef -1 on n_y+i (μ_i column). RHS = 0.
+    # A_eq layout:
+    #   row 0                        : Σμ = 1
+    #   rows 1..d                    : RLT row-sum   Σ_j Y_{i,j} − μ_i = 0
+    #   rows 1+d..1+2d-1             : (C1) RLT col-sum  Σ_i Y_{i,j} − μ_j = 0
+    #   rows 1+2d.. + n_sym          : (C2) Y-symmetry   Y_{i,j} − Y_{j,i} = 0  (i<j)
+    n_sym = d * (d - 1) // 2
+    n_eq = 1 + d + d + n_sym
     eq_rows = []
     eq_cols = []
     eq_data = []
@@ -283,25 +285,42 @@ def _solve_epigraph_lp(lo, hi, windows, d):
     eq_rows.extend([0] * d)
     eq_cols.extend([n_y + i for i in range(d)])
     eq_data.extend([1.0] * d)
-    # RLT: Σ_j Y_{i,j} - μ_i = 0, one row per i.
+    # RLT row-sum: Σ_j Y_{i,j} - μ_i = 0
     for i in range(d):
-        # +1 on Y_{i,j} for all j
         for j in range(d):
             eq_rows.append(1 + i)
             eq_cols.append(i * d + j)
             eq_data.append(1.0)
-        # -1 on μ_i
         eq_rows.append(1 + i)
         eq_cols.append(n_y + i)
         eq_data.append(-1.0)
+    # (C1) RLT col-sum: Σ_i Y_{i,j} - μ_j = 0
+    col_row_start = 1 + d
+    for j in range(d):
+        for i in range(d):
+            eq_rows.append(col_row_start + j)
+            eq_cols.append(i * d + j)
+            eq_data.append(1.0)
+        eq_rows.append(col_row_start + j)
+        eq_cols.append(n_y + j)
+        eq_data.append(-1.0)
+    # (C2) Y-symmetry: Y_{i,j} - Y_{j,i} = 0 for i<j
+    sym_row_start = col_row_start + d
+    sym_k = 0
+    for i in range(d):
+        for j in range(i + 1, d):
+            r = sym_row_start + sym_k
+            eq_rows.append(r); eq_cols.append(i * d + j); eq_data.append(1.0)
+            eq_rows.append(r); eq_cols.append(j * d + i); eq_data.append(-1.0)
+            sym_k += 1
     A_eq = csr_matrix(
         (np.asarray(eq_data, dtype=np.float64),
          (np.asarray(eq_rows, dtype=np.int64),
           np.asarray(eq_cols, dtype=np.int64))),
-        shape=(1 + d, n_vars),
+        shape=(n_eq, n_vars),
     )
-    b_eq = np.zeros(1 + d, dtype=np.float64)
-    b_eq[0] = 1.0  # Σμ = 1; RLT eqs have RHS 0
+    b_eq = np.zeros(n_eq, dtype=np.float64)
+    b_eq[0] = 1.0  # Σμ = 1; remaining eqs have RHS 0
 
     # Bounds
     bnds = [(0.0, None)] * n_y + [(float(lo[i]), float(hi[i])) for i in range(d)]
@@ -383,11 +402,11 @@ def bound_epigraph_int_ge(
 
     target_f = target_num / target_den
 
-    # CORRECT n_ineq: 4 * n_y + n_W (SW + NE + NW + SE + epigraph).
-    # The previous formula `2*n_y + n_W` undercounted but the absolute
-    # margin difference is negligible (both ~1e-11 at d=20).
+    # n_ineq: 4 * n_y + n_W (SW + NE + NW + SE + epigraph)
+    #         + 1 (diagonal SOS)
+    #         + d (midpoint diag tangents).
     n_vars = n_y + d + 1
-    n_ineq = 4 * n_y + n_W
+    n_ineq = 4 * n_y + n_W + 1 + d
     safety_arith = max(n_vars + n_ineq, 100) * 1e-14
     # TODO(publication): add HiGHS-tolerance cushion (e.g. 1e-7) and
     # tighten HiGHS optimality tolerances.

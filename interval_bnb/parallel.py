@@ -42,7 +42,7 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from interval_bnb.box import Box  # noqa: E402
-from interval_bnb.symmetry import half_simplex_cuts  # noqa: E402
+from interval_bnb.symmetry import box_outside_hd, half_simplex_cuts  # noqa: E402
 
 
 # ---------------------------------------------------------------------
@@ -51,18 +51,25 @@ from interval_bnb.symmetry import half_simplex_cuts  # noqa: E402
 
 def _split_initial(d: int, depth: int, sym_cuts) -> List[Box]:
     """Breadth-first midpoint split of the initial (half-)simplex box
-    `depth` times. Drops sub-boxes that do not intersect the simplex.
+    `depth` times. Drops sub-boxes that do not intersect the simplex,
+    or that lie strictly outside the half-simplex H_d (proper sigma
+    cut: see interval_bnb/symmetry.py:box_outside_hd).
+
+    The H_d cut is the proper coordinate-coupled symmetry reduction:
+    for any orbit {mu, sigma(mu)}, exactly one representative survives
+    (or both, if mu_0 = mu_{d-1}). This roughly halves the search.
     """
     root = Box.initial(d, sym_cuts)
     boxes: List[Box] = [root]
+    apply_hd_cut = bool(sym_cuts)
     for _ in range(depth):
         new_boxes: List[Box] = []
         for B in boxes:
             ax = B.widest_axis()
             left, right = B.split(ax)
-            if left.intersects_simplex():
+            if left.intersects_simplex() and not (apply_hd_cut and box_outside_hd(left)):
                 new_boxes.append(left)
-            if right.intersects_simplex():
+            if right.intersects_simplex() and not (apply_hd_cut and box_outside_hd(right)):
                 new_boxes.append(right)
         boxes = new_boxes
     return boxes
@@ -300,6 +307,16 @@ def _worker_main(
                 break
 
             if not B.intersects_simplex():
+                local_vol += B.volume()
+                with in_flight.get_lock():
+                    in_flight.value -= 1
+                continue
+
+            # H_d half-simplex pre-filter: drop boxes strictly outside
+            # H_d = {mu_0 <= mu_{d-1}}. Sound by Lemma 3.4 (THEOREM.md).
+            # The dropped box's sigma-image lies in H_d and is covered
+            # by another sibling that survives this cut.
+            if box_outside_hd(B):
                 local_vol += B.volume()
                 with in_flight.get_lock():
                     in_flight.value -= 1

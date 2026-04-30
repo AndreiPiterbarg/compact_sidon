@@ -43,7 +43,7 @@ from .bound_eval import (
     window_tensor,
 )
 from .box import Box
-from .symmetry import half_simplex_cuts
+from .symmetry import box_outside_hd, half_simplex_cuts
 from .windows import WindowMeta, build_windows
 
 
@@ -315,6 +315,12 @@ def branch_and_bound_from_box(
             stats.max_queue = len(stack)
 
         if not B.intersects_simplex():
+            continue
+
+        # H_d half-simplex pre-filter (proper sigma cut). Sound by
+        # Lemma 3.4 (THEOREM.md): boxes with lo_int[0] > hi_int[d-1]
+        # have their sigma-image covered by another (sibling) box.
+        if box_outside_hd(B):
             continue
 
         # T3 re-enabled at depth threshold: tightens hi via simplex

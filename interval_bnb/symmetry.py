@@ -64,3 +64,34 @@ def half_simplex_cuts(d: int) -> List[Tuple[int, int]]:
 def sigma_pairs(d: int) -> List[Tuple[int, int]]:
     """Return (i, sigma(i)) for i = 0..d-1 (including fixed points)."""
     return [(i, d - 1 - i) for i in range(d)]
+
+
+def box_outside_hd(box) -> bool:
+    """Return True iff the box lies STRICTLY outside the half-simplex
+    H_d = {mu : mu_0 <= mu_{d-1}}, i.e. every mu in the box has
+    mu_0 > mu_{d-1}.
+
+    The check uses the exact integer endpoints so it is rigorously
+    correct at all dyadic depths. A box is strictly outside H_d iff
+    its forced-min mu_0 strictly exceeds its forced-max mu_{d-1}, i.e.
+        lo_int[0] > hi_int[d-1].
+
+    Boxes whose interval-projection straddles the H_d boundary
+    {mu_0 = mu_{d-1}} (i.e. lo_int[0] <= hi_int[d-1]) are KEPT because
+    they may contain points in H_d. This keeps the cut SOUND: we drop
+    only boxes whose sigma-image (mu_0 <-> mu_{d-1} reversal of the
+    point) lies in another already-covered box, never any box that
+    might host a min(H_d) certificate.
+
+    SOUNDNESS: by Lemma 3.4 of THEOREM.md, val(d) = min over H_d. Any
+    mu in Delta_d minus H_d has sigma(mu) in H_d with the same objective
+    value (Lemma 3.3). So restricting the BnB cover to boxes that
+    *meet* H_d — i.e. dropping boxes with lo_int[0] > hi_int[d-1] —
+    still certifies val(d) >= c.
+    """
+    if box.lo_int is None or box.hi_int is None:
+        return False  # cannot judge; keep box (conservative)
+    d = len(box.lo_int)
+    if d < 2:
+        return False
+    return box.lo_int[0] > box.hi_int[d - 1]
