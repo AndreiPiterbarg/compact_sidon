@@ -107,9 +107,12 @@ def _worker_main(
 ):
     """Long-lived worker: pull from shared queue, process local DFS,
     donate when stack grows large, exit when done/failed signalled."""
-    # Install SIGINT handler so Ctrl-C from the master cleanly
-    # flips `failed_event` and exits.
-    signal.signal(signal.SIGINT, lambda *_: (failed_event.set(), sys.exit(0)))
+    # Install SIGINT handler so Ctrl-C from the master cleanly flips
+    # `failed_event`. The main loop observes this on the next iteration
+    # and exits via the `try/finally` cleanup. Avoid `sys.exit()` from
+    # inside the signal handler — it can fire mid-`queue.put` and leave
+    # internal queue locks held, deadlocking sibling workers.
+    signal.signal(signal.SIGINT, lambda *_: failed_event.set())
 
     # Lazy imports of the bnb-internal functions so the fork happens
     # with the module preloaded but per-process caches remain clean.
@@ -128,10 +131,84 @@ def _worker_main(
         rigor_replay, rigor_replay_topk_joint, rigor_replay_with_cctr,
     )
     from interval_bnb.windows import build_windows
+    from interval_bnb.bound_anchor import (
+        build_anchor_data, bound_anchor_int_ge,
+        build_multi_anchor_data, bound_anchor_multi_int_ge,
+        build_centroid_anchor_cache, bound_anchor_centroid_int_ge,
+    )
 
     windows = build_windows(d)
     A_tensor, scales = window_tensor(windows, d)
     target_q = target_c if isinstance(target_c, Fraction) else Fraction(str(target_c))
+
+    # Anchor-cut setup: load mu_star_d{d}.npz if present and build the
+    # supporting-hyperplane data once. Activated by INTERVAL_BNB_ANCHOR_DEPTH
+    # env var (default 999 = disabled).
+    anchor_depth_threshold = int(os.environ.get(
+        "INTERVAL_BNB_ANCHOR_DEPTH", "999"
+    ))
+    multi_anchors = None  # list of anchor dicts (mu*, sigma(mu*))
+    centroid_cache = None  # per-window lambda_min / A_W cache
+    anchor_disable_reason = None
+    if anchor_depth_threshold < 999:
+        anchor_npz_path = os.path.join(_REPO, f"mu_star_d{d}.npz")
+        if not os.path.isfile(anchor_npz_path):
+            anchor_disable_reason = (
+                f"file not found: {anchor_npz_path}"
+            )
+        else:
+            try:
+                _data = np.load(anchor_npz_path, allow_pickle=True)
+                if 'mu_star' in _data.files:
+                    mu_star_arr = np.asarray(
+                        _data['mu_star'], dtype=np.float64,
+                    )
+                elif 'mu' in _data.files:
+                    mu_star_arr = np.asarray(_data['mu'], dtype=np.float64)
+                else:
+                    mu_star_arr = None
+                    anchor_disable_reason = (
+                        f"npz missing 'mu_star' / 'mu' key "
+                        f"(found: {list(_data.files)})"
+                    )
+                if mu_star_arr is not None:
+                    if mu_star_arr.shape != (d,):
+                        anchor_disable_reason = (
+                            f"mu_star shape {mu_star_arr.shape}, "
+                            f"expected ({d},)"
+                        )
+                    else:
+                        # Multi-anchor: builds {mu*, sigma(mu*)}.
+                        # Sigma(mu*) is in H_d when mu_0 > mu_{d-1};
+                        # without this, anchor never fires on H_d boxes
+                        # (root cause of d=22 anchor 0/251763).
+                        multi_anchors = build_multi_anchor_data(
+                            d, mu_star_arr, windows=windows,
+                        )
+                        # Per-box centroid anchor: rebuilds the supporting
+                        # hyperplane at each box's midpoint with curvature
+                        # concession. Tighter than the global anchor on
+                        # boxes far from mu*.
+                        centroid_cache = build_centroid_anchor_cache(
+                            d, windows=windows,
+                        )
+            except Exception as exc:
+                anchor_disable_reason = f"load/build failed: {exc!r}"
+                multi_anchors = None
+                centroid_cache = None
+    anchor_enabled = multi_anchors is not None
+    if (anchor_depth_threshold < 999) and (not anchor_enabled):
+        try:
+            print(
+                f"[w{worker_id}] anchor disabled: {anchor_disable_reason}",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
+    local_anchor_attempts = 0
+    local_anchor_certs = 0
+    local_centroid_attempts = 0
+    local_centroid_certs = 0
     target_f = float(target_q)
 
     # Depth threshold above which rigor_replay also tries the joint-face
@@ -197,6 +274,74 @@ def _worker_main(
     epigraph_filter = float(os.environ.get(
         "INTERVAL_BNB_EPIGRAPH_FILTER", "0.10"
     ))
+    # PER-BOX CENTROID ANCHOR: ~98ms per box at d=24 (Python iteration
+    # over W * |pairs| products in argmax_window_at_centroid). Sound
+    # safety-net cut for boxes where the epi LP fails. Empirically the
+    # centroid cert rate is ~0% for half-width > 0.003 and ~100% for
+    # half-width <= 0.0015 (Agent 1 measurement). To avoid paying its
+    # cost on shallow boxes that won't benefit, gate it on a depth
+    # threshold separate from the cheap multi-anchor (which always runs
+    # at depth >= INTERVAL_BNB_ANCHOR_DEPTH).
+    centroid_depth_threshold = int(os.environ.get(
+        "INTERVAL_BNB_CENTROID_DEPTH", "999"
+    ))
+    # LP-BINDING SPLIT-AXIS heuristic: when the epigraph LP just solved
+    # (and failed to certify), use its McCormick-face dual marginals to
+    # pick the split axis whose tightening will most lift the LP value
+    # next time. Default 999 (disabled). Recommended: 28 (deeper than
+    # the cross-box variance heuristic at 25). Activates only when the
+    # epigraph LP was solved AND ineqlin marginals are available.
+    lp_split_depth_threshold = int(os.environ.get(
+        "INTERVAL_BNB_LP_SPLIT_DEPTH", "999"
+    ))
+    # BOUNDARY-CONCENTRATED SPLIT heuristic (HIGHEST priority when active).
+    # Targets the d>=22 BnB stall mode: stuck boxes have many axes pinned
+    # at lo[i]<=1e-12 ("boundary axes" — mu_i=0 face of the simplex), and
+    # the LP gap is dominated by (free, free) axis pair products. The
+    # existing LP-binding / PC-variance / widest cascade can pick a wide
+    # boundary axis whose split does not change the LP gap; the resulting
+    # children inherit the same gap and the BnB random-walks. This tier,
+    # when the box has >= boundary_axis_count_threshold boundary axes,
+    # forces the split onto a FREE axis (lo[i] > 1e-12), which is what
+    # actually tightens the LP gap on those products.
+    #
+    # Soundness: unaffected. The BnB is sound for ANY axis choice (the
+    # split partitions the parent's feasible region into two children
+    # whose union equals the parent). This heuristic only changes the
+    # ORDER of work, not what is searched.
+    #
+    # Default 999 (disabled). Recommended at d>=22 stall: 30 (above the
+    # PC-variance threshold of 25 so it overrides on deep boxes).
+    boundary_split_depth_threshold = int(os.environ.get(
+        "INTERVAL_BNB_BOUNDARY_SPLIT_DEPTH", "999"
+    ))
+    # Min number of axes at lo<=1e-12 to trigger the heuristic. Default
+    # d//2 — i.e. half or more of axes pinned to the simplex boundary.
+    boundary_axis_count_threshold = int(os.environ.get(
+        "INTERVAL_BNB_BOUNDARY_AXIS_COUNT", str(d // 2)
+    ))
+    # LASSERRE ORDER-2 SDP ESCALATION (publication-rigor tier 3):
+    # Fires AFTER the epigraph LP and centroid anchor on residual boxes
+    # the cheap cascade could not close. Closes the McCormick gap by
+    # going one rung up the Lasserre hierarchy (~O(w^4) gap vs LP's
+    # O(w^2)). Cost ~1-3s per box at d=30 via MOSEK Fusion.
+    # Default depth=999 (disabled). Recommended at d=30: 30 (after epi
+    # LP at depth 24-30 has had its chance).
+    sdp_depth_threshold = int(os.environ.get(
+        "INTERVAL_BNB_SDP_DEPTH", "999"
+    ))
+    # Pre-filter for SDP: only invoke if the epi LP value is within
+    # `sdp_filter` of the target. Boxes the epi LP says are far from
+    # cert are unlikely to be closed by the SDP relaxation either.
+    # Default 0.02 (the empirical SDP-vs-LP gap on residual boxes).
+    sdp_filter = float(os.environ.get(
+        "INTERVAL_BNB_SDP_FILTER", "0.02"
+    ))
+    # Per-box MOSEK time limit in seconds. Sound under-approximation
+    # on timeout (returns False).
+    sdp_time_limit_s = float(os.environ.get(
+        "INTERVAL_BNB_SDP_TIME_LIMIT_S", "5.0"
+    ))
     # Build float aggregate matrix M_float once per worker (for the
     # cheap pre-filter). Reconstructs M_float from the integer M_int
     # (avoids passing two large arrays via fork/spawn).
@@ -234,6 +379,13 @@ def _worker_main(
     # Epigraph diagnostics
     local_epi_attempts = 0
     local_epi_certs = 0
+    # SDP escalation diagnostics
+    local_sdp_attempts = 0
+    local_sdp_certs = 0
+    # Lazy MOSEK escalation cache (built on first SDP attempt; ~1s at
+    # d=30). None until first invocation; then a dict from
+    # `build_sdp_escalation_cache(d, windows)`.
+    sdp_cache = None
     # PC1-tracker: cross-box variance EMA over stuck-box centroids.
     # Uses Welford's online mean+variance recursion (numerically stable).
     # Updated only on boxes that reach pc_split_depth_threshold (i.e. the
@@ -390,7 +542,7 @@ def _worker_main(
                                          if lb_all[int(i)] >= target_f - 1e-3]
                         alt_windows_list = [windows[i] for i in alt_idx_list]
                         if rigor_replay_with_cctr(
-                            B, w, d, which, target_q,
+                            B, w, d, target_q,
                             alt_windows=alt_windows_list,
                             cctr_M_int=cctr_M_int if cctr_active else None,
                             cctr_D_M=cctr_D_M if cctr_active else 0,
@@ -400,7 +552,7 @@ def _worker_main(
                 else:
                     # Standard tier + CCTR (no top-K joint), no Shor filter.
                     if rigor_replay_with_cctr(
-                        B, w, d, which, target_q,
+                        B, w, d, target_q,
                         alt_windows=(),
                         cctr_M_int=cctr_M_int if cctr_active else None,
                         cctr_D_M=cctr_D_M if cctr_active else 0,
@@ -414,6 +566,32 @@ def _worker_main(
                         in_flight.value -= 1
                     continue
                 # Rigor refused -- split further below.
+
+            # MULTI-ANCHOR CUT: OR over {mu*, sigma(mu*)} supporting
+            # hyperplanes (sigma-image makes the cut work in H_d when
+            # mu* is not). Cheap (~10us per box: two greedy LPs over d
+            # axes each), sound globally with curvature concession for
+            # non-PSD A_{W*}. Always tried at this depth — fast filter.
+            #
+            # The PER-BOX CENTROID ANCHOR is the EXPENSIVE last-resort
+            # cut and is moved AFTER the epigraph LP — it fires only on
+            # boxes the epi LP couldn't close. See comment block after
+            # the epigraph LP for soundness + cost analysis.
+            if anchor_enabled and depth >= anchor_depth_threshold:
+                lo_int_, hi_int_ = B.to_ints()
+                tn_, td_ = target_q.numerator, target_q.denominator
+                local_anchor_attempts += 1
+                if bound_anchor_multi_int_ge(
+                    lo_int_, hi_int_,
+                    multi_anchors,
+                    tn_, td_,
+                ):
+                    local_anchor_certs += 1
+                    local_cert += 1
+                    local_vol += B.volume()
+                    with in_flight.get_lock():
+                        in_flight.value -= 1
+                    continue
 
             # CCTR LAST-CHANCE: try multiple α aggregates, each individually
             # sound. Pick the best one per box (highest float-SW LB) and
@@ -488,27 +666,52 @@ def _worker_main(
                                 in_flight.value -= 1
                             continue
             # EPIGRAPH LP — final tier that closes the minimax-maximin gap.
-            # SINGLE LP solve (extract value AND cert in one call).
+            # SINGLE LP solve (extract value AND cert AND dual marginals
+            # in one call — no double-solve).
+            epi_ineqlin = None  # captured for LP-binding split heuristic
             if depth >= epigraph_depth_threshold:
-                from interval_bnb.bound_epigraph import _solve_epigraph_lp
-                # One LP solve. Extract value, decide pre-filter + cert.
-                lp_val, *_ = _solve_epigraph_lp(B.lo, B.hi, windows, d)
+                from interval_bnb.bound_epigraph import (
+                    bound_epigraph_int_ge_with_marginals,
+                )
+                cert, lp_val, epi_ineqlin = (
+                    bound_epigraph_int_ge_with_marginals(
+                        B.lo, B.hi, windows, d, target_f,
+                    )
+                )
                 if np.isfinite(lp_val):
                     local_epi_attempts += 1
-                    # Sound: HiGHS LP error ≤ 1e-12; safety margin 1e-10
-                    # gives 100× cushion. Boxes whose LP value > target +
-                    # safety are certified directly.
-                    safety = max(d * d + d + 1, 100) * 1e-14
-                    if (lp_val - safety) >= target_f:
+                    if cert:
                         local_epi_certs += 1
                         local_cert += 1
                         local_vol += B.volume()
                         with in_flight.get_lock():
                             in_flight.value -= 1
                         continue
-            if False:  # placeholder for future single-α path
-                pass
-            elif cctr_M_int is not None and cctr_D_M > 0:
+
+            # PER-BOX CENTROID ANCHOR (LAST-RESORT). Sound: builds a
+            # supporting hyperplane at the box midpoint mu_c using the
+            # box's argmax window W*(B), with curvature concession for
+            # non-PSD A_{W*(B)}. Only fires when the epi LP did NOT
+            # cert and the box is small enough (depth gate) for the
+            # curvature concession to be tighter than the missed margin.
+            # Cost ~98ms/call at d=24 (Python argmax over windows).
+            if (anchor_enabled and depth >= centroid_depth_threshold
+                    and centroid_cache is not None):
+                lo_int_, hi_int_ = B.to_ints()
+                tn_, td_ = target_q.numerator, target_q.denominator
+                local_centroid_attempts += 1
+                if bound_anchor_centroid_int_ge(
+                    lo_int_, hi_int_,
+                    tn_, td_,
+                    centroid_cache,
+                ):
+                    local_centroid_certs += 1
+                    local_cert += 1
+                    local_vol += B.volume()
+                    with in_flight.get_lock():
+                        in_flight.value -= 1
+                    continue
+            if cctr_M_int is not None and cctr_D_M > 0:
                 # Legacy single-α path (kept for backwards compat).
                 from interval_bnb.bound_cctr import (
                     bound_cctr_int_ge, bound_cctr_joint_face_int_ge,
@@ -552,6 +755,50 @@ def _worker_main(
                                 in_flight.value -= 1
                             continue
 
+            # LASSERRE ORDER-2 SDP ESCALATION (publication-rigor tier 3).
+            # Last tier before splitting. Sound by Lasserre 2001 Thm 4.2:
+            # the order-2 moment SDP is a valid lower bound on
+            # min_{mu in B cap Delta_d} max_W mu^T A_W mu. Cushion-based
+            # rigor cert; see `bound_sdp_escalation.py` docstring for
+            # the soundness derivation and cushion size justification.
+            #
+            # Pre-filter (epi LP value within `sdp_filter` of target)
+            # avoids paying the ~1-3s SDP cost on boxes the LP says are
+            # far from cert. The epi LP must have been solved (tier
+            # active and finite lp_val captured). Without that, we skip.
+            if (depth >= sdp_depth_threshold
+                    and depth >= epigraph_depth_threshold
+                    and epi_ineqlin is not None):
+                # `lp_val` is captured above when the epi LP solved; reuse.
+                # We need an explicit reference to the value here.
+                # (epi LP block sets `cert, lp_val, epi_ineqlin`; on this
+                # path `cert` was False so the LP value is below target.)
+                if np.isfinite(lp_val) and lp_val >= target_f - sdp_filter:
+                    if sdp_cache is None:
+                        from interval_bnb.bound_sdp_escalation import (
+                            build_sdp_escalation_cache,
+                        )
+                        sdp_cache = build_sdp_escalation_cache(d, windows)
+                    from interval_bnb.bound_sdp_escalation import (
+                        bound_sdp_escalation_int_ge,
+                    )
+                    lo_int_, hi_int_ = B.to_ints()
+                    tn_, td_ = target_q.numerator, target_q.denominator
+                    local_sdp_attempts += 1
+                    if bound_sdp_escalation_int_ge(
+                        lo_int_, hi_int_, windows, d,
+                        tn_, td_,
+                        cache=sdp_cache,
+                        time_limit_s=sdp_time_limit_s,
+                        n_threads=1,
+                    ):
+                        local_sdp_certs += 1
+                        local_cert += 1
+                        local_vol += B.volume()
+                        with in_flight.get_lock():
+                            in_flight.value -= 1
+                        continue
+
             if B.max_width() < min_box_width:
                 failed_event.set()
                 break
@@ -584,16 +831,64 @@ def _worker_main(
             else:
                 splittable = (B.hi - B.lo) > 0
             if not splittable.any():
-                # Fully saturated box: cannot split further. Drop it as
-                # certified-infeasible-to-progress; volume already counted
-                # if it doesn't intersect simplex; otherwise mark as the
-                # smallest representable leaf.
-                local_vol += B.volume()
-                with in_flight.get_lock():
-                    in_flight.value -= 1
-                continue
+                # Fully saturated box: every axis exhausted dyadic depth
+                # (int_width <= 1) without a certificate. Soundness
+                # requires us to FAIL LOUDLY rather than silently close
+                # the box. With the default `min_box_width=1e-10` (>>
+                # 2^-60) the upstream `B.max_width() < min_box_width`
+                # check fires first and this branch is unreachable; we
+                # keep it as a defensive guard against future config
+                # changes that could lower min_box_width below the
+                # dyadic resolution.
+                failed_event.set()
+                break
 
-            if depth >= pc_split_depth_threshold and w_idx >= 0:
+            # BOUNDARY-CONCENTRATED split heuristic (HIGHEST priority).
+            # When the box has >= boundary_axis_count_threshold axes pinned
+            # at lo[i] <= 1e-12 (mu_i==0 face of the simplex), prefer
+            # splitting a FREE axis (lo[i] > 1e-12) — these are the axes
+            # whose product terms dominate the LP gap, and splitting a
+            # boundary axis is wasted work (LP gap unchanged on the
+            # surviving free-axis pair products). Among free splittable
+            # axes, pick the widest. Falls back to widest splittable when
+            # no free axis is splittable. Soundness is unaffected (any
+            # valid axis split is sound; this only reorders work).
+            axis = None
+            if depth >= boundary_split_depth_threshold:
+                boundary_mask = B.lo <= 1e-12
+                n_boundary = int(np.count_nonzero(boundary_mask))
+                if n_boundary >= boundary_axis_count_threshold:
+                    free_mask = ~boundary_mask
+                    free_splittable = free_mask & splittable
+                    if free_splittable.any():
+                        widths_b = B.hi - B.lo
+                        ws_free = np.where(
+                            free_splittable, widths_b, -np.inf
+                        )
+                        cand = int(np.argmax(ws_free))
+                        if np.isfinite(ws_free[cand]):
+                            axis = cand
+                    # else: fall through to existing cascade (widest
+                    # splittable will run as the final fallback below).
+
+            # LP-BINDING split heuristic (next priority when active).
+            # Uses the just-returned ineqlin from the epigraph LP to score
+            # axes by Σ_j (|λ_SW(i,j)|+|λ_NE|+|λ_NW|+|λ_SE|) · width[i].
+            # Soundness is unaffected (any valid axis split is sound).
+            if (axis is None
+                    and depth >= lp_split_depth_threshold
+                    and epi_ineqlin is not None):
+                from interval_bnb.bound_epigraph import lp_binding_axis_score
+                widths = B.hi - B.lo
+                lp_score = lp_binding_axis_score(epi_ineqlin, widths, d)
+                lp_score = np.where(splittable, lp_score, -np.inf)
+                cand = int(np.argmax(lp_score))
+                if np.isfinite(lp_score[cand]) and lp_score[cand] > 0:
+                    axis = cand
+
+            if axis is not None:
+                pass  # boundary or LP-binding heuristic chose `axis`
+            elif depth >= pc_split_depth_threshold and w_idx >= 0:
                 widths = B.hi - B.lo
                 mid = (B.lo + B.hi) * 0.5
                 # Welford update: track cross-box centroid variance per axis.
@@ -693,6 +988,23 @@ def _worker_main(
 
     finally:
         _publish_stats()
+        # Optional: dump remaining in_flight boxes to a per-worker .npz file
+        # for post-mortem analysis of stuck/stall pathologies.
+        # Activated by env var INTERVAL_BNB_DUMP_BOXES=<prefix>; each worker
+        # writes <prefix>_w{worker_id}.npz with arrays lo, hi, depths.
+        _dump_prefix = os.environ.get('INTERVAL_BNB_DUMP_BOXES', '')
+        if _dump_prefix and local_stack:
+            try:
+                _los = np.asarray([B.lo for (B, _, _, _, _) in local_stack],
+                                   dtype=np.float64)
+                _his = np.asarray([B.hi for (B, _, _, _, _) in local_stack],
+                                   dtype=np.float64)
+                _deps = np.asarray([dep for (_, dep, _, _, _) in local_stack],
+                                    dtype=np.int64)
+                np.savez(f'{_dump_prefix}_w{worker_id}.npz',
+                         lo=_los, hi=_his, depths=_deps)
+            except Exception:
+                pass
         if local_max_depth > 0:
             try:
                 stats_queue.put_nowait({
@@ -706,6 +1018,12 @@ def _worker_main(
                     "cctr_rlt_certs": local_cctr_rlt_certs,
                     "epi_attempts": local_epi_attempts,
                     "epi_certs": local_epi_certs,
+                    "anchor_attempts": local_anchor_attempts,
+                    "anchor_certs": local_anchor_certs,
+                    "centroid_attempts": local_centroid_attempts,
+                    "centroid_certs": local_centroid_certs,
+                    "sdp_attempts": local_sdp_attempts,
+                    "sdp_certs": local_sdp_certs,
                 })
             except Exception:
                 pass
@@ -888,8 +1206,18 @@ def parallel_branch_and_bound(
         # therefore depends on `failed_event` being correctly set on any
         # uncertified termination, which it is at every break path.
         done_event.set()
+        # First pass: short join to catch workers already at the loop
+        # guard. Second pass: longer wait for workers mid-LP-solve so
+        # their `_publish_stats` flush in the `finally` block can land
+        # before we resort to `terminate()` (which bypasses `finally`
+        # and loses any local_vol / local_cert / local_nodes accumulated
+        # since the last 500-node publish).
         for p in procs:
             p.join(timeout=5.0)
+        for p in procs:
+            if p.is_alive():
+                p.join(timeout=30.0)
+        for p in procs:
             if p.is_alive():
                 p.terminate()
                 p.join(timeout=2.0)
@@ -914,9 +1242,27 @@ def parallel_branch_and_bound(
         "attempts": sum(s.get("epi_attempts", 0) for s in stats_items),
         "certs": sum(s.get("epi_certs", 0) for s in stats_items),
     }
+    anchor_stats = {
+        "attempts": sum(s.get("anchor_attempts", 0) for s in stats_items),
+        "certs": sum(s.get("anchor_certs", 0) for s in stats_items),
+    }
+    centroid_stats = {
+        "attempts": sum(s.get("centroid_attempts", 0) for s in stats_items),
+        "certs": sum(s.get("centroid_certs", 0) for s in stats_items),
+    }
+    sdp_stats = {
+        "attempts": sum(s.get("sdp_attempts", 0) for s in stats_items),
+        "certs": sum(s.get("sdp_certs", 0) for s in stats_items),
+    }
 
     elapsed = time.time() - t0
     cvol_final = closed_vol.value
+    # SOUNDNESS NOTE: `coverage_fraction` is for progress display only.
+    # The denominator `total_volume` is the sum of starter-box
+    # HYPERRECTANGLE volumes (Box.volume), not vol(B ∩ Δ_d), so the
+    # ratio is informational. Soundness of val(d) >= target is
+    # established by  `success == True`  i.e.  failed_event NOT set
+    # AND in_flight_final == 0, NOT by coverage_fraction.
     result = {
         "success": ok,
         "target_q": str(target_c) if isinstance(target_c, Fraction) else str(target_c),
@@ -934,6 +1280,9 @@ def parallel_branch_and_bound(
     }
     result["cctr_stats"] = cctr_stats
     result["epi_stats"] = epi_stats
+    result["anchor_stats"] = anchor_stats
+    result["centroid_stats"] = centroid_stats
+    result["sdp_stats"] = sdp_stats
     if verbose:
         print(f"[par] DONE success={ok} elapsed={elapsed:.1f}s  "
               f"nodes={result['total_nodes']}  cert={result['total_leaves_certified']}  "
@@ -946,4 +1295,10 @@ def parallel_branch_and_bound(
                   f"RLT: {cctr_stats['rlt_certs']}/{cctr_stats['rlt_attempts']}")
         if epi_stats["attempts"] > 0:
             print(f"[par] EPIGRAPH: certs={epi_stats['certs']}/{epi_stats['attempts']}")
+        if anchor_stats["attempts"] > 0:
+            print(f"[par] ANCHOR: certs={anchor_stats['certs']}/{anchor_stats['attempts']}")
+        if centroid_stats["attempts"] > 0:
+            print(f"[par] CENTROID: certs={centroid_stats['certs']}/{centroid_stats['attempts']}")
+        if sdp_stats["attempts"] > 0:
+            print(f"[par] SDP-ESCALATION: certs={sdp_stats['certs']}/{sdp_stats['attempts']}")
     return result
