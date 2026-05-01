@@ -48,7 +48,7 @@ from .windows import WindowMeta, build_windows
 
 
 def rigor_replay(
-    B: Box, w: WindowMeta, d: int, which: str, target_q: Fraction,
+    B: Box, w: WindowMeta, d: int, target_q: Fraction,
     *, try_joint: bool = False,
 ) -> bool:
     """Exact integer-arithmetic rigor gate.
@@ -87,7 +87,7 @@ def rigor_replay(
 
 
 def rigor_replay_with_cctr(
-    B: Box, w_winner: WindowMeta, d: int, which: str, target_q: Fraction,
+    B: Box, w_winner: WindowMeta, d: int, target_q: Fraction,
     *, alt_windows: Sequence[WindowMeta] = (),
     cctr_M_int=None, cctr_D_M: int = 0,
     try_joint: bool = False,
@@ -103,7 +103,7 @@ def rigor_replay_with_cctr(
     tn = target_q.numerator
     td = target_q.denominator
     # Standard rigor (natural / autoconv / SW / NE / optionally joint-face).
-    if rigor_replay(B, w_winner, d, which, target_q, try_joint=try_joint):
+    if rigor_replay(B, w_winner, d, target_q, try_joint=try_joint):
         return True
     # P1-LITE top-K joint-face on alternate windows.
     from .bound_eval import bound_mccormick_joint_face_dual_cert_int_ge
@@ -133,7 +133,7 @@ def rigor_replay_with_cctr(
 
 
 def rigor_replay_topk_joint(
-    B: Box, w_winner: WindowMeta, d: int, which: str, target_q: Fraction,
+    B: Box, w_winner: WindowMeta, d: int, target_q: Fraction,
     *, alt_windows: Sequence[WindowMeta] = (),
 ) -> bool:
     """P1-LITE: rigor replay with top-K alternate-window joint-face fallback.
@@ -158,7 +158,7 @@ def rigor_replay_topk_joint(
     lo_int, hi_int = B.to_ints()
     tn = target_q.numerator
     td = target_q.denominator
-    if rigor_replay(B, w_winner, d, which, target_q, try_joint=True):
+    if rigor_replay(B, w_winner, d, target_q, try_joint=True):
         return True
     # Alternate-window joint-face dual cert.
     from .bound_eval import bound_mccormick_joint_face_dual_cert_int_ge
@@ -173,7 +173,7 @@ def rigor_replay_topk_joint(
 
 
 def rigor_replay_fraction(
-    B: Box, w: WindowMeta, d: int, which: str, target_q: Fraction,
+    B: Box, w: WindowMeta, d: int, target_q: Fraction,
 ) -> bool:
     """Legacy Fraction-based rigor gate. Retained for cross-check tests
     that the integer path is mathematically identical. Not used on the
@@ -241,7 +241,6 @@ def branch_and_bound(
     use_symmetry: bool = True,
     log_every: int = 10_000,
     time_budget_s: Optional[float] = None,
-    method: str = "combined",  # kept for API; batch path always = "combined"
     verbose: bool = True,
 ) -> BnBResult:
     """Run BnB. Returns BnBResult with stats."""
@@ -253,7 +252,7 @@ def branch_and_bound(
         d, target_c, initial,
         max_nodes=max_nodes, min_box_width=min_box_width,
         log_every=log_every, time_budget_s=time_budget_s,
-        verbose=verbose,
+        verbose=verbose, use_symmetry=use_symmetry,
     )
 
 
@@ -269,6 +268,7 @@ def branch_and_bound_from_box(
     verbose: bool = True,
     joint_depth_threshold: int = 20,
     tighten_depth_threshold: int = 15,
+    use_symmetry: bool = True,
 ) -> BnBResult:
     """Run BnB restricted to the given initial box. Used both as the
     single-shot entry point and as the per-worker driver in
@@ -319,8 +319,10 @@ def branch_and_bound_from_box(
 
         # H_d half-simplex pre-filter (proper sigma cut). Sound by
         # Lemma 3.4 (THEOREM.md): boxes with lo_int[0] > hi_int[d-1]
-        # have their sigma-image covered by another (sibling) box.
-        if box_outside_hd(B):
+        # have their sigma-image covered elsewhere in the BnB cover
+        # of {mu_0 <= 1/2}. Skipped when `use_symmetry=False` so the
+        # full-simplex cross-check can run without the symmetry cut.
+        if use_symmetry and box_outside_hd(B):
             continue
 
         # T3 re-enabled at depth threshold: tightens hi via simplex
@@ -333,17 +335,6 @@ def branch_and_bound_from_box(
                 parent_cache = None
                 if not B.intersects_simplex():
                     continue
-
-        # T3 (simplex box tightening) was REVERTED: benchmark on pod
-        # showed +40% wall-clock (75.3s vs 53.8s) at d=10 t=1.22 with
-        # IDENTICAL tree size. The McCormick LP already uses the
-        # simplex constraint implicitly, so tightening lo/hi didn't
-        # change the binding bound on hard boxes. Per-box O(d)
-        # overhead + rank-1 cache invalidation outweighed the (zero)
-        # tree shrink.
-        # Re-enable only if a tighter bound formulation makes the
-        # box-lo/hi actually binding -- e.g. a future RLT LP that
-        # reads lo/hi as coefficients (not just constraints).
 
         # Bounds (with rank-1 update if possible).
         if parent_cache is None:
@@ -371,11 +362,18 @@ def branch_and_bound_from_box(
 
         if lb_fast >= target_f:
             w = windows[w_idx]
-            # P2 SAFE-MARGIN SHORTCUT: float bound is mathematically equal to
-            # the integer-arithmetic bound (verified by inspection of
-            # bound_autoconv_int_ge / bound_mccormick_*_int_ge). Worst-case
-            # float64 accumulated error at d=20 is ~3.5e-13. Threshold 1e-9
-            # is 4 orders safer. Skips int rigor replay on the easy majority.
+            # P2 SAFE-MARGIN SHORTCUT: the autoconv and McCormick float
+            # bounds compute the same closed-form formula as their integer
+            # counterparts (bound_autoconv_int_ge, bound_mccormick_*_int_ge).
+            # Worst-case absolute disagreement is bounded by float64 +
+            # Numba `fastmath=True` reassociation error in the batched
+            # evaluator (`bound_eval._batch_min_linear_lb_only_numba`):
+            #   |lb_float - lb_int| <= O(d * depth * eps_machine)
+            # i.e. ~ d * 60 * 2.22e-16 ~ 6e-13 at d=22, depth=60. The 1e-9
+            # margin is 4 orders larger; this skips int rigor replay on the
+            # easy majority while staying safely above the worst-case
+            # float drift. NOT applied to joint-face (joint-face has its
+            # own rigor invocation inside rigor_replay).
             if (lb_fast - target_f) > 1e-9 and which in ("autoconv", "mccormick"):
                 stats.leaves_certified += 1
                 stats.window_usage[w_idx] = stats.window_usage.get(w_idx, 0) + 1
@@ -385,7 +383,7 @@ def branch_and_bound_from_box(
                     last_log = time.time()
                 continue
             certified = rigor_replay(
-                B, w, d, which, target_q,
+                B, w, d, target_q,
                 try_joint=(depth >= joint_depth_threshold),
             )
             if certified:
@@ -415,8 +413,28 @@ def branch_and_bound_from_box(
         # gradient anisotropy of the binding window.
         if depth >= 4 and w_idx >= 0:
             axis = gap_weighted_split_axis(B.lo, B.hi, windows[w_idx], d)
+            # Defensive: if gap_weighted picked a saturated axis, fall back.
+            if B.lo_int is not None and B.hi_int is not None \
+                    and (B.hi_int[axis] - B.lo_int[axis]) < 2:
+                axis = B.widest_splittable_axis()
         else:
-            axis = B.widest_axis()
+            axis = B.widest_splittable_axis()
+        if axis < 0:
+            # No axis is splittable — every axis exhausted dyadic depth.
+            # The bound did not certify (we'd have continued above), so
+            # this is an UNCERTIFIED leaf. Failing loudly is the correct
+            # rigor stance.
+            stats.wall_time_s = time.time() - t0
+            if verbose:
+                print(f"[bnb] FAIL: box at depth {depth} fully saturated "
+                      f"(no axis splittable) without certifying")
+                print(f"       lb_fast={lb_fast:.6f}  target={target_f:.6f}")
+                print(f"       {B.shape_summary()}")
+            return BnBResult(
+                success=False, target_q=target_q, target_float=target_f,
+                d=d, stats=_finalise(stats, t0),
+                failing_box=B, failing_lb=lb_fast,
+            )
         left, right = B.split(axis)
         stats.leaves_split += 1
         # Push RIGHT first so LEFT is processed first (LIFO). Both share
