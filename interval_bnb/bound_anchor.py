@@ -1217,52 +1217,62 @@ def _anchor_lb_at_point_int_ge(
 def _build_anchor_points_int(
     lo_int: Sequence[int], hi_int: Sequence[int], d: int, SCALE: int,
 ) -> List[List[int]]:
-    """Generate a list of integer anchor points p in B ∩ Delta_d, each
-    at denom SCALE with sum exactly SCALE (round-down construction with
-    deterministic residual handed to the largest free axis).
+    """Generate a list of integer anchor points p (each at denom SCALE).
 
-    Anchors generated:
-      0. Box centroid p_0 = (lo + hi) // 2 (then rebalanced to sum=SCALE).
-      1. Free-axis-concentrated corner: p_1[i] = hi[i] for i in F (free
-         = lo[i] > 0), p_1[i] = lo[i] for i in B (boundary). Rescale to
-         sum = SCALE while remaining inside [lo, hi].
-      2. Boundary-spread corner: p_2[i] = (lo[i] + hi[i]) // 2 for i in F,
-         p_2[i] = hi[i] for i in B. Rescale to sum = SCALE.
-      3. Single-axis corners: for each j in F, p_3j with mass concentrated
-         on j (clipped to [lo[j], hi[j]]), other free axes at lo[i]
-         (boundary axes always at lo[i] = 0).
+    SOUNDNESS NOTE: the per-anchor LB
+        f(mu) >= TV_W(p) + g_p . (mu - p) + min(0, scale_W * lambda_min(A_W)) * D2_centered(B, p)
+    holds for ANY anchor p in R^d (not just p in B ∩ Delta_d). The
+    Taylor identity is global; the curvature concession bounds
+    ||mu - p||^2 by D2_centered(B, p) for all mu in B (each axis
+    independently). So we have flexibility in choosing p — in
+    particular, the box centroid mu_c := (lo+hi)/2 need NOT lie on the
+    simplex for the cert to be sound. Choosing p in B ∩ Delta_d is
+    desirable for tightness (smaller D2, better g_p alignment) but
+    not required for soundness.
 
-    Each generated point is FORCIBLY clamped to [lo, hi] and rescaled
-    so its components sum exactly to SCALE. If the box has sum(lo)
-    > SCALE or sum(hi) < SCALE the box-simplex intersection is empty;
-    in that case the centroid alone is returned and the downstream
-    cert recognises the vacuous case.
+    Anchors generated (each at denom SCALE):
+      0. Box centroid p_0 = (lo + hi) // 2. Always included; matches
+         exactly the anchor used by `bound_anchor_centroid_int_ge`,
+         guaranteeing multi-corner OR is at least as strong as that
+         cert. p_0 may NOT lie on the simplex — the cert is still
+         sound (see SOUNDNESS NOTE above).
+      1. Free-axis-concentrated point: p_1[i] = hi[i] on free axes
+         (lo[i] > 0), p_1[i] = lo[i] on boundary axes. Then PROJECTED
+         onto the simplex (sum = SCALE) by trimming/extending free
+         axes to keep the point in [lo, hi]. Skipped if the box-simplex
+         intersection is empty.
+      2. Boundary-spread point: p_2[i] = midpoint on free axes,
+         p_2[i] = hi[i] on boundary axes. Projected onto sum = SCALE.
+      3. Single-axis points (one per free axis j): mass concentrated
+         on j (clipped to [lo[j], hi[j]]), other axes at lo[i].
+         Projected onto sum = SCALE.
 
-    All construction is in INTEGER arithmetic at denom SCALE; no float
-    rounding errors. SOUNDNESS: the cert per-anchor is sound for ANY
-    p in B ∩ Delta_d, so we only need each generated p to lie in the
-    box and sum to SCALE. Points that fail the simplex constraint are
-    skipped (they would just be wasted compute, not unsound).
+    Anchors 1-3 are skipped if projection cannot reach sum = SCALE
+    while staying in the box (which signals box-simplex empty); this
+    leaves only the centroid-style anchor 0.
     """
     pts: List[List[int]] = []
     lo_sum = sum(lo_int)
     hi_sum = sum(hi_int)
-    if lo_sum > SCALE or hi_sum < SCALE:
-        # Vacuous: just return centroid; downstream will detect empty.
-        return [[(lo_int[i] + hi_int[i]) >> 1 for i in range(d)]]
 
-    # Free axes: lo[i] > 0. We treat axis i as "boundary" if lo_int[i] == 0
-    # and lo_int[i] is at denom SCALE (so == 0 means truly at the boundary).
+    # 0. Box centroid — always included (matches the centroid cert).
+    p0 = [(lo_int[i] + hi_int[i]) >> 1 for i in range(d)]
+    pts.append(p0)
+
+    # If box-simplex is empty, only p0 is meaningful (downstream LB
+    # routine will short-circuit on empty).
+    if lo_sum > SCALE or hi_sum < SCALE:
+        return pts
+
+    # Free axes: lo[i] > 0. Boundary axes: lo[i] == 0.
     F: List[int] = [i for i in range(d) if lo_int[i] > 0]
     Bset: List[int] = [i for i in range(d) if lo_int[i] == 0]
 
     def _project_to_box_and_sum(raw: List[int]) -> Optional[List[int]]:
-        """Clamp `raw` to [lo, hi] elementwise; if total < SCALE, distribute
-        residual (in priority order: free axes with most slack first); if
-        total > SCALE, subtract from axes with most slack first. Returns
-        list of ints summing to SCALE, all in [lo[i], hi[i]], or None if
-        the box-simplex constraints cannot be reconciled (which only
-        occurs when lo_sum > SCALE or hi_sum < SCALE — already handled).
+        """Clamp `raw` to [lo, hi] elementwise; if total != SCALE,
+        redistribute (in priority order). Returns list of ints summing
+        to SCALE with all components in [lo[i], hi[i]], or None if no
+        such projection exists (box-simplex empty).
         """
         p = [max(lo_int[i], min(hi_int[i], raw[i])) for i in range(d)]
         s = sum(p)
@@ -1270,7 +1280,6 @@ def _build_anchor_points_int(
             return p
         if s < SCALE:
             need = SCALE - s
-            # Distribute to axes with most upward slack: hi - p.
             order = sorted(
                 range(d), key=lambda i: -(hi_int[i] - p[i])
             )
@@ -1282,9 +1291,8 @@ def _build_anchor_points_int(
                 p[i] += add
                 need -= add
             if need > 0:
-                return None  # cannot reach SCALE — should not happen
+                return None
             return p
-        # s > SCALE: subtract from axes with most downward slack: p - lo.
         excess = s - SCALE
         order = sorted(
             range(d), key=lambda i: -(p[i] - lo_int[i])
@@ -1300,17 +1308,12 @@ def _build_anchor_points_int(
             return None
         return p
 
-    # 0. Centroid (always include)
-    raw0 = [(lo_int[i] + hi_int[i]) >> 1 for i in range(d)]
-    p0 = _project_to_box_and_sum(raw0)
-    if p0 is not None:
-        pts.append(p0)
-
     # 1. Free-axis-concentrated corner: hi on F, lo on B.
     if F:
-        raw1 = [hi_int[i] if i in set(F) else lo_int[i] for i in range(d)]
+        F_set = set(F)
+        raw1 = [hi_int[i] if i in F_set else lo_int[i] for i in range(d)]
         p1 = _project_to_box_and_sum(raw1)
-        if p1 is not None:
+        if p1 is not None and p1 != p0:
             pts.append(p1)
 
     # 2. Boundary-spread corner: midpoint on F, hi on B.
@@ -1321,18 +1324,17 @@ def _build_anchor_points_int(
             for i in range(d)
         ]
         p2 = _project_to_box_and_sum(raw2)
-        if p2 is not None:
+        if p2 is not None and p2 != p0:
             pts.append(p2)
 
     # 3. Single-axis corners: for each j in F, push max mass onto j.
+    sum_lo = sum(lo_int)
     for j in F:
         raw3 = [lo_int[i] for i in range(d)]
-        # raw3[j] gets remaining mass = SCALE - sum(lo) + lo[j], clipped
-        # to [lo[j], hi[j]].
-        target_j = SCALE - (sum(lo_int) - lo_int[j])
+        target_j = SCALE - (sum_lo - lo_int[j])
         raw3[j] = max(lo_int[j], min(hi_int[j], target_j))
         p3 = _project_to_box_and_sum(raw3)
-        if p3 is not None:
+        if p3 is not None and p3 not in pts:
             pts.append(p3)
 
     return pts
@@ -1428,10 +1430,11 @@ def bound_anchor_multi_corner_int_ge(
     pts = _build_anchor_points_int(lo_int, hi_int, d, SCALE)
 
     for p_int in pts:
-        # Defensive: ensure p is in [lo, hi] and sums to SCALE.
-        s = sum(p_int)
-        if s != SCALE:
-            continue
+        # The cert is sound for ANY p (Taylor identity is global). We
+        # only require p in [lo, hi] (so D2_centered is correct) — we do
+        # NOT require sum(p) == SCALE. The box centroid (lo+hi)//2 in
+        # particular may not lie on the simplex; this matches the
+        # convention in `bound_anchor_centroid_int_ge`.
         ok = True
         for i in range(d):
             if p_int[i] < lo_int[i] or p_int[i] > hi_int[i]:
