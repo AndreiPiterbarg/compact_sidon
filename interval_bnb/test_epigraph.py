@@ -27,6 +27,8 @@ if _REPO not in sys.path:
 
 from interval_bnb.bound_epigraph import (
     bound_epigraph_lp_float, bound_epigraph_int_ge,
+    _solve_epigraph_lp, _publication_cushion,
+    _HIGHS_TOL_CUSHION, _DUAL_FEAS_TOL,
 )
 from interval_bnb.bound_eval import _adjacency_matrix
 from interval_bnb.box import SCALE as _SCALE
@@ -88,14 +90,12 @@ def test_epigraph_int_cert_agrees_with_float():
     cert_low = bound_epigraph_int_ge(
         lo_int, hi_int, windows, d,
         target_low.numerator, target_low.denominator,
-        safety_only=True,
     )
     # Test target just above (should not certify).
     target_high = Fraction.from_float(lp_val + 1e-4).limit_denominator(10**10)
     cert_high = bound_epigraph_int_ge(
         lo_int, hi_int, windows, d,
         target_high.numerator, target_high.denominator,
-        safety_only=True,
     )
     if not cert_low:
         print(f"[T2 FAIL] target_low={float(target_low):.8f} (< {lp_val:.8f}) "
@@ -166,7 +166,6 @@ def test_d4_known_optimum():
     cert = bound_epigraph_int_ge(
         lo_int, hi_int, windows, d,
         target.numerator, target.denominator,
-        safety_only=True,
     )
     lp_val = bound_epigraph_lp_float(lo_f, hi_f, windows, d)
     print(f"[T5] d=4 mu* tiny box, target=1.10:")
@@ -181,7 +180,6 @@ def test_d4_known_optimum():
     cert_high = bound_epigraph_int_ge(
         lo_int, hi_int, windows, d,
         target_too_high.numerator, target_too_high.denominator,
-        safety_only=True,
     )
     if cert_high:
         print(f"[T5 FAIL] wrongly certified target=1.12 > val(4)")
@@ -218,8 +216,7 @@ def test_epigraph_breaks_d10_stall():
         cert = bound_epigraph_int_ge(
             lo_int, hi_int, windows, d,
             target.numerator, target.denominator,
-            safety_only=True,
-        )
+            )
         # Per-window joint-face for comparison
         from interval_bnb.bound_eval import bound_mccormick_joint_face_lp
         best_jf = float("-inf")
@@ -238,6 +235,123 @@ def test_epigraph_breaks_d10_stall():
     return closed
 
 
+def test_rigor_cushion_above_dual_residual_d4():
+    """T7 (publication-rigor): solving an LP at d=4, the HiGHS-reported
+    residuals (eq + ineq) must be << publication cushion.
+
+    This is a SOUNDNESS test on the cushion size: at the requested
+    HiGHS tolerance ε_d = 1e-9, residuals ≤ ε_d should be observed in
+    practice on a healthy LP, and the cushion 100·ε_d = 1e-7 is the
+    safety multiplier on top.
+    """
+    d = 4
+    windows = build_windows(d)
+    mu_star = np.array([1/3, 1/6, 1/6, 1/3])
+    radius = 1e-3
+    lo_f = mu_star - radius
+    hi_f = mu_star + radius
+    n_y = d * d
+    n_vars = n_y + d + 1
+    n_ineq = 4 * n_y + len(windows) + 1 + d
+    cushion = _publication_cushion(d, n_vars, n_ineq)
+
+    out = _solve_epigraph_lp(lo_f, hi_f, windows, d, return_residuals=True)
+    lp_val = out[0]
+    max_eq = out[5]
+    max_ineq = out[6]
+    assert np.isfinite(lp_val), "LP must succeed at the canonical d=4 box"
+    # Residuals should be VERY much smaller than cushion (cushion is 1e-7,
+    # residuals at ε_d=1e-9 should be ≤ 1e-9, i.e. 100x headroom).
+    assert max_eq <= cushion, (
+        f"max_eq_resid={max_eq:.3e} > cushion={cushion:.3e}"
+    )
+    assert max_ineq <= cushion, (
+        f"max_ineq_resid={max_ineq:.3e} > cushion={cushion:.3e}"
+    )
+    # Stronger: residuals should fit a 10× headroom over the 1e-9 tol.
+    # (If this trips, HiGHS may have changed its tolerance handling.)
+    headroom = 1e-8
+    assert max_eq <= headroom, (
+        f"max_eq_resid={max_eq:.3e} exceeds 10x ε_d headroom — "
+        f"HiGHS reported worse than expected"
+    )
+    assert max_ineq <= headroom, (
+        f"max_ineq_resid={max_ineq:.3e} exceeds 10x ε_d headroom"
+    )
+    print(f"[T7 PASS] d=4 LP: lp_val={lp_val:.6f}, "
+          f"max_eq={max_eq:.2e}, max_ineq={max_ineq:.2e}, "
+          f"cushion={cushion:.2e}")
+    return True
+
+
+def test_rigor_cushion_actually_blocks_borderline_cert_d4():
+    """T8 (publication-rigor): a borderline target (lp_val - 5e-8) must
+    NOT certify because the new 1e-7 cushion is the binder.
+
+    This is a NEGATIVE test confirming the cushion is the active
+    constraint for borderline certs (the old 5e-11 arith-only safety
+    would have certified this incorrectly).
+    """
+    d = 4
+    windows = build_windows(d)
+    mu_star = np.array([1/3, 1/6, 1/6, 1/3])
+    radius = 1e-3
+    lo_f = mu_star - radius
+    hi_f = mu_star + radius
+    lo_int, hi_int = _ints_from_floats(lo_f, hi_f)
+
+    lp_val = bound_epigraph_lp_float(lo_f, hi_f, windows, d)
+    assert np.isfinite(lp_val) and lp_val > 0
+    # Pick target = lp_val - 5e-8 (between arith safety 5e-11 and cushion 1e-7)
+    target_borderline = lp_val - 5e-8
+    target_q = Fraction(target_borderline).limit_denominator(10**14)
+    cert = bound_epigraph_int_ge(
+        lo_int, hi_int, windows, d,
+        target_q.numerator, target_q.denominator,
+    )
+    # The new cushion (1e-7) must block this cert.
+    assert not cert, (
+        f"[T8 FAIL] borderline target {float(target_q):.10f} "
+        f"(lp_val={lp_val:.10f}, gap={lp_val - float(target_q):.3e}) "
+        f"was wrongly certified — cushion did not bind"
+    )
+    print(f"[T8 PASS] borderline target (gap=5e-8) blocked by 1e-7 cushion")
+    return True
+
+
+def test_rigor_cushion_passes_genuine_certs_d4():
+    """T9 (publication-rigor): genuine known-good certs at d=4 t=1.05
+    still go through with the new larger cushion."""
+    d = 4
+    windows = build_windows(d)
+    mu_star = np.array([1/3, 1/6, 1/6, 1/3])
+    # tight box around d=4 mu*; val(4) = 10/9 ≈ 1.1111, comfortably > 1.05
+    radius = 1e-4
+    lo_f = mu_star - radius
+    hi_f = mu_star + radius
+    lo_int, hi_int = _ints_from_floats(lo_f, hi_f)
+
+    target = Fraction(105, 100)  # 1.05
+    cert = bound_epigraph_int_ge(
+        lo_int, hi_int, windows, d,
+        target.numerator, target.denominator,
+    )
+    assert cert, (
+        f"[T9 FAIL] genuine cert at d=4, t=1.05 refused by new 1e-7 cushion"
+    )
+    # Also try slightly looser target.
+    target2 = Fraction("1.10")
+    cert2 = bound_epigraph_int_ge(
+        lo_int, hi_int, windows, d,
+        target2.numerator, target2.denominator,
+    )
+    assert cert2, (
+        f"[T9 FAIL] genuine cert at d=4, t=1.10 refused"
+    )
+    print(f"[T9 PASS] cert at 1.05 ✓, cert at 1.10 ✓ (genuine certs preserved)")
+    return True
+
+
 def main():
     print("="*60)
     print("EPIGRAPH bound: soundness + stall-closure tests")
@@ -249,6 +363,12 @@ def main():
         ("test_epigraph_strictly_tighter_than_jointface", test_epigraph_strictly_tighter_than_jointface),
         ("test_d4_known_optimum", test_d4_known_optimum),
         ("test_epigraph_breaks_d10_stall", test_epigraph_breaks_d10_stall),
+        ("test_rigor_cushion_above_dual_residual_d4",
+         test_rigor_cushion_above_dual_residual_d4),
+        ("test_rigor_cushion_actually_blocks_borderline_cert_d4",
+         test_rigor_cushion_actually_blocks_borderline_cert_d4),
+        ("test_rigor_cushion_passes_genuine_certs_d4",
+         test_rigor_cushion_passes_genuine_certs_d4),
     ]:
         try:
             ok = fn()

@@ -343,6 +343,41 @@ def test_extra_cuts_d20_stuck_box():
     )
 
 
+def test_extra_cuts_with_publication_cushion_at_d4():
+    """Smoke check: with the new publication-grade 1e-7 cushion in
+    bound_epigraph_int_ge, known-good d=4 certs still pass.
+
+    This guards against a regression where the larger cushion would
+    silently block previously-passing certs that the extra-cut soundness
+    framework depends on.
+    """
+    from fractions import Fraction
+    from interval_bnb.bound_epigraph import bound_epigraph_int_ge
+    from interval_bnb.box import SCALE as _SCALE
+    d = 4
+    windows = build_windows(d)
+    mu_star = np.array([1/3, 1/6, 1/6, 1/3])
+    radius = 1e-3
+    lo_f = mu_star - radius
+    hi_f = mu_star + radius
+    lo_int = [int(round(x * _SCALE)) for x in lo_f]
+    hi_int = [int(round(x * _SCALE)) for x in hi_f]
+    # val(4) = 10/9 ≈ 1.1111, so target=1.05 must cert with the new cushion.
+    target = Fraction(105, 100)
+    cert = bound_epigraph_int_ge(
+        lo_int, hi_int, windows, d,
+        target.numerator, target.denominator,
+    )
+    assert cert, "[regression] d=4 t=1.05 cert refused under publication cushion"
+    # And target=1.10 (closer to val(4)=10/9 but still safely below it).
+    target2 = Fraction(110, 100)
+    cert2 = bound_epigraph_int_ge(
+        lo_int, hi_int, windows, d,
+        target2.numerator, target2.denominator,
+    )
+    assert cert2, "[regression] d=4 t=1.10 cert refused under publication cushion"
+
+
 if __name__ == "__main__":
     test_extra_cuts_soundness()
     print("soundness ok")
