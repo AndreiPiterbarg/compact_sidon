@@ -79,17 +79,31 @@ _DUAL_SDP_API = None
 
 
 def _import_dual_sdp_api():
-    """Vendored / proxy access to lasserre.dual_sdp helpers + precompute."""
+    """Vendored / proxy access to lasserre.dual_sdp helpers + precompute.
+
+    Hash utilities come from `lasserre.core` (NOT `tests/lasserre_fusion`)
+    because `lasserre.precompute` uses the core variant — at d>=22 the
+    core impl switches to a Mersenne-prime split-base hash to avoid
+    int64 overflow, while the lasserre_fusion impl uses naive int64
+    tensordot which gives DIFFERENT hash values. Mismatch causes the
+    moment-matrix lookup to return -1 spuriously at d=22+.
+    """
     global _DUAL_SDP_API
     if _DUAL_SDP_API is None:
         from lasserre.precompute import _precompute
         from lasserre.dual_sdp import (
             _aggregate_bar_triplet, _aggregate_scalar_triplet,
-            _alpha_lookup, solve_dual_task, update_task_t,
+            solve_dual_task, update_task_t,
         )
-        # Hash utilities — same source dual_sdp uses.
-        sys.path.insert(0, os.path.join(_REPO, 'tests'))
-        from lasserre_fusion import _hash_monos, _hash_lookup
+        from lasserre.core import _hash_monos, _hash_lookup
+
+        def _alpha_lookup(alpha_hash, sorted_h, sort_o, old_to_new=None):
+            raw = _hash_lookup(alpha_hash, sorted_h, sort_o)
+            if old_to_new is None:
+                return raw
+            out = np.where(raw < 0, -1, old_to_new[np.maximum(raw, 0)])
+            return out
+
         _DUAL_SDP_API = {
             '_precompute': _precompute,
             '_aggregate_bar_triplet': _aggregate_bar_triplet,
@@ -138,6 +152,7 @@ def _build_dual_task_box(
     mono_idx = P['idx']
     M_mats = P['M_mats']
     bases_arr = np.asarray(P['bases'], dtype=np.int64)
+    prime = P.get('prime')
     sorted_h = np.asarray(P['sorted_h'])
     sort_o = np.asarray(P['sort_o'])
     consist_mono = P['consist_mono']
@@ -297,7 +312,7 @@ def _build_dual_task_box(
 
     # Moment cone: single n_basis × n_basis BAR; coef = +1 at α=loc[k]+loc[l].
     B_arr = np.asarray(basis, dtype=np.int64)
-    B_hash = _hash_monos(B_arr, bases_arr)
+    B_hash = _hash_monos(B_arr, bases_arr, prime)
     ks_m, ls_m = np.tril_indices(n_basis)
     alpha_hash_m = B_hash[ks_m] + B_hash[ls_m]
     alpha_idx_m = _alpha_lookup(alpha_hash_m, sorted_h, sort_o, old_to_new_arr)
@@ -312,7 +327,7 @@ def _build_dual_task_box(
 
     # Localizing prep: hashes for loc_basis tabulation.
     L_arr = np.asarray(loc_basis, dtype=np.int64)
-    L_hash = _hash_monos(L_arr, bases_arr)
+    L_hash = _hash_monos(L_arr, bases_arr, prime)
     ks_l, ls_l = np.tril_indices(n_loc)
     base_hash_loc = L_hash[ks_l] + L_hash[ls_l]  # α = loc[k] + loc[l]
     alpha_idx_loc0 = _alpha_lookup(
