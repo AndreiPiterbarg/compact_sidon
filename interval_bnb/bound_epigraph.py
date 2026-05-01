@@ -217,6 +217,86 @@ def _solve_epigraph_lp(lo, hi, windows, d, *, return_residuals: bool = False):
     where max_eq_resid = max(|A_eq x* - b_eq|) and
     max_ineq_resid = max((A_ub x* - b_ub)_+). On LP failure both are
     +inf so the caller's "residuals exceed cushion" check refuses cert.
+
+    -------------------------------------------------------------------
+    ACTIVE CUTS — full inventory (all sound on Δ_d ∩ box, with Y = μμᵀ)
+    -------------------------------------------------------------------
+
+    Inequality constraints (n_ineq = 4*n_y + n_W + 1 + d):
+
+      [SW] Y_{i,j} ≥ lo_j μ_i + lo_i μ_j − lo_i lo_j         (n_y rows)
+        Bilinear-McCormick LB at the SW corner of [lo_i,hi_i]×[lo_j,hi_j].
+        Tight when (μ_i, μ_j) = (lo_i, lo_j).
+
+      [NE] Y_{i,j} ≥ hi_j μ_i + hi_i μ_j − hi_i hi_j         (n_y rows)
+        Bilinear-McCormick LB at the NE corner.
+        Tight when (μ_i, μ_j) = (hi_i, hi_j).
+
+      [NW] Y_{i,j} ≤ lo_j μ_i + hi_i μ_j − lo_j hi_i         (n_y rows)
+        Bilinear-McCormick UB connecting NW corner.
+        For i = j this reduces to the secant chord
+            Y_{i,i} ≤ (lo_i + hi_i) μ_i − lo_i hi_i
+        which is the tightest LP UB on a univariate convex μ_i².
+
+      [SE] Y_{i,j} ≤ hi_j μ_i + lo_i μ_j − hi_j lo_i         (n_y rows)
+        Bilinear-McCormick UB connecting SE corner.
+
+      [EPI_W] z ≥ scale_W · Σ_{(i,j) ∈ S_W} Y_{i,j}          (n_W rows)
+        Per-window epigraph defining z = max_W TV_W. Couples ALL
+        windows via shared Y, closing the minimax–maximin gap.
+
+      [C3] Σ_i Y_{i,i} ≥ 1/d                                  (1 row)
+        Diagonal Cauchy–Schwarz (a.k.a. SOS). On the simplex
+            Σ μ_i² ≥ (Σ μ_i)² / d = 1/d.
+        Tight at uniform μ = (1/d, …, 1/d).
+
+      [C4] Y_{i,i} ≥ 2 m_i μ_i − m_i²,  m_i = (lo_i+hi_i)/2  (d rows)
+        Univariate convex tangent at midpoint m_i, since
+            μ_i² ≥ 2 m_i μ_i − m_i².
+        Tight at μ_i = m_i. Stronger than SW (i,i) and NE (i,i)
+        when μ_i lies between lo_i and hi_i.
+
+    Equality constraints (n_eq = 1 + 2d + d(d−1)/2):
+
+      [SIMP] Σ_i μ_i = 1                                      (1 row)
+        Probability-simplex equality. Foundational; without it the
+        whole pipeline collapses.
+
+      [RLT_R] Σ_j Y_{i,j} = μ_i, ∀ i                          (d rows)
+        Reformulation–Linearization Technique row-sum. Sums of
+        Y over a row equal μ. Implies (with SIMP) that
+            Σ_{i,j} Y_{i,j} = 1,
+        so a stand-alone "sum Y = 1" cut would be REDUNDANT.
+
+      [C1 / RLT_C] Σ_i Y_{i,j} = μ_j, ∀ j                     (d rows)
+        RLT column-sum. Independent of RLT_R only because the LP
+        does NOT enforce Y symmetry by default — pairs C1 with C2
+        below.
+
+      [C2] Y_{i,j} = Y_{j,i}, ∀ i < j                         (d(d−1)/2 rows)
+        Y-symmetry. Holds for Y = μμᵀ. Reduces the LP relaxation's
+        degrees of freedom and directly tightens the bound.
+
+    -------------------------------------------------------------------
+    Why no further obvious LP cut tightens the bound:
+      • "Σ_{i,j} Y_{i,j} = 1" — implied by SIMP + RLT_R.
+      • "Σ_{(i,j) ∈ S_W} Y_{i,j} ≥ ..." per-window linear bounds
+        beyond the McCormick faces — already enforced via the SW/NE
+        inequalities for individual pairs in S_W, and an aggregated
+        sum bound is tighter only if it removes a bilinear product
+        (which an LP cannot).
+      • "Y_{i,i} ≤ hi_i μ_i" / "Y_{i,j} ≤ hi_i μ_j" — these line
+        bounds are LOOSER than the McCormick NW/SE faces (verified
+        algebraically: NW = hi_i μ_j + lo_j (μ_i − hi_i), and
+        lo_j (μ_i − hi_i) ≤ 0 since μ_i ≤ hi_i, so NW ≤ hi_i μ_j).
+      • "Y_{i,i} ≥ lo_i μ_i" — LOOSER than SW (i,i), which gives
+        Y_{i,i} ≥ 2 lo_i μ_i − lo_i².
+      • "Y_{i,j}² ≤ Y_{i,i} Y_{j,j}" (PSD 2×2 minor) — bilinear,
+        not LP-expressible.
+
+    Soundness: each cut is a polynomial inequality in (μ, Y) that
+    holds for every μ ∈ Δ_d ∩ [lo, hi] with Y = μμᵀ — so the LP
+    feasible set still contains every box-feasible (μ, μμᵀ, max_W TV_W).
     """
     from scipy.optimize import linprog
     from scipy.sparse import csr_matrix, coo_matrix
