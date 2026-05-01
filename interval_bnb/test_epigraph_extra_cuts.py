@@ -378,6 +378,211 @@ def test_extra_cuts_with_publication_cushion_at_d4():
     assert cert2, "[regression] d=4 t=1.10 cert refused under publication cushion"
 
 
+# ---------------------------------------------------------------------
+# AUDIT tests: verify each documented cut is actually enforced at LP
+# optimum on real boxes. These guard against silent indexing bugs that
+# would let a constraint be skipped without changing the LP value
+# noticeably (since other constraints often dominate at the optimum).
+# ---------------------------------------------------------------------
+
+def _solve_and_extract_xstar(lo, hi, windows, d):
+    """Solve the production LP and return the primal optimum
+    x* = (Y_flat, μ, z), reusing the same builder as `_solve_epigraph_lp`
+    via a sibling linprog call. Returns (Y, μ, z) or None on LP failure.
+    """
+    from scipy.optimize import linprog
+    A_ub, b_ub, A_eq, b_eq, bnds_lo, bnds_hi = _build_constraints(lo, hi, windows, d)
+    n_y = d * d
+    n_vars = n_y + d + 1
+    z_idx = n_y + d
+    bnds = [(float(bnds_lo[i]),
+             None if not np.isfinite(bnds_hi[i]) else float(bnds_hi[i]))
+            for i in range(n_vars)]
+    c = np.zeros(n_vars); c[z_idx] = 1.0
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+                  bounds=bnds, method="highs",
+                  options={
+                      "primal_feasibility_tolerance": 1e-9,
+                      "dual_feasibility_tolerance": 1e-9,
+                      "ipm_optimality_tolerance": 1e-10,
+                  })
+    if not res.success:
+        return None
+    x = np.asarray(res.x, dtype=np.float64)
+    Y = x[:n_y].reshape(d, d)
+    mu = x[n_y:n_y + d]
+    z = float(x[z_idx])
+    return Y, mu, z
+
+
+def _audit_boxes():
+    """Yield (label, lo, hi, d, windows) for the audit suite — diverse
+    boxes that exercise both interior and boundary configurations.
+    """
+    # Interior box, small d
+    d = 4
+    windows = build_windows(d)
+    mu_star = np.array([1/3, 1/6, 1/6, 1/3])
+    radius = 1e-3
+    yield ("d4-interior", np.maximum(mu_star - radius, 0.0),
+           np.minimum(mu_star + radius, 1.0), d, windows)
+
+    # Boundary axis (lo = 0), small d
+    d = 5
+    windows = build_windows(d)
+    lo = np.array([0.0, 0.05, 0.10, 0.15, 0.20])
+    hi = np.array([0.5, 0.40, 0.40, 0.40, 0.40])
+    yield ("d5-boundary", lo, hi, d, windows)
+
+    # Wide box at d=6
+    d = 6
+    windows = build_windows(d)
+    lo = np.full(d, 0.05)
+    hi = np.full(d, 0.40)
+    yield ("d6-wide", lo, hi, d, windows)
+
+    # Tight d=8 box
+    d = 8
+    windows = build_windows(d)
+    rng = np.random.default_rng(1234)
+    mu = rng.dirichlet(np.ones(d))
+    radius = 5e-3
+    lo = np.maximum(mu - radius, 1e-9)
+    hi = np.minimum(mu + radius, 1.0 - 1e-9)
+    if lo.sum() <= 1.0 <= hi.sum():
+        yield ("d8-tight", lo, hi, d, windows)
+
+
+def test_audit_simplex_constraint_holds():
+    """At every LP optimum, Σ_i μ_i = 1 within tolerance."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        s = float(mu.sum())
+        assert abs(s - 1.0) < 1e-7, f"{label}: Σμ = {s} ≠ 1"
+
+
+def test_audit_rlt_row_sum_constraint_holds():
+    """At every LP optimum, Σ_j Y_{i,j} = μ_i within tolerance, ∀ i."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        row_sums = Y.sum(axis=1)
+        max_err = float(np.max(np.abs(row_sums - mu)))
+        assert max_err < 1e-7, (
+            f"{label}: max |Σ_j Y_{{i,j}} − μ_i| = {max_err:.3e}"
+        )
+
+
+def test_audit_rlt_col_sum_constraint_holds():
+    """C1 audit: at LP optimum, Σ_i Y_{i,j} = μ_j ∀ j."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        col_sums = Y.sum(axis=0)
+        max_err = float(np.max(np.abs(col_sums - mu)))
+        assert max_err < 1e-7, (
+            f"{label}: max |Σ_i Y_{{i,j}} − μ_j| = {max_err:.3e}"
+        )
+
+
+def test_audit_y_symmetry_constraint_holds():
+    """C2 audit: at LP optimum, Y_{i,j} = Y_{j,i} ∀ i ≠ j."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        asym = float(np.max(np.abs(Y - Y.T)))
+        assert asym < 1e-7, f"{label}: max |Y - Yᵀ| = {asym:.3e}"
+
+
+def test_audit_diagonal_sos_constraint_holds():
+    """C3 audit: at LP optimum, Σ_i Y_{i,i} ≥ 1/d − tol."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        diag_sum = float(np.diag(Y).sum())
+        assert diag_sum >= 1.0 / d - 1e-7, (
+            f"{label}: Σ Y_{{i,i}} = {diag_sum:.6e} < 1/d = {1.0/d:.6e}"
+        )
+
+
+def test_audit_midpoint_diag_tangent_holds():
+    """C4 audit: at LP optimum, Y_{i,i} ≥ 2 m_i μ_i − m_i² ∀ i."""
+    for label, lo_a, hi_a, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo_a, hi_a, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        m = 0.5 * (np.asarray(lo_a) + np.asarray(hi_a))
+        rhs = 2.0 * m * mu - m * m
+        viol = float(np.max(rhs - np.diag(Y)))
+        assert viol < 1e-7, (
+            f"{label}: max [2 m_i μ_i − m_i² − Y_{{i,i}}] = {viol:.3e}"
+        )
+
+
+def test_audit_mccormick_faces_satisfied():
+    """SW/NE/NW/SE McCormick face audit: at LP optimum, each
+    bilinear-McCormick face inequality is satisfied within tolerance.
+
+    SW: Y_{i,j} ≥ lo_j μ_i + lo_i μ_j − lo_i lo_j
+    NE: Y_{i,j} ≥ hi_j μ_i + hi_i μ_j − hi_i hi_j
+    NW: Y_{i,j} ≤ lo_j μ_i + hi_i μ_j − lo_j hi_i
+    SE: Y_{i,j} ≤ hi_j μ_i + lo_i μ_j − hi_j lo_i
+    """
+    for label, lo_a, hi_a, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo_a, hi_a, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        lo_a = np.asarray(lo_a); hi_a = np.asarray(hi_a)
+        # Vectorized SW/NE LB: Y[i,j] >= lo[j]*mu[i] + lo[i]*mu[j] - lo[i]*lo[j]
+        sw = np.outer(mu, lo_a) + np.outer(lo_a, mu) - np.outer(lo_a, lo_a)
+        ne = np.outer(mu, hi_a) + np.outer(hi_a, mu) - np.outer(hi_a, hi_a)
+        # NW/SE UB
+        nw = np.outer(mu, lo_a) + np.outer(hi_a, mu) - np.outer(hi_a, lo_a)
+        se = np.outer(mu, hi_a) + np.outer(lo_a, mu) - np.outer(lo_a, hi_a)
+        sw_viol = float(np.max(sw - Y))     # LB: should be ≤ 0 (Y ≥ sw)
+        ne_viol = float(np.max(ne - Y))
+        nw_viol = float(np.max(Y - nw))     # UB: should be ≤ 0 (Y ≤ nw)
+        se_viol = float(np.max(Y - se))
+        assert sw_viol < 1e-7, f"{label}: SW viol {sw_viol:.3e}"
+        assert ne_viol < 1e-7, f"{label}: NE viol {ne_viol:.3e}"
+        assert nw_viol < 1e-7, f"{label}: NW viol {nw_viol:.3e}"
+        assert se_viol < 1e-7, f"{label}: SE viol {se_viol:.3e}"
+
+
+def test_audit_epigraph_per_window_holds():
+    """At LP optimum, z ≥ scale_W · Σ_{(i,j) ∈ S_W} Y_{i,j} for every W."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        worst_viol = -np.inf
+        for w in windows:
+            mass = sum(Y[i, j] for (i, j) in w.pairs_all)
+            tv = float(w.scale) * mass
+            worst_viol = max(worst_viol, tv - z)
+        assert worst_viol < 1e-7, (
+            f"{label}: max [scale_W Σ Y - z] = {worst_viol:.3e}"
+        )
+
+
+def test_audit_implied_sum_y_equals_one():
+    """Σ_{i,j} Y_{i,j} = 1 follows from SIMP + RLT_R; verify it is in
+    fact close to 1 at every LP optimum. This is the redundant cut
+    discussed in the analysis."""
+    for label, lo, hi, d, windows in _audit_boxes():
+        out = _solve_and_extract_xstar(lo, hi, windows, d)
+        assert out is not None, f"{label}: LP failed"
+        Y, mu, z = out
+        s = float(Y.sum())
+        assert abs(s - 1.0) < 1e-7, f"{label}: Σ Y = {s} ≠ 1"
+
+
 if __name__ == "__main__":
     test_extra_cuts_soundness()
     print("soundness ok")
@@ -385,3 +590,12 @@ if __name__ == "__main__":
     print("tightening ok")
     test_extra_cuts_d20_stuck_box()
     print("d20 ok")
+    test_audit_simplex_constraint_holds(); print("audit simplex ok")
+    test_audit_rlt_row_sum_constraint_holds(); print("audit row-sum ok")
+    test_audit_rlt_col_sum_constraint_holds(); print("audit col-sum ok")
+    test_audit_y_symmetry_constraint_holds(); print("audit symmetry ok")
+    test_audit_diagonal_sos_constraint_holds(); print("audit SOS ok")
+    test_audit_midpoint_diag_tangent_holds(); print("audit tangent ok")
+    test_audit_mccormick_faces_satisfied(); print("audit McCormick ok")
+    test_audit_epigraph_per_window_holds(); print("audit epigraph ok")
+    test_audit_implied_sum_y_equals_one(); print("audit sumY ok")
