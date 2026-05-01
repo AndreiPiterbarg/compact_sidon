@@ -78,16 +78,14 @@ def box_outside_hd(box) -> bool:
 
     Boxes whose interval-projection straddles the H_d boundary
     {mu_0 = mu_{d-1}} (i.e. lo_int[0] <= hi_int[d-1]) are KEPT because
-    they may contain points in H_d. This keeps the cut SOUND: we drop
-    only boxes whose sigma-image (mu_0 <-> mu_{d-1} reversal of the
-    point) lies in another already-covered box, never any box that
-    might host a min(H_d) certificate.
+    they may contain points in H_d.
 
-    SOUNDNESS: by Lemma 3.4 of THEOREM.md, val(d) = min over H_d. Any
-    mu in Delta_d minus H_d has sigma(mu) in H_d with the same objective
-    value (Lemma 3.3). So restricting the BnB cover to boxes that
-    *meet* H_d — i.e. dropping boxes with lo_int[0] > hi_int[d-1] —
-    still certifies val(d) >= c.
+    SOUNDNESS: by Lemma 3.4 of THEOREM.md, val(d) = min_{H_d} f. The
+    BnB explores a cover of {mu_0 <= 1/2}, which is a SUPERSET of H_d
+    (any mu in Delta_d with mu_0 > mu_{d-1} satisfies mu_{d-1} < 1/2,
+    so its sigma-image has (sigma mu)_0 = mu_{d-1} < 1/2 and lies in
+    {mu_0 <= 1/2}). Hence dropping any box strictly outside H_d is
+    sound: no min(H_d) candidate is lost.
     """
     if box.lo_int is None or box.hi_int is None:
         return False  # cannot judge; keep box (conservative)
