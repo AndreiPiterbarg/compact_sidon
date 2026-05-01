@@ -142,6 +142,7 @@ def _build_dual_task_box(
     _alpha_lookup = api['_alpha_lookup']
     _aggregate_bar_triplet = api['_aggregate_bar_triplet']
     _aggregate_scalar_triplet = api['_aggregate_scalar_triplet']
+    from lasserre.core import _hash_add
 
     d = int(P['d'])
     n_y = int(P['n_y'])
@@ -314,7 +315,7 @@ def _build_dual_task_box(
     B_arr = np.asarray(basis, dtype=np.int64)
     B_hash = _hash_monos(B_arr, bases_arr, prime)
     ks_m, ls_m = np.tril_indices(n_basis)
-    alpha_hash_m = B_hash[ks_m] + B_hash[ls_m]
+    alpha_hash_m = _hash_add(B_hash[ks_m], B_hash[ls_m], prime)
     alpha_idx_m = _alpha_lookup(alpha_hash_m, sorted_h, sort_o, old_to_new_arr)
     if np.any(alpha_idx_m < 0):
         raise RuntimeError("Moment sensitivity lookup -1; precompute broken")
@@ -329,7 +330,7 @@ def _build_dual_task_box(
     L_arr = np.asarray(loc_basis, dtype=np.int64)
     L_hash = _hash_monos(L_arr, bases_arr, prime)
     ks_l, ls_l = np.tril_indices(n_loc)
-    base_hash_loc = L_hash[ks_l] + L_hash[ls_l]  # α = loc[k] + loc[l]
+    base_hash_loc = _hash_add(L_hash[ks_l], L_hash[ls_l], prime)  # α = loc[k] + loc[l]
     alpha_idx_loc0 = _alpha_lookup(
         base_hash_loc, sorted_h, sort_o, old_to_new_arr)
 
@@ -339,7 +340,7 @@ def _build_dual_task_box(
     for j, i in enumerate(active_loc):
         bar_idx_here = lo_bar_start + j
         # +1 part (from μ_i term)
-        alpha_hash_li = base_hash_loc + bases_arr[i]
+        alpha_hash_li = _hash_add(base_hash_loc, bases_arr[i], prime)
         alpha_idx_li = _alpha_lookup(
             alpha_hash_li, sorted_h, sort_o, old_to_new_arr)
         mask = alpha_idx_li >= 0
@@ -383,7 +384,7 @@ def _build_dual_task_box(
                 hi_coef=np.full(n_m0, +1.0, dtype=np.float64),
             )
         # -1 part
-        alpha_hash_li = base_hash_loc + bases_arr[i]
+        alpha_hash_li = _hash_add(base_hash_loc, bases_arr[i], prime)
         alpha_idx_li = _alpha_lookup(
             alpha_hash_li, sorted_h, sort_o, old_to_new_arr)
         mask = alpha_idx_li >= 0
