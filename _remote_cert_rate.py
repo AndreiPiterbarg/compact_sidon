@@ -29,8 +29,10 @@ def main(d, hw, target, n_max=20):
     print(f"  building cache...", flush=True)
     t0 = time.time()
     cache = build_sdp_escalation_cache(d, windows)
-    print(f"  cache build: {time.time()-t0:.2f}s, n_y={cache['n_y']}, "
-          f"bandwidth={cache['bandwidth']}, cliques={len(cache['mom_blocks'])}",
+    info = cache.get('info', {})
+    print(f"  cache build: {time.time()-t0:.2f}s, n_y={info.get('n_y','?')}, "
+          f"target={cache.get('target','?')}, "
+          f"bar_sizes={info.get('bar_sizes','?')[:3] if info.get('bar_sizes') else '?'}+...",
           flush=True)
     rng = np.random.default_rng(0)
     n_lp_cert = 0
