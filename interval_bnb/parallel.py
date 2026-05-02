@@ -1206,6 +1206,47 @@ def parallel_branch_and_bound(
         # therefore depends on `failed_event` being correctly set on any
         # uncertified termination, which it is at every break path.
         done_event.set()
+        # Drain the shared queue and dump it BEFORE joining workers, so
+        # we capture all in_flight boxes that were waiting in the queue
+        # (not just those in worker local DFS stacks). Activated by
+        # INTERVAL_BNB_DUMP_BOXES=<prefix>; writes <prefix>_master_queue.npz.
+        # Soundness: queue items are batches of (Box, depth) tuples that
+        # workers haven't claimed yet — they are still in_flight.
+        _dump_prefix = os.environ.get('INTERVAL_BNB_DUMP_BOXES', '')
+        if _dump_prefix:
+            try:
+                _q_los: list = []
+                _q_his: list = []
+                _q_deps: list = []
+                # done_event is set so workers will stop pulling from queue
+                # at their next loop guard check; drain now is race-free.
+                while True:
+                    try:
+                        batch = queue.get_nowait()
+                    except Exception:
+                        break
+                    for item in batch:
+                        if isinstance(item, tuple) and len(item) >= 2:
+                            B, depth = item[0], item[1]
+                        else:
+                            B = item
+                            depth = 0
+                        _q_los.append(B.lo)
+                        _q_his.append(B.hi)
+                        _q_deps.append(depth)
+                if _q_los:
+                    np.savez(f'{_dump_prefix}_master_queue.npz',
+                              lo=np.asarray(_q_los, dtype=np.float64),
+                              hi=np.asarray(_q_his, dtype=np.float64),
+                              depths=np.asarray(_q_deps, dtype=np.int64))
+                    if verbose:
+                        print(f"[par] master drained queue: "
+                              f"{len(_q_los)} boxes -> "
+                              f"{_dump_prefix}_master_queue.npz", flush=True)
+            except Exception as e:
+                if verbose:
+                    print(f"[par] queue-drain dump failed: {e}", flush=True)
+
         # First pass: short join to catch workers already at the loop
         # guard. Second pass: longer wait for workers mid-LP-solve so
         # their `_publish_stats` flush in the `finally` block can land
