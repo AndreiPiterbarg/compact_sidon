@@ -421,10 +421,10 @@ def _build_dual_task_box(
             # For each ij_pair, compute alpha_hash = base_hash_loc + bases[i] + bases[j]
             # Stack: shape (n_pairs, n_kl).
             n_pairs = len(nz_i)
-            shifts = bases_arr[nz_i] + bases_arr[nz_j]  # (n_pairs,)
+            shifts = _hash_add(bases_arr[nz_i], bases_arr[nz_j], prime)
             mw_vals = Mw[nz_i, nz_j]  # (n_pairs,)
             for pp in range(n_pairs):
-                alpha_hash_pij = base_hash_loc + shifts[pp]
+                alpha_hash_pij = _hash_add(base_hash_loc, shifts[pp], prime)
                 alpha_idx_pij = _alpha_lookup(
                     alpha_hash_pij, sorted_h, sort_o, old_to_new_arr)
                 mask_q = alpha_idx_pij >= 0
@@ -675,8 +675,11 @@ def bound_sdp_escalation_int_ge(
     *,
     order: int = 2, bandwidth: Optional[int] = None,
     time_limit_s: float = 30.0,
-    tol_gap_abs: float = 1e-7, tol_gap_rel: float = 1e-7, tol_feas: float = 1e-7,
-    n_threads: int = 1,
+    tol_gap_abs: float = 1e-5, tol_gap_rel: float = 1e-5, tol_feas: float = 1e-5,
+    n_threads: int = 48,
+    early_stop: bool = True,
+    early_stop_feas_frac: float = 0.15,
+    early_stop_infeas_frac: float = 0.85,
     return_diagnostic: bool = False,
 ):
     """True iff the dual Farkas LP at t = target_num/target_den proves
@@ -713,7 +716,12 @@ def bound_sdp_escalation_int_ge(
         task.putintparam(mosek.iparam.num_threads, int(n_threads))
 
     try:
-        verdict = api['solve_dual_task'](task, info, verbose=False)
+        verdict = api['solve_dual_task'](
+            task, info, verbose=False,
+            early_stop_on_clear_verdict=early_stop,
+            early_stop_feas_frac=early_stop_feas_frac,
+            early_stop_infeas_frac=early_stop_infeas_frac,
+        )
     except Exception as e:
         if return_diagnostic:
             return False, {
@@ -743,8 +751,11 @@ def bound_sdp_escalation_lb_float(
     order: int = 2, bandwidth: Optional[int] = None,
     target: float = 1.281,
     time_limit_s: float = 30.0,
-    tol_gap_abs: float = 1e-7, tol_gap_rel: float = 1e-7, tol_feas: float = 1e-7,
-    n_threads: int = 1,
+    tol_gap_abs: float = 1e-5, tol_gap_rel: float = 1e-5, tol_feas: float = 1e-5,
+    n_threads: int = 48,
+    early_stop: bool = True,
+    early_stop_feas_frac: float = 0.15,
+    early_stop_infeas_frac: float = 0.85,
 ) -> dict:
     """Float-side diagnostic: solve dual Farkas at t = target.
     Returns a dict with the verdict and MOSEK info.
@@ -770,7 +781,12 @@ def bound_sdp_escalation_lb_float(
         task.putintparam(mosek.iparam.num_threads, int(n_threads))
     try:
         t0 = time.time()
-        verdict = api['solve_dual_task'](task, info, verbose=False)
+        verdict = api['solve_dual_task'](
+            task, info, verbose=False,
+            early_stop_on_clear_verdict=early_stop,
+            early_stop_feas_frac=early_stop_feas_frac,
+            early_stop_infeas_frac=early_stop_infeas_frac,
+        )
         dt = time.time() - t0
         verdict['solve_time'] = dt
         verdict['target'] = target
