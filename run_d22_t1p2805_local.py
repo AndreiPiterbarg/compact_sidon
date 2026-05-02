@@ -27,6 +27,10 @@ os.environ['INTERVAL_BNB_EPIGRAPH_FILTER'] = '0.02'
 os.environ['INTERVAL_BNB_ANCHOR_DEPTH'] = '24'
 os.environ['INTERVAL_BNB_CENTROID_DEPTH'] = '60'
 os.environ['INTERVAL_BNB_LP_SPLIT_DEPTH'] = '26'
+# Boundary-aware split heuristic (Agent B fix):
+# at depth >= 30 with >= 11 axes on lo=0 boundary, force split onto a free axis.
+os.environ['INTERVAL_BNB_BOUNDARY_SPLIT_DEPTH'] = '30'
+os.environ['INTERVAL_BNB_BOUNDARY_AXIS_COUNT'] = '11'
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from interval_bnb.parallel import parallel_branch_and_bound
@@ -36,7 +40,7 @@ def main():
     d = 22
     target = '1.2805'
     workers = 16
-    time_budget_s = 10800  # 3 hours
+    time_budget_s = 43200  # 12 hours — option A, fire-and-forget, check at end
     init_split_depth = 22
 
     print("#" * 72, flush=True)
