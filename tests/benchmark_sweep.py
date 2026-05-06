@@ -35,11 +35,19 @@ def main():
     ap.add_argument('--sample', type=int, default=100,
                     help='parents to sample per level')
     ap.add_argument('--use_flat_threshold', action='store_true')
+    ap.add_argument('--use_F', action='store_true',
+                    help='Use variant F pruning (LP-tight Δ_BB).  Sound, '
+                         '25-65%% additional pruning over W-refined.  '
+                         'Mutually exclusive with --use_flat_threshold.')
     args = ap.parse_args()
+
+    if args.use_F and args.use_flat_threshold:
+        ap.error('--use_F and --use_flat_threshold are mutually exclusive.')
 
     m, n_half, c_target = args.m, args.n_half, args.c_target
     sample_n = args.sample
     flat = args.use_flat_threshold
+    use_F = args.use_F
 
     # Vacuity check
     corr = correction(m, n_half)
@@ -52,7 +60,7 @@ def main():
     S0 = 4 * n_half * m
     n_compositions = count_compositions(d0, S0)
     print(f"Config: m={m}, n_half={n_half}, c_target={c_target}, "
-          f"flat={flat}")
+          f"flat={flat}, use_F={use_F}")
     print(f"L0: d={d0}, S={S0}, compositions={n_compositions:,}")
     print(f"    correction={corr:.6f}, threshold={c_target+corr:.6f}")
     print()
@@ -60,7 +68,7 @@ def main():
     # --- L0: run fully ---
     t0 = time.time()
     result = run_level0(n_half, m, c_target, verbose=True,
-                        use_flat_threshold=flat)
+                        use_flat_threshold=flat, use_F=use_F)
     survivors = result['survivors']
     n_surv = result['n_survivors']
     print(f"\nL0 done: {n_surv:,} survivors in {time.time()-t0:.1f}s")
@@ -150,7 +158,7 @@ def main():
         for i, parent in enumerate(sample):
             surv_i, n_children_i = process_parent_fused(
                 parent, m, c_target, n_half_child,
-                use_flat_threshold=flat)
+                use_flat_threshold=flat, use_F=use_F)
             total_children_sampled += n_children_i
             n_surv_i = len(surv_i)
             total_survivors_sampled += n_surv_i

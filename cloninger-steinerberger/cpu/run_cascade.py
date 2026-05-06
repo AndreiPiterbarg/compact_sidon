@@ -50,17 +50,21 @@ from test_values import compute_test_values_batch
 
 @njit(parallel=True, cache=True)
 def _prune_dynamic_int32(batch_int, n_half, m, c_target,
-                          use_flat_threshold=False):
+                          use_flat_threshold=False, use_F=False):
     """int32 path: halves memory bandwidth in autoconvolution inner loop.
 
     Safe when m <= 200 because max prefix sum of conv = m^2 = 40000,
     which fits comfortably in int32 (max 2,147,483,647).
     Values are widened to int64 only at the threshold comparison point.
 
-    When use_flat_threshold=True, uses the flat C&S Lemma 3 correction
-    (2/m + 1/m^2 → integer correction 2m+1) instead of the W-refined
-    correction (1 + W_int/(2n)).  The flat threshold is what the Lean
-    axiom cascade_all_pruned requires for soundness.
+    Three correction modes (priority: flat > F > W-refined):
+      use_flat_threshold=True: flat C&S Lemma 3 (2/m + 1/m^2).  Required
+        for the Lean axiom cascade_all_pruned.
+      use_F=True: variant F — LP-tight linear bound via sort+extremes
+        plus the standard δ² bound.  Empirically 25-65% additional
+        pruning over W-refined; sound under |a-b|_∞ ≤ 1/m, Σa = 4n,
+        a ≥ 0.  See _M1_bench.py:prune_F.
+      else: W-refined (1 + W_int/(2n)) — the prior default.
     """
     B = batch_int.shape[0]
     d = batch_int.shape[1]
@@ -82,15 +86,26 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target,
         scale_arr[ell] = np.float64(ell) * four_n
 
     # Flat C&S Lemma 3 correction: (2/m + 1/m^2)*m^2 = 2m + 1.
-    # Independent of W_int — no need for prefix_c when flat.
     flat_corr = 2.0 * m_d + 1.0
-
-    # Pre-compute flat threshold per ell (when use_flat_threshold=True)
     flat_threshold_arr = np.empty(max_ell + 1, dtype=np.int64)
     if use_flat_threshold:
         for ell in range(2, max_ell + 1):
             dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_arr[ell]
             flat_threshold_arr[ell] = np.int64(dyn_x)
+
+    # Variant F: precompute ell_prefix where ell_int_arr[k] = #{(i,j): i+j=k}.
+    # ell_int_arr[k] = max(0, 2n - |k+1 - 2n|), in [0, 2n].
+    ell_prefix = np.zeros(conv_len + 1, dtype=np.int64)
+    if use_F and not use_flat_threshold:
+        two_n = 2 * n_half
+        for k in range(conv_len):
+            d_idx = (k + 1) - two_n
+            if d_idx < 0:
+                d_idx = -d_idx
+            v = two_n - d_idx
+            if v < 0:
+                v = 0
+            ell_prefix[k + 1] = ell_prefix[k] + v
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int32)
@@ -129,17 +144,44 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target,
                         break
             else:
                 scale_ell = scale_arr[ell]
+                ell_f = np.float64(ell)
+                half = d // 2
+                BB = np.empty(d, dtype=np.int64)
                 for s_lo in range(n_windows):
                     if s_lo > 0:
                         ws += np.int64(conv[s_lo + n_cv - 1]) - np.int64(conv[s_lo - 1])
-                    lo_bin = s_lo - d_minus_1
-                    if lo_bin < 0:
-                        lo_bin = 0
-                    hi_bin = s_lo + ell - 2
-                    if hi_bin > d_minus_1:
-                        hi_bin = d_minus_1
-                    W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    if use_F:
+                        # F: corr = Δ_BB/(2n·ell) + ell_int_sum/(4n·ell)
+                        # BB_j = Σ_{i: i+j ∈ window, i ∈ [0,d-1]} c_i
+                        for j in range(d):
+                            lo_i = s_lo - j
+                            if lo_i < 0:
+                                lo_i = 0
+                            hi_i = s_lo + ell - 2 - j
+                            if hi_i > d_minus_1:
+                                hi_i = d_minus_1
+                            if lo_i > hi_i:
+                                BB[j] = np.int64(0)
+                            else:
+                                BB[j] = prefix_c[hi_i + 1] - prefix_c[lo_i]
+                        BB_sorted = np.sort(BB)
+                        Delta_BB = np.int64(0)
+                        for jj in range(half):
+                            Delta_BB += BB_sorted[d - 1 - jj] - BB_sorted[jj]
+                        ell_int_sum = ell_prefix[s_lo + n_cv] - ell_prefix[s_lo]
+                        corr_w = (np.float64(Delta_BB) / (2.0 * n_half_d * ell_f)
+                                  + np.float64(ell_int_sum)
+                                  / (4.0 * n_half_d * ell_f))
+                    else:
+                        # W-refined (legacy default)
+                        lo_bin = s_lo - d_minus_1
+                        if lo_bin < 0:
+                            lo_bin = 0
+                        hi_bin = s_lo + ell - 2
+                        if hi_bin > d_minus_1:
+                            hi_bin = d_minus_1
+                        W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                        corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
                     dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                     dyn_it = np.int64(dyn_x)
                     if ws > dyn_it:
@@ -158,10 +200,10 @@ def _prune_dynamic_int32(batch_int, n_half, m, c_target,
 
 @njit(parallel=True, cache=True)
 def _prune_dynamic_int64(batch_int, n_half, m, c_target,
-                          use_flat_threshold=False):
+                          use_flat_threshold=False, use_F=False):
     """int64 path for large m values where int32 conv may overflow.
 
-    See _prune_dynamic_int32 for use_flat_threshold documentation.
+    See _prune_dynamic_int32 for use_flat_threshold and use_F docs.
     """
     B = batch_int.shape[0]
     d = batch_int.shape[1]
@@ -187,6 +229,19 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target,
         for ell in range(2, max_ell + 1):
             dyn_x = (cs_base_m2 + flat_corr + eps_margin) * scale_arr[ell]
             flat_threshold_arr[ell] = np.int64(dyn_x)
+
+    # Variant F: ell_int_arr prefix sum.
+    ell_prefix = np.zeros(conv_len + 1, dtype=np.int64)
+    if use_F and not use_flat_threshold:
+        two_n = 2 * n_half
+        for k in range(conv_len):
+            d_idx = (k + 1) - two_n
+            if d_idx < 0:
+                d_idx = -d_idx
+            v = two_n - d_idx
+            if v < 0:
+                v = 0
+            ell_prefix[k + 1] = ell_prefix[k] + v
 
     for b in prange(B):
         conv = np.zeros(conv_len, dtype=np.int64)
@@ -224,17 +279,41 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target,
                         break
             else:
                 scale_ell = scale_arr[ell]
+                ell_f = np.float64(ell)
+                half = d // 2
+                BB = np.empty(d, dtype=np.int64)
                 for s_lo in range(n_windows):
                     if s_lo > 0:
                         ws += conv[s_lo + n_cv - 1] - conv[s_lo - 1]
-                    lo_bin = s_lo - d_minus_1
-                    if lo_bin < 0:
-                        lo_bin = 0
-                    hi_bin = s_lo + ell - 2
-                    if hi_bin > d_minus_1:
-                        hi_bin = d_minus_1
-                    W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
-                    corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
+                    if use_F:
+                        for j in range(d):
+                            lo_i = s_lo - j
+                            if lo_i < 0:
+                                lo_i = 0
+                            hi_i = s_lo + ell - 2 - j
+                            if hi_i > d_minus_1:
+                                hi_i = d_minus_1
+                            if lo_i > hi_i:
+                                BB[j] = np.int64(0)
+                            else:
+                                BB[j] = prefix_c[hi_i + 1] - prefix_c[lo_i]
+                        BB_sorted = np.sort(BB)
+                        Delta_BB = np.int64(0)
+                        for jj in range(half):
+                            Delta_BB += BB_sorted[d - 1 - jj] - BB_sorted[jj]
+                        ell_int_sum = ell_prefix[s_lo + n_cv] - ell_prefix[s_lo]
+                        corr_w = (np.float64(Delta_BB) / (2.0 * n_half_d * ell_f)
+                                  + np.float64(ell_int_sum)
+                                  / (4.0 * n_half_d * ell_f))
+                    else:
+                        lo_bin = s_lo - d_minus_1
+                        if lo_bin < 0:
+                            lo_bin = 0
+                        hi_bin = s_lo + ell - 2
+                        if hi_bin > d_minus_1:
+                            hi_bin = d_minus_1
+                        W_int = prefix_c[hi_bin + 1] - prefix_c[lo_bin]
+                        corr_w = 1.0 + np.float64(W_int) / (2.0 * n_half_d)
                     dyn_x = (cs_base_m2 + corr_w + eps_margin) * scale_ell
                     dyn_it = np.int64(dyn_x)
                     if ws > dyn_it:
@@ -247,7 +326,8 @@ def _prune_dynamic_int64(batch_int, n_half, m, c_target,
     return survived
 
 
-def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False):
+def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False,
+                    use_F=False):
     """Per-window dynamic threshold — dispatches int32/int64 based on m.
 
     Works in integer convolution space (fine grid: c_i sum to S = 4nm).
@@ -265,10 +345,10 @@ def _prune_dynamic(batch_int, n_half, m, c_target, use_flat_threshold=False):
     """
     if m <= 200:
         return _prune_dynamic_int32(batch_int, n_half, m, c_target,
-                                     use_flat_threshold)
+                                     use_flat_threshold, use_F)
     else:
         return _prune_dynamic_int64(batch_int, n_half, m, c_target,
-                                     use_flat_threshold)
+                                     use_flat_threshold, use_F)
 
 
 # =====================================================================
@@ -3703,7 +3783,7 @@ def _default_buf_cap(d_child):
 
 
 def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
-                          use_flat_threshold=False):
+                          use_flat_threshold=False, use_F=False):
     """Wrapper: compute x_cap, allocate buffer, call fused kernel.
 
     Parameters
@@ -3714,6 +3794,12 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
         re-allocated at the exact size and the kernel re-run.
     use_flat_threshold : bool
         When True, uses flat C&S Lemma 3 correction for Lean axiom soundness.
+    use_F : bool
+        When True, after the fused W-refined kernel returns survivors,
+        apply variant F (LP-tight linear correction Δ_BB + ell_int_sum)
+        as an additional filter.  F is a strictly tighter rule than
+        W-refined, so any F-survivor is also a W-survivor.  Empirically
+        prunes 25-65% additional survivors at L0 and beyond.
 
     Returns
     -------
@@ -3786,6 +3872,16 @@ def process_parent_fused(parent_int, m, c_target, n_half_child, buf_cap=None,
             f"retry {n2}")
         n_survivors = n2
 
+    # Variant F post-filter: F is strictly tighter than the kernel's
+    # W-refined / Theorem-1 rule.  F-survivors ⊆ kernel-survivors, so this
+    # is sound by monotonicity.  Cost is O(survivors · d log d) — trivial
+    # vs. the enumeration just performed.
+    if use_F and n_survivors > 0 and not use_flat_threshold:
+        survivors_view = out_buf[:n_survivors]
+        f_mask = _prune_dynamic(survivors_view, n_half_child, m, c_target,
+                                 use_flat_threshold=False, use_F=True)
+        return survivors_view[f_mask].copy(), total_children
+
     return out_buf[:n_survivors].copy(), total_children
 
 
@@ -3853,11 +3949,13 @@ def process_parent_coarse(parent_int, S, c_target, d_child, buf_cap=None):
 
 def process_parent_verbose(parent_int, m, c_target, n_half_child,
                             parent_idx, n_parents,
-                            use_flat_threshold=False):
+                            use_flat_threshold=False, use_F=False):
     """Like process_parent_fused but logs intra-parent progress.
 
     Splits the Cartesian product along cursor[0]'s range so we can
     log between slices.  Falls back to single-shot for small parents.
+
+    See process_parent_fused for use_F documentation.
 
     Returns
     -------
@@ -3884,7 +3982,8 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
     if total_children < 500_000 or n_slices <= 1:
         _log(f"       {label}: {total_children:,} children (single pass)...")
         surv, tc = process_parent_fused(parent_int, m, c_target, n_half_child,
-                                         use_flat_threshold=use_flat_threshold)
+                                         use_flat_threshold=use_flat_threshold,
+                                         use_F=use_F)
         _log(f"       {label}: done, {len(surv):,} survivors")
         return surv, tc
 
@@ -3964,6 +4063,12 @@ def process_parent_verbose(parent_int, m, c_target, n_half_child,
     else:
         survivors = np.empty((0, d_child), dtype=np.int32)
 
+    # Variant F post-filter (see process_parent_fused for explanation).
+    if use_F and len(survivors) > 0 and not use_flat_threshold:
+        f_mask = _prune_dynamic(survivors, n_half_child, m, c_target,
+                                 use_flat_threshold=False, use_F=True)
+        survivors = survivors[f_mask]
+
     elapsed = time.time() - t_start
     _log(f"       {label}: done in {_fmt_time(elapsed)}, "
          f"{len(survivors):,} survivors")
@@ -3994,7 +4099,7 @@ _warmup_jit()
 # =====================================================================
 
 def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
-               d0=None, use_bnb=True, coarse_S=None):
+               d0=None, use_bnb=True, coarse_S=None, use_F=False):
     """Run Level 0: enumerate compositions, prune, collect survivors.
 
     Parameters
@@ -4128,6 +4233,16 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
             n_non_canonical = int(np.sum(~canon_mask))
             survivors = survivors[canon_mask]
 
+        # Variant F post-filter on B&B output.  B&B uses W-refined inline;
+        # F is strictly tighter (F-survivors ⊆ W-survivors).  Sound by
+        # monotonicity.
+        n_F_pruned = 0
+        if use_F and len(survivors) > 0 and not use_flat_threshold:
+            f_mask = _prune_dynamic(survivors, n_half, m, c_target,
+                                     use_flat_threshold=False, use_F=True)
+            n_F_pruned = int(np.sum(~f_mask))
+            survivors = survivors[f_mask]
+
         elapsed = time.time() - t0
         n_survivors = len(survivors)
         proven = n_survivors == 0
@@ -4138,6 +4253,8 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
             _log(f"     B&B pruned: {n_total - n_tested:,} branches, "
                  f"leaf pruned: {n_tested - n_surv_raw:,}, "
                  f"non-canonical: {n_non_canonical:,}")
+            if use_F:
+                _log(f"     F post-filter pruned: {n_F_pruned:,}")
             _log(f"     survivors: {n_survivors:,}")
             if proven:
                 _log(f"     PROVEN at L0!")
@@ -4146,7 +4263,7 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
             'survivors': survivors,
             'n_survivors': n_survivors,
             'n_pruned_asym': 0,  # asymmetry handled inside B&B kernel
-            'n_pruned_test': n_tested - n_surv_raw,
+            'n_pruned_test': n_tested - n_surv_raw + n_F_pruned,
             'n_processed': n_tested,
             'elapsed': elapsed,
             'proven': proven,
@@ -4188,7 +4305,7 @@ def run_level0(n_half, m, c_target, verbose=True, use_flat_threshold=False,
 
         # Dynamic per-window threshold
         survived_mask = _prune_dynamic(candidates, n_half, m, c_target,
-                                        use_flat_threshold)
+                                        use_flat_threshold, use_F)
         n_pruned_test += int(np.sum(~survived_mask))
 
         survivors = candidates[survived_mask]
@@ -4480,17 +4597,18 @@ def _process_single_parent(args):
 # =====================================================================
 
 def _init_worker_shm(mmap_path, shape, dtype_str, m, c_target, n_half_child,
-                     numba_threads, use_flat_threshold=False):
+                     numba_threads, use_flat_threshold=False, use_F=False):
     """Pool initializer: open mmap of parent array and store params in globals."""
     numba.set_num_threads(numba_threads)
     global _shared_parents, _shm_m, _shm_c_target, _shm_n_half_child
-    global _shm_use_flat_threshold
+    global _shm_use_flat_threshold, _shm_use_F
     _shared_parents = np.memmap(mmap_path, dtype=np.dtype(dtype_str),
                                 mode='r', shape=shape)
     _shm_m = m
     _shm_c_target = c_target
     _shm_n_half_child = n_half_child
     _shm_use_flat_threshold = use_flat_threshold
+    _shm_use_F = use_F
 
 
 def _process_parent_shm(idx):
@@ -4498,7 +4616,8 @@ def _process_parent_shm(idx):
     parent = _shared_parents[idx].copy()  # local copy from shared mem
     survivors, total_children = process_parent_fused(
         parent, _shm_m, _shm_c_target, _shm_n_half_child,
-        use_flat_threshold=_shm_use_flat_threshold)
+        use_flat_threshold=_shm_use_flat_threshold,
+        use_F=_shm_use_F)
     n_survived = len(survivors)
     result = survivors if n_survived > 0 else None
     return result, {
@@ -4648,7 +4767,7 @@ def _effective_cpu_count():
 def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                 verbose=True, output_dir='data', resume_dir=None,
                 use_flat_threshold=False, mass_grid=False, d0=None,
-                use_bnb=True, coarse_S=None):
+                use_bnb=True, coarse_S=None, use_F=False):
     """Run the full CPU cascade: L0 + refinement levels.
 
     Parameters
@@ -4792,7 +4911,7 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
         else:
             l0 = run_level0(n_half, m, c_target, verbose=verbose,
                              use_flat_threshold=use_flat_threshold,
-                             d0=d0, use_bnb=use_bnb)
+                             d0=d0, use_bnb=use_bnb, use_F=use_F)
 
         info = {
             'n_half': n_half, 'm': m, 'd0': d0, 'c_target': c_target,
@@ -5233,7 +5352,8 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                                   parents_dtype_str,
                                   m, c_target, n_half_child,
                                   numba_threads,
-                                  use_flat_threshold)) as pool:
+                                  use_flat_threshold,
+                                  use_F)) as pool:
                     for surv, stats in pool.imap_unordered(
                             _process_parent_shm, range(n_parents),
                             chunksize=chunksize):
@@ -5302,11 +5422,13 @@ def run_cascade(n_half, m, c_target, max_levels=10, n_workers=None,
                     survivors, n_children = process_parent_verbose(
                         parent, m, c_target, n_half_child,
                         p_idx, n_parents,
-                        use_flat_threshold=use_flat_threshold)
+                        use_flat_threshold=use_flat_threshold,
+                        use_F=use_F)
                 else:
                     survivors, n_children = process_parent_fused(
                         parent, m, c_target, n_half_child,
-                        use_flat_threshold=use_flat_threshold)
+                        use_flat_threshold=use_flat_threshold,
+                        use_F=use_F)
                 total_children += n_children
                 n_survived_this = len(survivors)
                 total_survived += n_survived_this
@@ -5729,6 +5851,14 @@ def main():
                              'instead of W-refined.  Required for verifying '
                              'the Lean axiom cascade_all_pruned.  Higher '
                              'threshold = fewer prunes = more survivors.')
+    parser.add_argument('--use_F', action='store_true',
+                        help='Use variant F pruning (LP-tight linear Δ_BB '
+                             'plus standard δ²): empirically prunes 25-65%% '
+                             'additional survivors over W-refined.  Sound '
+                             'under |a-b|_∞ ≤ 1/m, Σa = 4n, a ≥ 0.  Applied '
+                             'as a two-stage post-filter on W-survivors so '
+                             'the hot Gray-code kernel is unchanged.  '
+                             'Mutually exclusive with --use_flat_threshold.')
     parser.add_argument('--mass_grid', action='store_true',
                         help='Use MATLAB-style mass-based grid with palindrome '
                              'symmetry.  S=2*m (constant), only d_parent/2 '
@@ -5766,6 +5896,14 @@ def main():
             parser.error('--coarse requires --S (grid resolution)')
         coarse_S = args.S
 
+    if args.use_F and args.use_flat_threshold:
+        parser.error('--use_F and --use_flat_threshold are mutually exclusive. '
+                     'flat is required for the Lean axiom; F is for performance.')
+    if args.use_F and coarse_S is not None:
+        print('WARNING: --use_F has no effect with --coarse; coarse mode '
+              'uses Theorem 1 directly with no m-discretization correction.',
+              flush=True)
+
     info = run_cascade(
         n_half=args.n_half,
         m=args.m,
@@ -5780,6 +5918,7 @@ def main():
         d0=args.d0,
         use_bnb=not args.no_l0_bnb,
         coarse_S=coarse_S,
+        use_F=args.use_F,
     )
 
     print_summary(info)
