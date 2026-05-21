@@ -268,8 +268,8 @@ floating-point computation.
 **Mechanisation.** The analytic reduction — admissibility of
 $K_{\mathrm{ms}}$, the master inequality, the quadratic inversion,
 and the rational closing arithmetic — is mechanised in Lean 4
-(**30 modules, $\approx 15{,}465$ lines**: 13 core `Sidon/*.lean` at
-7658 lines plus 17 `Sidon/Constructor/*.lean` at 7915 lines, `mathlib
+(**30 modules, $\approx 15{,}577$ lines**: 13 core `Sidon/*.lean` at
+7655 lines plus 17 `Sidon/Constructor/*.lean` at 7922 lines, `mathlib
 v4.29.1`, no `sorry`). The formalisation exports two headlines, both
 concluding `autoconvolution_ratio f ≥ 1292/1000`, where
 `autoconvolution_ratio` is the Lean definition of $R(f) = \lVert
@@ -315,24 +315,24 @@ genuinely asserts an inequality on the analytic functional
 $(4/u)\cdot m_G^{2}/S_1$. The supporting definitions in
 `lean/Sidon/MultiScale.lean` are:
 
-* `qpNumerators : List ℤ` (line 525) — the 200 QP coefficient
-  numerators with common denominator $10^{8}$; the length identity
-  `qpNumerators.length = 200` is closed by `native_decide` at
-  line 728.
-* `noncomputable def G_concrete (x : ℝ) : ℝ` (line 734) — the
+* `qpNumerators : List ℤ` (line 569) — the 200 QP coefficient
+  numerators with common denominator $10^{8}$; the cosine sum
+  `G_concrete` reads them via `qpNumerators.getD i 0` (total, returning
+  the default $0$ out of range), so no list-length lemma is needed.
+* `noncomputable def G_concrete (x : ℝ) : ℝ` (line 775) — the
   explicit $200$-term cosine multiplier
   $G(x) = \sum_{i=0}^{199} (a_i/10^{8})\,\cos(2\pi (i+1) x / u)$,
   with $a_i =$ `qpNumerators.getD i 0`.
-* `noncomputable def Ktilde_ms (j : ℕ) : ℝ` (line 743) — the
+* `noncomputable def Ktilde_ms (j : ℕ) : ℝ` (line 784) — the
   Bessel-form period-$u$ Fourier coefficient
   $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i\,J_0(\pi j\,\delta_i/u)^{2}$,
   written in terms of `Sidon.Bessel.besselJ0`.
-* `noncomputable def S_1_analytic : ℝ` (line 751) — the concrete
+* `noncomputable def S_1_analytic : ℝ` (line 792) — the concrete
   sum $\sum_{i=0}^{199} (a_i/10^{8})^{2}\,/\,\widetilde{K_{\mathrm{ms}}}(i+1)$.
-* `noncomputable def min_G_analytic : ℝ` (line 756) — the analytic
+* `noncomputable def min_G_analytic : ℝ` (line 797) — the analytic
   infimum $\inf_{x\in[0,1/4]} G_{\mathrm{concrete}}(x)$, encoded as
   `sInf (G_concrete '' Set.Icc (0 : ℝ) (1/4))`.
-* `noncomputable def gain_analytic : ℝ` (line 789) — the analytic
+* `noncomputable def gain_analytic : ℝ` (line 830) — the analytic
   functional $(4/u)\cdot m_G^{2}/S_1$, encoded as
   `(4 / uQ_real) * min_G_analytic^2 / S_1_analytic`. This is a
   concrete `noncomputable def`, not an opaque symbol with a trivial
@@ -376,8 +376,6 @@ to the present three-scale 1.292 headline).
 
 ## Scope of the claim
 
-### Parity with MV 2010
-
 This work is at strict parity with the published MV 2010 proof of
 $C_{1a}\ge 1.27481$ on every component of the proof tree, and
 strictly above it on three:
@@ -385,9 +383,9 @@ strictly above it on three:
 | Component | MV 2010 (published) | This work |
 | --------- | ------------------- | --------- |
 | $\mathcal{F}\to$ square-integrable reduction | Cited by reference to Schinzel–Schmidt 2002 Theorem 1 (MV §2; see <a href="#MV-reduction">[MV-reduction]</a>) | **Cited identically** to <a href="#SS2002">[SS2002]</a> Theorem 1 (see "Reduction to square-integrable $f$" above) |
-| MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 (period-$u$ Parseval, constant-plus-tail split, lattice $F$-bound, torus split for $f*f + f\circ f$) | Cited by reference, and *applied to admissible $f$* in MV's English-prose proof: *"Lemma 3.1. [Lemmas 3.1, 3.2, 3.3, 3.4 in [6]]"* (MV p. 3; see <a href="#MV-primitives">[MV-primitives]</a>) | **Cited identically** and applied directly to the admissible kernel $K_{\mathrm{ms}}$ (a pdf supported in $[-\delta_1,\delta_1]$ with $\widetilde{K_{\mathrm{ms}}}(j)\ge 0$ and $K_{\mathrm{ms}}\in L^{2}$ — the only hypotheses MO 2009 Lemmas 3.1–3.4 / MV 2010 Lemma 3.1 require). The Lean theorem encodes the resulting outputs at $(f, K_{\mathrm{ms}})$ as named hypothesis fields (`hEq1`, `hEq2`, `hEq3_ge`, `hEq4`) of the record `ExtremiserPrimitives f`, and the paper discharges those fields by direct citation to MO 2009 Lemma 3.3 / Lemma 3.2 applied to $K_{\mathrm{ms}}$, exactly as MV 2010 discharged its single-arcsine applications by citation to MO 2009. The verbatim MO/MV statements are recorded in <a href="#MO-primitives">[MO-primitives]</a> / <a href="#MV-primitives">[MV-primitives]</a>. Two distinct things must be kept apart: (a) the citation-discharge of MO/MV at $K_{\mathrm{ms}}$ is mathematical content, dispatched in the same way MV 2010 dispatched its own applications of MO 2009; (b) the absence of a packaged mathlib `v4.29.1` $L^{1}\cap L^{2}$ Plancherel + period-$u$ Parseval API in the form the bundle consumes is engineering (the building blocks live in `Sidon.TorusParseval` and `Sidon.FourierAux`), but irrelevant to the validity of (a). No new analytic content is introduced beyond what MV cites. |
-| Master inequality + $z_1$-absorption + quadratic inversion + slack soundness + kernel admissibility | Proved analytically in MV §3 (English-prose proofs) | **Strictly above MV**: formally proved in Lean (axiom-free outside the numerical user axioms — two for the conditional headline, four for the unconditional — across 30 modules / ~15,573 lines: the 13 core `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`, plus the 17 axiom-free `Sidon/Constructor/*` modules mechanising `of_admissible`); 0 `sorry` |
-| Numerical anchors ($K_2$, $a$, $S_1$, $m_G$, $k_1$) | Mathematica 6 / LOQO; values reported as decimals (MV p. 7); no public certificate; no independent re-verification documented | **Strictly above MV**: `flint.arb` interval arithmetic at 256-bit precision, outward-rounded to exact rationals; SHA-256-anchored certificate `multiscale_arcsine_1292.json`; cross-check at 50 decimal digits via `audit3_mpmath.py` (independent arbitrary-precision library, same mathematical formulas) |
+| MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 (period-$u$ Parseval, constant-plus-tail split, lattice $F$-bound, torus split for $f*f + f\circ f$) | Cited by reference, and *applied to admissible $f$* in MV's English-prose proof: *"Lemma 3.1. [Lemmas 3.1, 3.2, 3.3, 3.4 in [6]]"* (MV p. 3; see <a href="#MV-primitives">[MV-primitives]</a>) | **Cited identically** and applied directly to the admissible kernel $K_{\mathrm{ms}}$ (a pdf supported in $[-\delta_1,\delta_1]$ with $\widetilde{K_{\mathrm{ms}}}(j)\ge 0$ and $K_{\mathrm{ms}}\in L^{2}$ — the only hypotheses MO 2009 Lemmas 3.1–3.4 / MV 2010 Lemma 3.1 require). The Lean theorem encodes the resulting outputs at $(f, K_{\mathrm{ms}})$ as named hypothesis fields (`hEq1`, `hEq2`, `hEq3_ge`, `hEq4`) of the record `ExtremiserPrimitives f`, and the paper discharges those fields by direct citation to MO 2009 Lemma 3.3 / Lemma 3.2 applied to $K_{\mathrm{ms}}$, exactly as MV 2010 discharged its single-arcsine applications by citation to MO 2009. The verbatim MO/MV statements are recorded in <a href="#MO-primitives">[MO-primitives]</a> / <a href="#MV-primitives">[MV-primitives]</a>. (The citation-discharge of MO/MV at $K_{\mathrm{ms}}$ is mathematical content; the absence of a packaged mathlib API in the form the bundle consumes is mere engineering — see "How the bound is established" above for this distinction.) No new analytic content is introduced beyond what MV cites. |
+| Master inequality + $z_1$-absorption + quadratic inversion + slack soundness + kernel admissibility | Proved analytically in MV §3 (English-prose proofs) | **Strictly above MV**: formally proved in Lean (axiom-free outside the numerical user axioms — two for the conditional headline, four for the unconditional — across 30 modules / ~15,577 lines: the 13 core `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`, plus the 17 axiom-free `Sidon/Constructor/*` modules mechanising `of_admissible`); 0 `sorry` |
+| Numerical anchors ($K_2$, $a$, $S_1$, $m_G$, $k_1$) | Mathematica 6 / LOQO; values reported as decimals (MV p. 7); no public certificate; no independent re-verification documented | **Strictly above MV**: `flint.arb` interval arithmetic at 256-bit precision, outward-rounded to exact rationals; SHA-256-anchored certificate `multiscale_arcsine_1292.json`; cross-check at 50 decimal digits via `audit3_mpmath.py` (independent arbitrary-precision library implementing the same mathematical formulas, so it catches arithmetic and library bugs but not formula bugs) |
 | Closing arithmetic | Numerical substitution (MV p. 7) | **Strictly above MV**: exact rational arithmetic, $\tau-\Phi(1292/1000)\ge 307/3190000\ge 9.6\times 10^{-5}$, machine-checked in Lean by `norm_num` |
 
 **In summary.** At the level of *provability*, every classical-analysis
@@ -462,71 +460,6 @@ more rigorous but contains new content. This is the same overall
 shape as Flyspeck (Hales 2017) and the PFR formalisation: cited
 classical analysis + new computer-assisted numerics.
 
-### Detailed accounting
-
-- **Analytic content: cited, not novel.** The conditional headline takes an
-  analytic-primitives record (`ExtremiserPrimitives f`) whose fields are formal
-  restatements of published, refereed results *evaluated at the
-  specific pair $(f, K_{\mathrm{ms}})$* (the unconditional headline
-  instead *derives* these fields axiom-free inside
-  `ExtremiserPrimitives.of_admissible`): the period-$u$ torus split
-  (MO 2009 Lemma 2.1; MV 2010 Eq.(3) / Lemma 3.1(3)); the
-  constant-plus-tail Parseval split for $\int(f\circ f)\,K$ (MO 2009
-  Lemma 3.2 proof; MV 2010 Lemma 3.3 proof); and the lattice
-  $F$-bound
-  $\sum_j \lvert\widehat{f}(j)\rvert^{4} \le \lVert f*f\rVert_{\infty}$
-  (MO 2009 Lemma 3.2 proof; MV 2010 Lemma 3.3 proof). MO 2009 Lemmas
-  3.1–3.4 and MV 2010 Lemma 3.1 require only that $K$ is a pdf
-  supported in $[-\delta,\delta]$ with $\widetilde{K}(j)\ge 0$ and
-  $K\in L^{2}$; $K_{\mathrm{ms}}$ satisfies all of these, so those
-  lemmas apply to $K_{\mathrm{ms}}$ directly (see "Applicability to
-  $K_{\mathrm{ms}}$" above). The paper discharges the bundle fields
-  by direct citation to MO 2009 / MV 2010 applied to
-  $K_{\mathrm{ms}}$ — see
-  <a href="#MV-primitives">[MV-primitives]</a> and
-  <a href="#MO-primitives">[MO-primitives]</a> for the verbatim
-  sources. The Lean theorem retains the bundle fields as named
-  hypotheses (rather than deriving them inside Lean) — a paper-side
-  citation-discharge, not a missing proof, and the standard
-  convention for cited classical analysis in computer-assisted
-  real-number proofs (Flyspeck, PFR, Cohn–Elkies sphere-packing).
-  Two distinct things must be kept separate: (a) the
-  citation-discharge of MO 2009 / MV 2010 at $K_{\mathrm{ms}}$ is
-  mathematical content, dispatched in exactly the same way MV 2010
-  dispatched its own applications of MO 2009; (b) the absence of a
-  packaged mathlib `v4.29.1` $L^{1}\cap L^{2}$ Plancherel +
-  period-$u$ Parseval API in the form `Sidon.MVLemmas` consumes is
-  engineering — the relevant building blocks live in
-  `Sidon.TorusParseval` and `Sidon.FourierAux` but have not yet been
-  packaged into a one-call constructor — and is irrelevant to the
-  validity of (a). No analytic content beyond what MV 2010 cites is
-  introduced.
-- **Numerical content: `flint.arb` certificates.** Inside Lean,
-  $K_2 \le 47897/10000$ and $a \ge 20925/100000$ are user axioms
-  recording outputs of the Arb certifier (the two reached by the
-  conditional headline); the unconditional headline reaches two more,
-  $\min_{[0,1/4]} G \ge 998/1000$ and the lattice positivity
-  $\widetilde{K_{\mathrm{ms}}}(j)>0$ for $j\in\{1,\dots,200\}$. All are
-  decidable
-  inequalities, established by the trusted external computation, and
-  cross-checked at 50 decimal digits by `mpmath` (independent
-  arbitrary-precision implementation; same mathematical formulas, so
-  the cross-check catches arithmetic / library bugs but not formula
-  bugs). They are not conjectural and are not stated in MV 2010.
-- **Trust set.** Beyond Lean's standard axioms, the bound rests on
-  exactly two items: (a) the cited MO 2009 / MV 2010 Fourier-analytic
-  identities and Schinzel–Schmidt 2002 Theorem 1 (analytic layer —
-  same as MV 2010), applied to the admissible kernel
-  $K_{\mathrm{ms}}$; (b) the new numerical anchors, which rest on
-  trust in `flint.arb` (peer-reviewed, Johansson 2017
-  <a href="#Flint">[Flint]</a>), the Python certifier driver
-  `bisect_alt_kernel.py`, and the independent `mpmath` cross-check
-  `audit3_mpmath.py`, with the SHA-256 anchor pinning the certificate
-  artefact <a href="#PBV-cert">[PBV-cert]</a>. Item (a) is inherited
-  from MV 2010; item (b) is additional, and is the same kind of
-  computer-assisted numerical layer used by Flyspeck, PFR, and the
-  Cohn–Elkies sphere-packing record.
-
 ## Additional comments and links
 
 - Canonical page: [`constants/1a.md`](https://teorth.github.io/optimizationproblems/constants/1a.html).
@@ -557,29 +490,29 @@ classical analysis + new computer-assisted numerics.
 
 - <a id="PBV2026"></a>**[PBV2026]** Piterbarg, Andrei; Bajaj, Jai; Vincent, Derrick. *A New Lower Bound for the Supremum of Autoconvolutions.* Preprint, 2026. This repository: `lower_bound_proof.tex` / `.pdf`; Lean under `lean/Sidon/`.
 	- <a id="PBV-def"></a>**[PBV-def]**
-	  **loc:** `lower_bound_proof.tex`, Subsection "The Constant $C_{1a}$" (`subsec:intro-constant`, lines 302–326).
+	  **loc:** `lower_bound_proof.tex`, Subsection "The Constant $C_{1a}$" (`subsec:intro-constant`, lines 332–357).
 	  **quote:** "$C_{1a} = \inf_{f\in\mathcal{F}} R(f)$, $R(f) := \lVert f*f\rVert_{\infty}/(\int f)^2$", with $\mathcal{F}$ the non-negative $f\in L^1(\mathbb{R})$ such that $\mathrm{supp}(f) \subseteq (-1/4,1/4)$ and $\int f > 0$.
 	- <a id="PBV-main"></a>**[PBV-main]**
-	  **loc:** `lower_bound_proof.tex`, Theorem "Main result" (`thm:main`, lines 379–390).
+	  **loc:** `lower_bound_proof.tex`, Theorem "Main result" (`thm:main`, lines 413–424).
 	  **quote:** "Let $f:\mathbb{R}\to\mathbb{R}$ be nonnegative with $\mathrm{supp}(f)\subseteq(-1/4,1/4)$, $\int f>0$, and $\lVert f*f\rVert_{\infty}<\infty$. Then $\lVert f*f\rVert_{\infty}/(\int f)^2 \ge 1292/1000$. In particular $C_{1a}\ge 1292/1000=1.292$."
 	- <a id="PBV-master"></a>**[PBV-master]**
-	  **loc:** `lower_bound_proof.tex`, Theorem "Master inequality, $z_1$-free form" (`thm:mv-master`, lines 443–454); the $z_1$-absorption is in the proof (lines 456–488).
+	  **loc:** `lower_bound_proof.tex`, Theorem "Master inequality, $z_1$-free form" (`thm:mv-master`, lines 477–488); the $z_1$-absorption is in the proof (lines 490–522).
 	  **quote:** "For $K$ Bochner-admissible at scale $\delta$, $u=1/2+\delta$, and $G$ admissible with constant $m_G$ (defining $S_1$, $a$): for every $f\in\mathcal{F}$ with $\int f>0$, $M + 1 + \sqrt{(M-1)(K_2-1)} \ge 2/u + a$." The sharp form additionally carries $k_1=\widehat{K}(1)$ and $z_1=\lvert\widehat{f}(1)\rvert$ and reduces to this form by Cauchy–Schwarz.
 	- <a id="PBV-inversion"></a>**[PBV-inversion]**
-	  **loc:** `lower_bound_proof.tex`, Lemma "Quadratic inversion" (`lem:inversion`, lines 490–501).
+	  **loc:** `lower_bound_proof.tex`, Lemma "Quadratic inversion" (`lem:inversion`, lines 558–569).
 	  **quote:** "$\Phi(M) := M+1+\sqrt{(M-1)(K_2-1)}$ is continuous and strictly increasing on $[1,\infty)$ with $\Phi(1)=2$; for $\tau\ge 2$, every $f\in\mathcal{F}$ with $\Phi(R(f))\ge\tau$ satisfies $R(f)\ge M_*$, the unique solution of $\Phi(M_*)=\tau$. With $\tau=2/u+a$, $C_{1a}\ge M_*$."
 	- <a id="PBV-kernel"></a>**[PBV-kernel]**
-	  **loc:** `lower_bound_proof.tex`, Definition "Three-scale kernel" (`def:Kms`, lines 675–695) and Theorem "Admissibility" (`thm:admissibility`, lines 716–728).
+	  **loc:** `lower_bound_proof.tex`, Definition "Three-scale kernel" (`def:Kms`, lines 854–874) and Theorem "Admissibility" (`thm:admissibility`, lines 895–907).
 	  **quote:** $(\delta_1,\delta_2,\delta_3)=(138,55,25)/1000$, $(\lambda_1,\lambda_2,\lambda_3)=(85,10,5)/100$, $u=1/2+\delta_1=638/1000$; $K_{\mathrm{ms}}=\sum_i \lambda_i K_{\mathrm{arc}}(\delta_i;\cdot)$ is Bochner-admissible with $\widetilde{K_{\mathrm{ms}}}(j)=\sum_i \lambda_i J_0(\pi j\delta_i/u)^2 \ge 0$; multiplier degree $N=200$.
 	- <a id="PBV-anchors"></a>**[PBV-anchors]**
-	  **loc:** `lower_bound_proof.tex`, Lemmas `lem:k1`, `lem:K2`, `lem:S1`, `lem:mG`, `lem:a` (lines 851–966) and table `tab:anchors` (lines 968–985).
+	  **loc:** `lower_bound_proof.tex`, Lemmas `lem:k1`, `lem:K2`, `lem:S1`, `lem:mG`, `lem:a` (lines 1041–1135) and table `tab:anchors` (lines 1158–1175).
 	  **quote:** $k_1 := \widehat{K_{\mathrm{ms}}}(1) \ge 9212/10000$; $K_2 := \lVert K_{\mathrm{ms}}\rVert_{2}^{2} \le 47897/10000$ (proof: bulk $[4.78882342,\,4.78890519]$ by arb adaptive Gauss–Legendre on $[0,10^{5}]$, tail $\le 8.19\times 10^{-5}$ via the Watson envelope $\lvert J_0(z)\rvert^{2}\le 2/(\pi z)$ for $z>0$); $S_1 = \sum_{j=1}^{200} a_j^{2}/\widetilde{K_{\mathrm{ms}}}(j) \le 29841/1000$; $m_G := \min_{[0,1/4]} G \ge 998/1000$ (32768-cell second-order Taylor B&B in arb); $a = (4/u)\,m_G^{2}/S_1 \ge 20925/100000$.
 	- <a id="PBV-fail"></a>**[PBV-fail]**
-	  **loc:** `lower_bound_proof.tex`, Proposition "Strict failure at the rational witness" (`prop:fail`, lines 1029–1037; proof through line 1068).
+	  **loc:** `lower_bound_proof.tex`, Proposition "Strict failure at the rational witness" (`prop:fail`, lines 1219–1227; proof through line 1258).
 	  **quote:** "$\Phi(1292/1000) \le 66879/20000 = 3.34395 < 4267003/1276000 \le \tau$, with margin $\tau-\Phi(1292/1000) \ge 307/3190000 \ge 9.6\times10^{-5} > 0$." The Arb cell-search using the sharper refined inequality (which involves $k_1$) independently re-certifies $M_{\mathrm{cert}}\ge 1.29232$.
 	- <a id="PBV-lean"></a>**[PBV-lean]**
-	  **loc (core module).** `lean/Sidon/MultiScale.lean`: numerical axioms `K2_analytic_le_K2UpperQ` at line 1001, `gain_analytic_ge_gainLowerQ` at line 1029, and `min_G_analytic_ge_minGLowerQ` at line 1068; `ExtremiserPrimitives` structure at line 1468; conditional headline `autoconvolution_ratio_ge_1292_1000` at line 1589; slack-soundness theorems `K_two_upper_bound`, `k_one_lower_bound`, `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound` at lines 1093–1115; `autoconvolution_ratio` definition in `Sidon.Defs`. (Line anchors verified against source at `mathlib v4.29.1`, commit `5e932f97dd25535344f80f9dd8da3aab83df0fe6`.)
-	  **loc (constructor chain).** The unconditional headline and the admissibility-to-bundle constructor live under `lean/Sidon/Constructor/` (17 axiom-free modules, 7915 LoC): `ExtremiserPrimitives.of_admissible` at `Constructor/Assembly.lean:108`; unconditional headline `C1a_ge_1292_unconditional` at `Constructor/Assembly.lean:239`; the fourth numerical axiom `K_ms_fourier_lattice_pos_active` at `Constructor/LatticePositivity.lean:187`. The whole formalisation totals 30 modules (~15.6 kLoC: 13 core `Sidon/*.lean` at 7658 LoC plus the 17 `Sidon/Constructor/*.lean` at 7915 LoC). The previously exported Schwartz variants (`autoconvolution_ratio_ge_1292_1000_schwartz` and `_schwartz_residual`) and their backing modules (`Sidon.MultiScaleSchwartz` and `Sidon.SchwartzAtomicDischarge`) were retired by the S1+S2 refactor and no longer exist in the repository. (The file names `BundleEq2Schwartz.lean` and `BundleEq3Schwartz.lean` retain the `Schwartz` suffix from the pre-S1+S2 module layout, but their contents now serve the general bundle discharge for the headline; renaming is a deferred cosmetic.)
+	  **loc (core module).** `lean/Sidon/MultiScale.lean`: numerical axioms `K2_analytic_le_K2UpperQ` at line 998, `gain_analytic_ge_gainLowerQ` at line 1026, and `min_G_analytic_ge_minGLowerQ` at line 1065; `ExtremiserPrimitives` structure at line 1465; conditional headline `autoconvolution_ratio_ge_1292_1000` at line 1586; slack-soundness theorems `K_two_upper_bound`, `k_one_lower_bound`, `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound` at lines 1090–1112; `autoconvolution_ratio` definition in `Sidon.Defs`. (Line anchors verified against source at `mathlib v4.29.1`, commit `5e932f97dd25535344f80f9dd8da3aab83df0fe6`.)
+	  **loc (constructor chain).** The unconditional headline and the admissibility-to-bundle constructor live under `lean/Sidon/Constructor/` (17 axiom-free modules, 7922 LoC): `ExtremiserPrimitives.of_admissible` at `Constructor/Assembly.lean:107`; unconditional headline `C1a_ge_1292_unconditional` at `Constructor/Assembly.lean:246`; the fourth numerical axiom `K_ms_fourier_lattice_pos_active` at `Constructor/LatticePositivity.lean:187`. The whole formalisation totals 30 modules (~15.6 kLoC: 13 core `Sidon/*.lean` at 7655 LoC plus the 17 `Sidon/Constructor/*.lean` at 7922 LoC). The previously exported Schwartz variants (`autoconvolution_ratio_ge_1292_1000_schwartz` and `_schwartz_residual`) and their backing modules (`Sidon.MultiScaleSchwartz` and `Sidon.SchwartzAtomicDischarge`) were retired by the S1+S2 refactor and no longer exist in the repository. (The file names `BundleEq2Schwartz.lean` and `BundleEq3Schwartz.lean` retain the `Schwartz` suffix from the pre-S1+S2 module layout, but their contents now serve the general bundle discharge for the headline; renaming is a deferred cosmetic.)
 	  **axiom inventory (two headlines).** The formalisation exports two headlines with distinct dependency closures:
 	  • *Conditional* `autoconvolution_ratio_ge_1292_1000` takes `(P : ExtremiserPrimitives f)` as a hypothesis and concludes `autoconvolution_ratio f ≥ 1292/1000`; its user-axiom closure is exactly two kernel-specific facts, `K2_analytic_le_K2UpperQ` ($K_2 \le 47897/10000$) and `gain_analytic_ge_gainLowerQ` ($a \ge 20925/100000$).
 	  • *Unconditional* `C1a_ge_1292_unconditional` takes only raw admissibility hypotheses (`Integrable f`, `MemLp f 2`, $\mathrm{supp}\,f \subseteq (-1/4,1/4)$, $f\ge 0$, $\int f = 1$) and *constructs* the bundle via `ExtremiserPrimitives.of_admissible`; its user-axiom closure is four kernel-specific facts — the two above plus `min_G_analytic_ge_minGLowerQ` ($\min_{[0,1/4]} G \ge 998/1000$) and `K_ms_fourier_lattice_pos_active` ($\widetilde{K_{\mathrm{ms}}}(j) > 0$ for every $j\in\{1,\dots,200\}$). All four are logically decidable, `flint.arb`-backed at 256-bit precision, mpmath-corroborated, and SHA-256-anchored. Both closures additionally reach Lean's three core logical axioms (`propext`, `Classical.choice`, `Quot.sound`).
@@ -611,41 +544,7 @@ classical analysis + new computer-assisted numerics.
 	  **loc 3:** MV 2010, p. 7, Eq.(10) (master inequality in the assembled form used by the present work).
 	  **quote 3:** "$\frac{2}{u} + a \le \lVert f*f\rVert_\infty + 1 + 2 z_1^2 k_1 + \sqrt{\lVert f*f\rVert_\infty - 1 - 2 z_1^4}\sqrt{0.5747/\delta - 1 - 2 k_1^2}.$"
 	  **loc 4:** MV 2010 (arXiv:0907.1379v2), p. 3, Lemma 3.1, Eq.(4) (multiplier floor — lower bound on the period-$u$ Fourier energy of $f$ weighted by $\widetilde K$, in terms of the multiplier minimum $m_G$ and the QP denominator).
-	  **quote 4 (verbatim):** "Let $G$ be an even, real-valued, $u$-periodic function that takes positive values on $[-1/4, 1/4]$, and satisfies $\widetilde G(0) = 0$. Then $u^{2} \sum_{j\ne 0} (\Re \widetilde f(j))^{2}\, \widetilde K(j) \ge \big(\min_{0\le x\le 1/4} G(x)\big)^{2} \cdot \big(\sum_{j:\,\widetilde G(j)\ne 0} \widetilde G(j)^{2} / \widetilde K(j)\big)^{-1}.$" This is precisely the `hEq4` field of `ExtremiserPrimitives` (Lean literal: `(uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G`) displayed under "The 'Eq.(4) floor'" above — the inequality is stated by MV in this squared form directly; no Sedrakyan/Engel step is interposed in MV's statement (the underlying lattice Cauchy–Schwarz step is, however, used in the manuscript's proof of Lemma 2.5(4) when *deriving* this floor from the atomic MO 2009 primitives, cf. `lower_bound_proof.tex` lines 586–596). The positivity hypothesis is on $[-1/4, 1/4]$ (matching the Lean `mv_inner_product_floor` hypothesis `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x`), and via evenness of $G$ reduces to $[0, 1/4]$, which is exactly the interval over which the certifier's 32768-cell Taylor B&B in `delsarte_dual/grid_bound/G_min.py` proves $m_G \ge 998/1000$.
-
-### Schwartz-class textbook backups for MO 2.1 / 2.2 (Poisson summation, Plancherel, Wiener–Khinchin)
-
-The Fourier-analytic inputs invoked by MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 — period-$u$ Parseval, period-1 Parseval on $L^2((-1/2, 1/2))$, the convolution-Fourier identity $\widehat{f*g} = \hat f \, \hat g$, and Plancherel for $\mathcal{S}(\mathbb{R})$ — admit textbook-level discharges when $f$ is taken in the Schwartz class $\mathcal{S}(\mathbb{R})$ (which is dense in the admissible class $\mathcal{F}$ via Schinzel–Schmidt 2002). The references below are the standard graduate-textbook sources and provide a parallel citation chain.
-
-<a name="SteinShakarchi2003">[SteinShakarchi2003]</a>
-Elias M. Stein and Rami Shakarchi, *Fourier Analysis: An Introduction*, Princeton Lectures in Analysis, vol. 1, Princeton University Press, 2003.
-- **Theorem 3.1 (Ch. 5, §5.3, pp. 153–155):** Poisson summation formula for Schwartz $f$: $\sum_{n\in\mathbb{Z}} f(n) = \sum_{n\in\mathbb{Z}} \hat f(n)$, proved by uniformly convergent periodization $F(x) = \sum_n f(x+n)$.
-- **Proposition 1.7 (Ch. 5, §5.1):** $(f*g)^{\wedge}(\xi) = \hat f(\xi) \hat g(\xi)$ and other elementary FT properties on $\mathcal{S}$.
-- **Theorem 1.5 (Ch. 5, §5.1, pp. 142–144):** Plancherel $\|f\|_2 = \|\hat f\|_2$ on $\mathcal{S}$, extended to $L^2$ by density.
-- Period-$u$ rescaling (substitute $f \mapsto f(\cdot/u)$, $\hat f \mapsto u\,\hat f(u\cdot)$) is recorded on p. 155 immediately following Theorem 3.1.
-
-<a name="Grafakos2014">[Grafakos2014]</a>
-Loukas Grafakos, *Classical Fourier Analysis*, 3rd ed., Graduate Texts in Mathematics, vol. 249, Springer, 2014.
-- **Theorem 3.2.8 (Poisson summation, §3.2):** For continuous integrable $f$ on $\mathbb{R}^n$ with $|f(x)|, |\hat f(\xi)| \le C(1+|\cdot|)^{-n-\delta}$ for some $\delta > 0$, $\sum_{m\in\mathbb{Z}^n} f(m) = \sum_{m\in\mathbb{Z}^n} \hat f(m)$. Schwartz functions satisfy the decay hypothesis.
-- **Corollary 3.2.10:** Period rescaling — used to pass from $\mathbb{Z}$ to $u\mathbb{Z}$.
-- **Proposition 2.2.11 (item 11), §2.2:** $\widehat{f*g} = \hat f \hat g$; combined with $\widehat{\bar f(-\cdot)} = \overline{\hat f}$ this gives the Wiener–Khinchin identity $\widehat{f * \tilde f} = |\hat f|^2$ for real $f$, where $\tilde f(x) = f(-x)$.
-- **Theorem 2.2.14 (Plancherel):** $\|\hat f\|_2 = \|f\|_2$ on $L^2(\mathbb{R}^n)$.
-
-<a name="SteinWeiss1971">[SteinWeiss1971]</a>
-Elias M. Stein and Guido Weiss, *Introduction to Fourier Analysis on Euclidean Spaces*, Princeton Mathematical Series, vol. 32, Princeton University Press, 1971.
-- **Corollary VII.2.6 (Ch. VII, §2, p. 252):** Multi-dimensional Poisson summation for $f$ with decay $|f|, |\hat f| \le C|\cdot|^{-b}$, $b > n$; Schwartz $\Rightarrow$ hypothesis. **This is the reference cited by mathlib's `Real.tsum_eq_tsum_fourier_of_rpow_decay` Poisson-summation lemma** (`Mathlib/Analysis/Fourier/PoissonSummation.lean`, lines 210–211: *"one-dimensional case of Corollary VII.2.6 of Stein and Weiss, Introduction to Fourier analysis on Euclidean spaces"*), the polynomial-decay specialisation of the underlying `Real.tsum_eq_tsum_fourier`.
-
-<a name="Folland1999">[Folland1999]</a>
-Gerald B. Folland, *Real Analysis: Modern Techniques and Their Applications*, 2nd ed., Pure and Applied Mathematics, Wiley, 1999.
-- **Theorem 8.36 (Ch. 8, §8.4, pp. 254–255):** Poisson summation for $f, \hat f \in L^1$ with appropriate decay.
-- **Theorem 8.22(d):** $(f*g)^{\wedge} = \hat f \hat g$ and the conjugate-symmetry identities yielding the autocorrelation–Fourier formula.
-- **Theorem 8.29:** $L^2$ Plancherel via density of $\mathcal{S}$.
-
-<a name="Hormander1990">[Hormander1990]</a>
-Lars Hörmander, *The Analysis of Linear Partial Differential Operators I*, 2nd ed., Grundlehren der mathematischen Wissenschaften, vol. 256, Springer, 1990.
-- **Theorem 7.2.1 (§7.2, pp. 178–179):** Distributional form of Poisson summation — $\sum_n \delta_n = \sum_k e^{2\pi i k \cdot}$ in $\mathcal{S}'(\mathbb{R})$ — applied to Schwartz $f$ by pairing.
-
-**Role in the present argument.** When the Lean discharge of the `ExtremiserPrimitives` bundle is read for a Schwartz mollification of an admissible $f$ (which loses no generality by Schinzel–Schmidt 2002; see the reduction at the top of this file), each of the four MO 2009 / MV 2010 outputs may equivalently be derived from these textbook-level building blocks: period-$u$ Parseval (MO 2.1) ⟸ Poisson summation (Stein–Shakarchi Thm 3.1 / Grafakos Thm 3.2.8); period-1 Parseval (MO 2.2) ⟸ same with $u=1$; the Wiener–Khinchin identity for $\widehat{f\circ f} = |\hat f|^2$ ⟸ Grafakos Prop 2.2.11 / Folland Thm 8.22(d); Plancherel ⟸ Stein–Shakarchi Thm 1.5 / Grafakos Thm 2.2.14. The combination of mathlib's existing `Real.tsum_eq_tsum_fourier` (which cites Stein–Weiss Cor. VII.2.6) and `Sidon.BilinearParseval.bilinear_parseval_period_u` (already in this repository) reduces the bundle's Lean-side discharge to direct mathlib API — see the Lean engineering note in `docs/formalization.md`.
+	  **quote 4 (verbatim):** "Let $G$ be an even, real-valued, $u$-periodic function that takes positive values on $[-1/4, 1/4]$, and satisfies $\widetilde G(0) = 0$. Then $u^{2} \sum_{j\ne 0} (\Re \widetilde f(j))^{2}\, \widetilde K(j) \ge \big(\min_{0\le x\le 1/4} G(x)\big)^{2} \cdot \big(\sum_{j:\,\widetilde G(j)\ne 0} \widetilde G(j)^{2} / \widetilde K(j)\big)^{-1}.$" This is precisely the `hEq4` field of `ExtremiserPrimitives` (Lean literal: `(uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G`) displayed under "The 'Eq.(4) floor'" above — the inequality is stated by MV in this squared form directly; no Sedrakyan/Engel step is interposed in MV's statement (the underlying lattice Cauchy–Schwarz step is, however, used in the manuscript's proof of Lemma 2.5(4) when *deriving* this floor from the atomic MO 2009 primitives, cf. `lower_bound_proof.tex` lines 675–682). The positivity hypothesis is on $[-1/4, 1/4]$ (matching the Lean `mv_inner_product_floor` hypothesis `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x`), and via evenness of $G$ reduces to $[0, 1/4]$, which is exactly the interval over which the certifier's 32768-cell Taylor B&B in `delsarte_dual/grid_bound/G_min.py` proves $m_G \ge 998/1000$.
 
 - <a id="MV-reduction"></a>**[MV-reduction]** Verbatim source for the $\mathcal{F}\to$ square-integrable reduction invoked by the present work, exactly as in MV 2010.
 	  **loc:** MV 2010 (arXiv:0907.1379v2), p. 2, §2 ("Notation"), opening paragraph.
@@ -664,6 +563,6 @@ Lars Hörmander, *The Analysis of Linear Partial Differential Operators I*, 2nd 
 
 - <a id="XX2026"></a>**[XX2026]** Xie, Xinyuan. *Unpublished improvement to the lower bound for $C_{1a}$ (claiming $C_{1a} \ge 1.2802$).* 2026. Listed on the canonical page as "Unpublished improvement, Grok".
 
-- <a id="Watson"></a>**[Watson]** Watson, G. N. *A Treatise on the Theory of Bessel Functions.* 2nd ed., Cambridge University Press, 1944. §7.21 contains the classical envelope $\lvert J_0(z)\rvert \le \sqrt{2/(\pi z)}$ for $z>0$, equivalently $\lvert J_0(z)\rvert^{2}\le 2/(\pi z)$. Used to control the $K_2$ tail past $\xi=10^{5}$ (`lower_bound_proof.tex` line 672; the same attribution is recorded in `delsarte_dual/grid_bound_alt_kernel/kernels.py`).
+- <a id="Watson"></a>**[Watson]** Watson, G. N. *A Treatise on the Theory of Bessel Functions.* 2nd ed., Cambridge University Press, 1944. §7.21 contains the classical envelope $\lvert J_0(z)\rvert \le \sqrt{2/(\pi z)}$ for $z>0$, equivalently $\lvert J_0(z)\rvert^{2}\le 2/(\pi z)$. Used to control the $K_2$ tail past $\xi=10^{5}$ (`lower_bound_proof.tex` line 1072; the same attribution is recorded in `delsarte_dual/grid_bound_alt_kernel/kernels.py`).
 
 - <a id="Flint"></a>**[Flint]** Johansson, Fredrik. *Arb: efficient arbitrary-precision midpoint-radius interval arithmetic.* IEEE Trans. Comput. **66** (2017), no. 8, 1281–1292. [arblib.org](http://arblib.org/) — the interval-arithmetic library underlying every certified anchor.
