@@ -121,7 +121,7 @@ $$2 z_1^{2} k_1 + \sqrt{(M-1-2 z_1^{4})(K_2-1-2 k_1^{2})} \;\le\; \sqrt{(M-1)(K_
 *Proof.* Apply the elementary inequality $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ (Cauchy–Schwarz on the vectors $(\sqrt a,\sqrt b),(\sqrt c,\sqrt d)$) to $(a,b,c,d) = (2 z_1^{4},\,M-1-2 z_1^{4},\,2 k_1^{2},\,K_2-1-2 k_1^{2})$. Then $\sqrt{ac} = \sqrt{4 z_1^{4} k_1^{2}} = 2 z_1^{2} k_1$ and $(a+b)(c+d) = (M-1)(K_2-1)$. $\square$
 
 Combining the lemma with Eq.(10) yields the $z_1$-free master inequality
-$$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{$\ast$}$$
+$$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{\ast}$$
 in which only the kernel/multiplier quantities $K_2$ and $a$ appear. This $z_1$-absorption is the one analytic step in the present work beyond MV 2010; the displayed proof is the entire derivation. The corresponding Lean theorem is in `Sidon.MasterFromLemmas`.
 
 **The three-scale kernel.** Let $\eta(x) := (2/\pi)\,(1-4x^2)^{-1/2}\,\mathbf{1}_{|x|<1/2}$ be the arcsine density of half-width $1/2$, and write the $\delta$-rescaled autoconvolution
