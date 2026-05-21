@@ -3,9 +3,11 @@
 ## Description of constant
 
 $C_{1a}$ is the largest constant for which one has
+
 $$
 \max_{-1/2 \leq t \leq 1/2} \int_{\mathbb{R}} f(t-x) f(x)\,dx \;\geq\; C_{1a} \left(\int_{-1/4}^{1/4} f(x)\,dx\right)^{2}
 $$
+
 for all non-negative $f \colon \mathbb{R} \to \mathbb{R}$.
 <a href="#1a-def">[1a-def]</a>
 
@@ -101,31 +103,45 @@ admissible $f$. Any valid pair yields some bound; a well-chosen pair
 yields a strong one <a href="#PBV-master">[PBV-master]</a>.
 
 **The master inequality.** Apply MO 2009 Lemmas 2.1–3.3 / MV 2010 Lemma 3.1 to the pair $(f, K_{\mathrm{ms}})$, where $f$ is a square-integrable pdf supported in $(-1/4, 1/4)$ (cf. "Applicability to $K_{\mathrm{ms}}$" below) and $G$ is the cosine multiplier described in the next paragraph. Assembling the period-$u$ torus split (Eq.(3); MO Lemma 3.3), the constant-plus-tail Parseval split for $\int(f\circ f)K$ (proof of MO Lemma 3.2), the lattice $F$-bound $\sum_j \lvert\widehat f(j)\rvert^{4}\le \lVert f*f\rVert_{\infty}$ (also from the proof of MO Lemma 3.2, using $\lVert f*f\rVert_1 = 1$), the multiplier floor (the "Eq.(4) floor" — see below), and one Cauchy–Schwarz step on the QP weights yields MV 2010 Eq.(10) in its general form: for every admissible $f$,
+
 $$\tfrac{2}{u} + a \;\le\; M + 1 + 2 z_1^{2} k_1 + \sqrt{(M - 1 - 2 z_1^{4})(K_2 - 1 - 2 k_1^{2})},$$
+
 with $M = R(f)$, $z_1 = \lvert\widehat f(1)\rvert$, $K_2 = \lVert K_{\mathrm{ms}}\rVert_2^{2}$, $k_1 = \widehat{K_{\mathrm{ms}}}(1)$, $u = 1/2 + \delta_1$, and $a$ defined in the table below <a href="#PBV-master">[PBV-master]</a>.
 
 **The 'Eq.(4) floor'.** The bundle field `hEq4` of `ExtremiserPrimitives`
 (Lean literal: `(uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G`) encodes the
 lower bound
+
 $$u^{2} \sum_{j\ne 0} (\Re \widetilde f(j))^{2}\, \widetilde K(j) \;\ge\; m_G^{2} \big/ S_G, \qquad S_G \;:=\; \sum_{j:\,\widetilde G(j)\ne 0} \widetilde G(j)^{2} \big/ \widetilde K(j),$$
+
 which is MV 2010 Lemma 3.1 part (4) applied at $(f, K_{\mathrm{ms}}, G)$, where $G$ is an even, real-valued, $u$-periodic function that takes positive values on $[-1/4, 1/4]$ with $\widetilde G(0)=0$, and $m_G := \min_{0\le x\le 1/4} G(x)$ (the half-interval suffices by evenness of $G$). For the cosine multiplier $G(x) = \sum_{k=1}^{N} a_k\cos(2\pi kx/u)$ described in the next paragraph, $\widetilde G$ denotes the Parseval-normalised period-$u$ Fourier coefficient
+
 $$\widetilde G(j) \;:=\; u^{-1/2}\int_{-u/2}^{u/2} G(x)\, e^{-2\pi i j x/u}\,dx,$$
+
 so $\widetilde G(0)=0$, $\widetilde G(\pm j) = a_j\sqrt{u}/2$ for $1\le j\le N$, and $\widetilde G(j) = 0$ for $|j|>N$. Writing $S_1 := \sum_{j=1}^{N} a_j^{2}/\widetilde K(j)$ (which matches Lean's `S_1_analytic` and the anchor-table entry below), the displayed $S_G$ specialises by even symmetry to
+
 $$S_G \;=\; 2\sum_{j=1}^{N}\bigl(a_j\sqrt{u}/2\bigr)^{2}\big/\widetilde K(j) \;=\; \tfrac{u}{2}\,S_1.$$
+
 The bundle is instantiated with $S_G := u_{\mathrm{real}}\cdot S_1/2$, in agreement with this derivation, and the Lemma 3.1(3) gain identity $a = 2 m_G^{2}/S_G$ then reduces to $a = (4/u)\,m_G^{2}/S_1$ — exactly the formula recorded in the anchor table below. The Lean encoding of the underlying inner-product floor is `Sidon.MV.mv_inner_product_floor` in `Sidon.MVLemmas`, whose hypothesis is `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x` — exactly MV's `[-1/4,1/4]` positivity hypothesis, not the larger interval $(-1/2,1/2)$.
 
 **The $z_1$-free reduction (this work).** Equation (10) above carries $z_1$, an uncontrolled Fourier coefficient of the unknown extremiser. We absorb it by Cauchy–Schwarz:
 
 *Lemma ($z_1$-absorption).* For any real $z_1, k_1$ with $2 z_1^{4}\le M-1$ and $2 k_1^{2}\le K_2-1$,
+
 $$2 z_1^{2} k_1 + \sqrt{(M-1-2 z_1^{4})(K_2-1-2 k_1^{2})} \;\le\; \sqrt{(M-1)(K_2-1)}.$$
+
 *Proof.* Apply the elementary inequality $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ (Cauchy–Schwarz on the vectors $(\sqrt a,\sqrt b),(\sqrt c,\sqrt d)$) to $(a,b,c,d) = (2 z_1^{4},\,M-1-2 z_1^{4},\,2 k_1^{2},\,K_2-1-2 k_1^{2})$. Then $\sqrt{ac} = \sqrt{4 z_1^{4} k_1^{2}} = 2 z_1^{2} k_1$ and $(a+b)(c+d) = (M-1)(K_2-1)$. $\square$
 
 Combining the lemma with Eq.(10) yields the $z_1$-free master inequality
+
 $$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{\ast}$$
+
 in which only the kernel/multiplier quantities $K_2$ and $a$ appear. This $z_1$-absorption is the one analytic step in the present work beyond MV 2010; the displayed proof is the entire derivation. The corresponding Lean theorem is in `Sidon.MasterFromLemmas`.
 
 **The three-scale kernel.** Let $\eta(x) := (2/\pi)\,(1-4x^2)^{-1/2}\,\mathbf{1}_{|x|<1/2}$ be the arcsine density of half-width $1/2$, and write the $\delta$-rescaled autoconvolution
+
 $$K_{\mathrm{arc}}(\delta; x) \;:=\; \delta^{-1}\,(\eta * \eta)(x/\delta).$$
+
 (Equivalently, with the paper's and Lean's $\delta$-scaled density $\eta_\delta(x) := \delta^{-1}(2/\pi)(1-(2x/\delta)^2)^{-1/2}\mathbf{1}_{|x|<\delta/2}$ supported on $(-\delta/2,\delta/2)$, one has $K_{\mathrm{arc}}(\delta;\cdot) = \eta_\delta*\eta_\delta$; the two presentations yield the identical kernel on $[-\delta,\delta]$.)
 Then $K_{\mathrm{arc}}(\delta; \cdot)$ is a probability density supported on $[-\delta,\delta]$ (since $\mathrm{supp}(\eta * \eta) = [-1, 1]$ and the rescaling contracts by $\delta$), and its continuous Fourier transform, under the convention $\widehat g(\xi) := \int_{\mathbb{R}} g(x) e^{-2\pi i x \xi}\,dx$, is $\widehat{K_{\mathrm{arc}}}(\delta;\xi) = J_0(\pi\delta\xi)^{2}\ge 0$. Any convex combination of such kernels is therefore Bochner-admissible. Matolcsi–Vinuesa used a single
 arcsine kernel. Here $K = K_{\mathrm{ms}}$ is a convex combination of
@@ -239,21 +255,27 @@ $\Phi(R(f)) \ge \tau$ for every admissible $f$. Since $\Phi$ is
 continuous and strictly increasing in $M$, if $\Phi(M_0) < \tau$ at a
 fixed rational $M_0$, then $R(f) > M_0$ for all $f$, so $C_{1a} \ge M_0$ <a href="#PBV-inversion">[PBV-inversion]</a>. Take
 $M_0 = 1292/1000$. From $u = 638/1000$ and $a \ge 20925/100000$,
+
 $$
 \tau \;=\; \frac{2}{u} + a \;\ge\; \frac{2000}{638} + \frac{20925}{100000} \;=\; \frac{4267003}{1276000} \;=\; 3.344046\ldots .
 $$
+
 From $K_2 \le 47897/10000$ and
 $(M_0-1)(K_2-1) \le (292/1000)(37897/10000) = 11065924/10^{7}$, the
 rational $105195/10^{5}$ majorises the square root because
 $(105195/10^{5})^{2} = 11065988025/10^{10} \ge 11065924/10^{7}$, so
+
 $$
 \Phi(1292/1000) \;\le\; \frac{1292}{1000} + 1 + \frac{105195}{10^{5}} \;=\; \frac{66879}{20000} \;=\; 3.34395 .
 $$
+
 Hence the inequality strictly fails at $M_0$, with an exactly
 rational margin
+
 $$
 \tau - \Phi(1292/1000) \;\ge\; \frac{4267003}{1276000} - \frac{66879}{20000} \;=\; \frac{307}{3190000} \;\ge\; 9.6\times10^{-5} \;>\; 0 ,
 $$
+
 yielding $C_{1a} \ge 1292/1000 = 1.292$ <a href="#PBV-fail">[PBV-fail]</a>.
 The closing step is exact rational arithmetic, independent of any
 floating-point computation.
