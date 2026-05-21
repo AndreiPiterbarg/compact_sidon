@@ -129,11 +129,8 @@ $$K_{\mathrm{arc}}(\delta; x) \;:=\; \delta^{-1}\,(\eta * \eta)(x/\delta).$$
 (Equivalently, with the paper's and Lean's $\delta$-scaled density $\eta_\delta(x) := \delta^{-1}(2/\pi)(1-(2x/\delta)^2)^{-1/2}\mathbf{1}_{|x|<\delta/2}$ supported on $(-\delta/2,\delta/2)$, one has $K_{\mathrm{arc}}(\delta;\cdot) = \eta_\delta*\eta_\delta$; the two presentations yield the identical kernel on $[-\delta,\delta]$.)
 Then $K_{\mathrm{arc}}(\delta; \cdot)$ is a probability density supported on $[-\delta,\delta]$ (since $\mathrm{supp}(\eta * \eta) = [-1, 1]$ and the rescaling contracts by $\delta$), and its continuous Fourier transform, under the convention $\widehat g(\xi) := \int_{\mathbb{R}} g(x) e^{-2\pi i x \xi}\,dx$, is $\widehat{K_{\mathrm{arc}}}(\delta;\xi) = J_0(\pi\delta\xi)^{2}\ge 0$. Any convex combination of such kernels is therefore Bochner-admissible. Matolcsi–Vinuesa used a single
 arcsine kernel. Here $K = K_{\mathrm{ms}}$ is a convex combination of
-**three**, with half-widths $(\delta_1,\delta_2,\delta_3) =
-(138,55,25)/1000$, weights $(\lambda_1,\lambda_2,\lambda_3) =
-(85,10,5)/100$, and period $u = 1/2+\delta_1 = 638/1000$; its periodic
-coefficients are $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i
-J_0(\pi j\delta_i/u)^{2} \ge 0$. The multiplier $G$ is re-optimised
+**three**, with half-widths $(\delta_1,\delta_2,\delta_3) = (138,55,25)/1000$, weights $(\lambda_1,\lambda_2,\lambda_3) = (85,10,5)/100$, and period $u = 1/2+\delta_1 = 638/1000$; its periodic
+coefficients are $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i J_0(\pi j\delta_i/u)^{2} \ge 0$. The multiplier $G$ is re-optimised
 for this kernel as a $200$-term cosine sum
 <a href="#PBV-kernel">[PBV-kernel]</a>. The $200$ rational coefficients $a_j$ are produced by a convex QP (`cvxpy` with solver fallback MOSEK $\to$ CLARABEL $\to$ SCS $\to$ ECOS), then rounded to a common denominator $\le 10^{8}$ and stored as the `coeffs_q` array in the SHA-256-anchored certificate `multiscale_arcsine_1292.json` (representative entries $a_1 = 95403771/50000000$, $a_2 = -161500769/100000000$). The solver's correctness does not enter the proof: only the recorded rationals are used downstream, and the certifier independently verifies $m_G\ge 998/1000$ and $S_1\le 29841/1000$ from them by `flint.arb` interval arithmetic. These parameters were chosen
 by numerical search; the bound below is valid regardless of whether
@@ -174,8 +171,7 @@ and $(-\infty,-\alpha_2)$, which are *open* sets disjoint from the
 are excluded on both sides, so equality is admissible in the
 hypothesis. (ii) MO Lemma 2.1 is a statement about $L^{2}$ classes
 (both sides are unchanged under modification of $g_i$ on a
-Lebesgue-null set), so even though $K_{\mathrm{arc}}(\delta_i;\cdot)
-=\eta_{\delta_i}*\eta_{\delta_i}$ has closed support
+Lebesgue-null set), so even though $K_{\mathrm{arc}}(\delta_i;\cdot) =\eta_{\delta_i}*\eta_{\delta_i}$ has closed support
 $[-\delta_i,\delta_i]$, it is continuous near and vanishes at the
 endpoints $\pm\delta_i$ (there the supports of the two arcsine factors
 $\eta_{\delta_i}\subseteq(-\delta_i/2,\delta_i/2)$ meet only at a
@@ -185,8 +181,7 @@ represent its $L^{2}$ class as a function supported in the open
 interval $(-\delta_i,\delta_i)$ (note $K_{\mathrm{arc}}$ is *not*
 globally continuous: it carries a logarithmic singularity at the
 origin, where $\int\eta_{\delta_i}^{2}=\infty$);
-the same applies to $K_{\mathrm{ms}}=\sum_i\lambda_i
-K_{\mathrm{arc}}(\delta_i;\cdot)$ on $(-\delta_1,\delta_1)$.
+the same applies to $K_{\mathrm{ms}}=\sum_i\lambda_i K_{\mathrm{arc}}(\delta_i;\cdot)$ on $(-\delta_1,\delta_1)$.
 With this $L^{2}$-class representative the hypothesis of MO Lemma
 2.1 holds with strict inequality on the support sets, and the
 identity is in any case insensitive to measure-zero modifications
@@ -239,12 +234,10 @@ $1/5000=2.0\times 10^{-4}$. This guarantees $S_1$ is finite and
 furnishes the positivity hypothesis under which the $S_1$ upper bound
 is certified.
 
-**Closing the inequality.** Set $\Phi(M) = M + 1 +
-\sqrt{(M-1)(K_2-1)}$ and $\tau = 2/u + a$. The master inequality says
+**Closing the inequality.** Set $\Phi(M) = M + 1 + \sqrt{(M-1)(K_2-1)}$ and $\tau = 2/u + a$. The master inequality says
 $\Phi(R(f)) \ge \tau$ for every admissible $f$. Since $\Phi$ is
 continuous and strictly increasing in $M$, if $\Phi(M_0) < \tau$ at a
-fixed rational $M_0$, then $R(f) > M_0$ for all $f$, so $C_{1a} \ge
-M_0$ <a href="#PBV-inversion">[PBV-inversion]</a>. Take
+fixed rational $M_0$, then $R(f) > M_0$ for all $f$, so $C_{1a} \ge M_0$ <a href="#PBV-inversion">[PBV-inversion]</a>. Take
 $M_0 = 1292/1000$. From $u = 638/1000$ and $a \ge 20925/100000$,
 $$
 \tau \;=\; \frac{2}{u} + a \;\ge\; \frac{2000}{638} + \frac{20925}{100000} \;=\; \frac{4267003}{1276000} \;=\; 3.344046\ldots .
@@ -272,8 +265,7 @@ and the rational closing arithmetic — is mechanised in Lean 4
 7655 lines plus 17 `Sidon/Constructor/*.lean` at 7922 lines, `mathlib
 v4.29.1`, no `sorry`). The formalisation exports two headlines, both
 concluding `autoconvolution_ratio f ≥ 1292/1000`, where
-`autoconvolution_ratio` is the Lean definition of $R(f) = \lVert
-f*f\rVert_{\infty}/(\int f)^{2}$ in `Sidon.Defs`:
+`autoconvolution_ratio` is the Lean definition of $R(f) = \lVert f*f\rVert_{\infty}/(\int f)^{2}$ in `Sidon.Defs`:
 - The *conditional* `autoconvolution_ratio_ge_1292_1000` takes an
   analytic-primitives record `ExtremiserPrimitives f` whose fields are
   Lean restatements of the cited MV/MO results
@@ -430,9 +422,7 @@ Cohn–Elkies sphere-packing):
   `K2_analytic_le_K2UpperQ` asserts
   $\int_{\mathbb{R}} K_{\mathrm{ms}}^{2}\,d\mathrm{vol} \le 47897/10000$,
   and `gain_analytic_ge_gainLowerQ` asserts
-  $(4/u_{\mathrm{real}})\cdot\bigl(\inf_{x\in[0,1/4]}
-  G_{\mathrm{concrete}}(x)\bigr)^{2}\,/\,\sum_{i=0}^{199}
-  (a_i/10^{8})^{2}/\widetilde{K_{\mathrm{ms}}}(i+1) \ge 20925/100000$,
+  $(4/u_{\mathrm{real}})\cdot\bigl(\inf_{x\in[0,1/4]} G_{\mathrm{concrete}}(x)\bigr)^{2}\,/\,\sum_{i=0}^{199} (a_i/10^{8})^{2}/\widetilde{K_{\mathrm{ms}}}(i+1) \ge 20925/100000$,
   where $G_{\mathrm{concrete}}$ is the explicit 200-term cosine sum
   with coefficients `qpNumerators[i]/10⁸` and $\widetilde{K_{\mathrm{ms}}}$
   the Bessel-form period-$u$ Fourier coefficient (all of these are
