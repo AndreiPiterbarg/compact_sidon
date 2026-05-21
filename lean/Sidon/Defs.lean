@@ -4,7 +4,7 @@ Sidon Autocorrelation Project — Core Definitions
 This module provides the core definitions used by the main proof:
 
 * `autoconvolution_ratio f := ‖f * f‖_∞ / (∫ f)²` — the ratio whose
-  supremum over admissible `f` defines the Sidon autocorrelation
+  infimum over admissible `f` defines the Sidon autocorrelation
   constant C_{1a}.
 
 * `convolution_nonneg` — pointwise nonnegativity of the convolution of

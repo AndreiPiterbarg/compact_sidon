@@ -64,8 +64,13 @@ uses the looser rational anchors and clears `1292/1000` with margin
 
 Axioms
 ------
-The headline theorem reaches exactly **two** numerical-only user
-axioms in its dependency closure:
+There are two headlines with two different axiom budgets (both atop
+the Lean-core trio `propext`, `Classical.choice`, `Quot.sound`).
+
+The *conditional* headline `autoconvolution_ratio_ge_1292_1000` (and
+its aliases `autoconvolution_ratio_ge_1_292`, `C1a_ge_1292`), which
+takes the `ExtremiserPrimitives f` bundle as a hypothesis, reaches
+exactly **two** numerical-only user axioms in its dependency closure:
 
   * `K2_analytic_le_K2UpperQ`  (paper Lemma 4.2)
       `K_2(K_ms) ≤ K2UpperQ = 47897/10000` — the closed-form `K_2` of
@@ -76,11 +81,27 @@ axioms in its dependency closure:
       `gain_analytic ≥ gainLowerQ = 20925/100000` — the cosine `G`'s
       `(min G)²/S_1` ratio, optimised by QP and arb-verified.
 
+The *unconditional* headline `C1a_ge_1292_unconditional` (in
+`Sidon.Constructor.Assembly`), which CONSTRUCTS the bundle from raw
+admissibility via `ExtremiserPrimitives.of_admissible`, additionally
+reaches **two** more numerical-only user axioms — **four** in total:
+
+  * `min_G_analytic_ge_minGLowerQ`  (paper Lemma 4.3)
+      `min_G_analytic ≥ minGLowerQ = 998/1000` — the cosine `G`'s
+      certified infimum on `[0, 1/4]` (in particular `0 ≤ min_G`),
+      consumed by the Cauchy–Schwarz floor.
+
+  * `Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active`
+      `0 < K̂_ms(j/u)` for every active QP index `1 ≤ j ≤ 200` — the
+      lattice positivity feeding `field_hEq4`.
+
 These are analogues of "Mathematica computed this value" in MV's
-paper — they are certifier outputs, not analytic content.  Both
-quantities are defined symbolically as concrete real integrals /
-finite sums over the explicit 3-scale arcsine kernel `K_ms` and the
-QP-optimised cosine `G`.
+paper — they are certifier outputs, not analytic content.  All four
+are logically *decidable* statements about specific real numbers,
+backed by `flint.arb` at 256-bit precision and mpmath-corroborated;
+each underlying quantity is defined symbolically as a concrete real
+integral / finite sum over the explicit 3-scale arcsine kernel `K_ms`
+and the QP-optimised cosine `G`.
 
 The headline factors through the wire-up theorem
 `MV_master_inequality_for_extremiser` (a Lean *theorem*, not an
@@ -89,17 +110,26 @@ axiom) which takes the four MV Lemma 3.1 atomic primitives as
 discharges them to the slack-rational form using the two numerical
 axioms above.
 
-The four atomic analytic primitives for `(f, K_ms)` are *not*
-provable from the available mathlib infrastructure for general
-non-Schwartz admissible `f` (the L¹∩L² periodisation bridge for
-`f*f` and `f∘f` on `ℝ/uℤ` is the missing piece).  They are therefore
-collected in a single residual `ExtremiserPrimitives f` hypothesis
-bundle, which the general headline `autoconvolution_ratio_ge_1292_1000`
-(and its display alias `C1a_ge_1292`) asks the consumer to supply.
-The paper discharges those fields by direct citation to MO 2009
-Lemmas 2.1, 2.2, 3.2, 3.3 / MV 2010 Lemma 3.1.  See the
-documentation of `ExtremiserPrimitives` for the precise mathematical
-content.  (The previously-exported Schwartz-class variants
+The four atomic analytic primitives for `(f, K_ms)` are carried as a
+single `ExtremiserPrimitives f` hypothesis bundle by the *conditional*
+headline `autoconvolution_ratio_ge_1292_1000` (and its display alias
+`C1a_ge_1292`), which asks the consumer to supply the bundle; the paper
+discharges those fields by direct citation to MO 2009 Lemmas 2.1, 2.2,
+3.2, 3.3 / MV 2010 Lemma 3.1.
+
+This bundle is **no longer only a hypothesis.**  `Sidon.Constructor`
+now *constructs* it unconditionally for any admissible `f` via
+`Sidon.MultiScale.ExtremiserPrimitives.of_admissible` (assembled in
+`Sidon.Constructor.Assembly`), yielding the **unconditional** headline
+`Sidon.MultiScale.C1a_ge_1292_unconditional`.  In particular the
+period-`u` Parseval / Poisson-sampling step — once cited as "the
+missing mathlib piece" — is now PROVED axiom-free in
+`Sidon.Constructor.PoissonSampling` (the period-`u` Poisson sampling
+identity for the `L¹ ∩ L²` periodisation, overcoming both mathlib's
+period-`1` restriction and its continuity requirement) and
+`Sidon.Constructor.MOLemma21`.  See the documentation of
+`ExtremiserPrimitives` for the precise mathematical content, and
+`Sidon.Constructor.Assembly` for the constructor.  (The previously-exported Schwartz-class variants
 `autoconvolution_ratio_ge_1292_1000_schwartz` /
 `_schwartz_residual` and their backing modules
 `Sidon.MultiScaleSchwartz` / `Sidon.SchwartzAtomicDischarge` were
@@ -126,11 +156,23 @@ by two zero-axiom wire-up theorems:
     `Sidon.Master.master_inequality_from_lemmas` with
     `MV_master_via_slack_monotonicity`.
 
-So the *only* content the axiom currently encapsulates is the
-discharge of the four MV-Lemma-3.1 atomic conclusions on `ℝ` (which
-needs L¹ ∩ L² Plancherel for non-Schwartz functions, periodisation of
+So the *only* content the `ExtremiserPrimitives f` bundle (a
+hypothesis of the conditional headline, not an axiom) encapsulates is
+the discharge of the four MV-Lemma-3.1 atomic conclusions on `ℝ` (which
+uses L¹ ∩ L² Plancherel for non-Schwartz functions, periodisation of
 `f*f` and `f∘f`, and the inner-product floor on `(f*f-1/u)·G`) plus
 the kernel-specific certifier outputs.
+
+This bundle content is **now constructed unconditionally** in
+`Sidon.Constructor`: the L¹ ∩ L² Plancherel + period-`u` Poisson
+sampling and the periodisation of `f*f` and `f∘f` are PROVED axiom-free
+(`Sidon.Constructor.PoissonSampling`, `Sidon.Constructor.MOLemma21`,
+`Sidon.Constructor.Eq2Period1`), the Cauchy–Schwarz floor in
+`Sidon.Constructor.CauchySchwarzFloor`, and the whole bundle is
+assembled by `ExtremiserPrimitives.of_admissible`
+(`Sidon.Constructor.Assembly`).  The conditional headline below keeps
+the bundle as a hypothesis; the unconditional headline
+`C1a_ge_1292_unconditional` discharges it.
 
 No `sorry`, no conjectural axioms.
 
@@ -162,6 +204,8 @@ open scoped Pointwise
 open MeasureTheory
 
 namespace Sidon.MultiScale
+
+open Sidon.FourierAux (autocorr)
 
 /-! ## Kernel anchors -/
 
@@ -725,9 +769,6 @@ def qpNumerators : List ℤ := [
     29587  -- a_200
   ]
 
-theorem qpNumerators_length : qpNumerators.length = 200 := by
-  native_decide
-
 /-- The QP-optimised cosine multiplier
 `G(x) = ∑_{j=1}^{200} a_j · cos(2π j x / u)`,
 where `a_j = qpNumerators[j-1] / 10⁸`. -/
@@ -789,18 +830,148 @@ and the Bessel-form `K̃_ms`, not an opaque symbol.  The numerical axiom
 noncomputable def gain_analytic : ℝ :=
   (4 / uQ_real) * min_G_analytic^2 / S_1_analytic
 
+/-! ## Canonical analytic functionals at `(f, K_ms)`
+
+These are the concrete analytic functionals that the headline's
+`ExtremiserPrimitives f` bundle binds its anchor fields to.  They depend
+on `K_ms` (defined above) and the convolutional autocorrelation
+`autocorr` (from `Sidon.FourierAux`, transitively imported via
+`Sidon.MVLemmas`), so they live in this module alongside the headline.
+
+  * `K_ms_fourier_lattice` — the closed-form lattice-period-`u` Fourier
+    coefficient `K̂_ms(j/u) = ∑ᵢ λᵢ · J₀(πδᵢ·j/u)²`.
+  * `S_cos` — the bilinear cosine sum
+    `∑'_{j ≠ 0} Re(f̂(j/u))² · K̂_ms(j/u)`.
+  * `LHS1`, `LHS2` — the two integrals on the LHS of MV Eqs.(1), (2).
+-/
+
+/-- The closed-form value of the lattice-period-`u` Fourier coefficient
+of `K_ms` at frequency `j/u`,
+`K̂_ms(j/u) = ∑ᵢ λᵢ · J₀(π·δᵢ·j/u)²`.
+
+Under the definition `K_arc(δ, ·) := η_δ * η_δ` with `η_δ` supported
+on `(-δ/2, δ/2)` and FT `J₀(πδξ)`, the convolution theorem gives the
+FT of `K_arc(δ, ·)` equal to `J₀(πδξ)²`.  The exponents match
+`Sidon.BundleEq4.K_ms_fourier_lattice` and the paper. -/
+noncomputable def K_ms_fourier_lattice (j : ℤ) : ℝ :=
+  lambda1 *
+    (Sidon.Bessel.besselJ0
+      (Real.pi * delta1 *
+        ((j : ℝ) / uQ_real))) ^ 2
+  + lambda2 *
+    (Sidon.Bessel.besselJ0
+      (Real.pi * delta2 *
+        ((j : ℝ) / uQ_real))) ^ 2
+  + lambda3 *
+    (Sidon.Bessel.besselJ0
+      (Real.pi * delta3 *
+        ((j : ℝ) / uQ_real))) ^ 2
+
+/-- `K̂_ms(j/u) ≥ 0` (Bochner positivity, automatic from the convex
+combination of `J₀²` and `λᵢ ≥ 0`). -/
+theorem K_ms_fourier_lattice_nonneg (j : ℤ) : 0 ≤ K_ms_fourier_lattice j := by
+  unfold K_ms_fourier_lattice
+  have h_lams := lambdas_nonneg
+  have hl1 : (0 : ℝ) ≤ lambda1 := by
+    unfold lambda1; exact_mod_cast h_lams.1
+  have hl2 : (0 : ℝ) ≤ lambda2 := by
+    unfold lambda2; exact_mod_cast h_lams.2.1
+  have hl3 : (0 : ℝ) ≤ lambda3 := by
+    unfold lambda3; exact_mod_cast h_lams.2.2
+  have h1 : (0 : ℝ) ≤ lambda1 *
+      (Sidon.Bessel.besselJ0
+        (Real.pi * delta1 *
+          ((j : ℝ) / uQ_real))) ^ 2 :=
+    mul_nonneg hl1 (sq_nonneg _)
+  have h2 : (0 : ℝ) ≤ lambda2 *
+      (Sidon.Bessel.besselJ0
+        (Real.pi * delta2 *
+          ((j : ℝ) / uQ_real))) ^ 2 :=
+    mul_nonneg hl2 (sq_nonneg _)
+  have h3 : (0 : ℝ) ≤ lambda3 *
+      (Sidon.Bessel.besselJ0
+        (Real.pi * delta3 *
+          ((j : ℝ) / uQ_real))) ^ 2 :=
+    mul_nonneg hl3 (sq_nonneg _)
+  linarith
+
+/-- The bilinear cosine sum: `S_cos f = ∑'_{j ≠ 0} Re(f̂(j/u))² · K̂_ms(j/u)`. -/
+noncomputable def S_cos (f : ℝ → ℝ) : ℝ :=
+  ∑' j : ℤ, if j = 0 then 0 else
+    ((Real.fourierIntegral (fun x => ((f x : ℂ)))
+        ((j : ℝ) / uQ_real)).re) ^ 2
+      * K_ms_fourier_lattice j
+
+/-- `S_cos` is a sum of nonneg terms: each summand is nonneg pointwise. -/
+theorem S_cos_summand_nonneg (f : ℝ → ℝ) (j : ℤ) :
+    0 ≤ (if j = 0 then 0 else
+          ((Real.fourierIntegral (fun x => ((f x : ℂ)))
+              ((j : ℝ) / uQ_real)).re) ^ 2
+            * K_ms_fourier_lattice j) := by
+  split_ifs with hj
+  · exact le_refl 0
+  · exact mul_nonneg (sq_nonneg _) (K_ms_fourier_lattice_nonneg j)
+
+/-- The `j = 0` value: `K̂_ms(0) = ∑ᵢ λᵢ · J₀(0)² = ∑ᵢ λᵢ · 1 = 1`. -/
+theorem K_ms_fourier_lattice_zero :
+    K_ms_fourier_lattice 0 = 1 := by
+  unfold K_ms_fourier_lattice
+  -- Each besselJ0 argument simplifies to 0: π·δᵢ·(0/u) = 0.
+  have h_zero1 : Real.pi * delta1 *
+      (((0 : ℤ) : ℝ) / uQ_real) = 0 := by
+    push_cast; ring
+  have h_zero2 : Real.pi * delta2 *
+      (((0 : ℤ) : ℝ) / uQ_real) = 0 := by
+    push_cast; ring
+  have h_zero3 : Real.pi * delta3 *
+      (((0 : ℤ) : ℝ) / uQ_real) = 0 := by
+    push_cast; ring
+  rw [h_zero1, h_zero2, h_zero3, Sidon.Bessel.besselJ0_zero]
+  -- Now: λ₁·1² + λ₂·1² + λ₃·1² = λ₁ + λ₂ + λ₃ = 1.
+  have h_sum : lambda1 + lambda2 + lambda3 = 1 := by
+    have h := lambdas_sum_one
+    unfold lambda1 lambda2 lambda3
+    exact_mod_cast h
+  linarith [h_sum]
+
+/-- LHS of MV Eq.(1): `LHS1 f := ∫ (f*f)(x) · K_ms(x) dx`. -/
+noncomputable def LHS1 (f : ℝ → ℝ) : ℝ :=
+  ∫ x,
+    (MeasureTheory.convolution f f
+      (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume) x
+      * K_ms x ∂MeasureTheory.volume
+
+/-- LHS of MV Eq.(2): `LHS2 f := ∫ (autocorr f)(x) · K_ms(x) dx`,
+where `autocorr f x := ∫ t, f(t)·f(x+t) dt` is the convolutional
+autocorrelation. -/
+noncomputable def LHS2 (f : ℝ → ℝ) : ℝ :=
+  ∫ x, autocorr f x * K_ms x ∂MeasureTheory.volume
+
 /-! ## Numerical kernel-specific axioms
 
-These are the **only** kernel-specific user axioms in the
-dependency closure of the headline theorem.  Both are *numerical*:
-they assert that the analytic primitives `K2_analytic` and
-`gain_analytic` lie on the correct side of the slack rationals
-`K2UpperQ` and `gainLowerQ`.
+This block declares **three** of the kernel-specific numerical user
+axioms (the fourth,
+`Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active`,
+lives in `Sidon.Constructor`).  Each is *numerical*: it asserts that an
+analytic primitive lies on the correct side of a slack rational.
 
-These axioms are analogues of "Mathematica computed this value" in
-MV's paper — they are certifier outputs, not analytic content.  The
-underlying numerical computations are performed by `flint.arb` at
-256-bit precision (`delsarte_dual/grid_bound_alt_kernel/`).
+  * `K2_analytic_le_K2UpperQ`, `gain_analytic_ge_gainLowerQ` are the
+    **two** axioms in the dependency closure of the *conditional*
+    headline `autoconvolution_ratio_ge_1292_1000` (`K2_analytic`,
+    `gain_analytic` vs. `K2UpperQ`, `gainLowerQ`).
+  * `min_G_analytic_ge_minGLowerQ` (declared below) and
+    `K_ms_fourier_lattice_pos_active` (in `Sidon.Constructor`) are the
+    **two** further axioms that, together with the first two, make up
+    the **four** in the dependency closure of the *unconditional*
+    headline `C1a_ge_1292_unconditional`; they are consumed by the
+    Cauchy–Schwarz floor and `field_hEq4` inside
+    `ExtremiserPrimitives.of_admissible`.
+
+All four are analogues of "Mathematica computed this value" in MV's
+paper — certifier outputs, not analytic content — and are logically
+decidable, with the underlying numerical computations performed by
+`flint.arb` at 256-bit precision
+(`delsarte_dual/grid_bound_alt_kernel/`) and mpmath-corroborated.
 -/
 
 /-- (NUMERICAL AXIOM 1, paper Lemma 4.2) `K_2(K_ms) ≤ K2UpperQ`.
@@ -853,6 +1024,54 @@ certified by `flint.arb` rather than heuristic CAS numerics. It is
 the three-scale kernel and the re-optimised 200-cosine `G`, not a
 statement contained in MV 2010. -/
 axiom gain_analytic_ge_gainLowerQ : gain_analytic ≥ (gainLowerQ : ℝ)
+
+/-- (NUMERICAL AXIOM 3, paper Lemma 4.3) `min_G_analytic ≥ minGLowerQ`.
+
+The `flint.arb` / `G_min.py` certifier reports
+`min_{x ∈ [0, 1/4]} G_concrete(x) ≥ 0.99997987` (radius `< 10⁻⁵`) at
+256-bit precision via:
+
+  * Form `G_concrete(x) = ∑_{j=1}^{200} aⱼ·cos(2πjx/u)` from the rounded
+    QP coefficients `aⱼ = qpNumerators[j-1]/10⁸`;
+  * Taylor-2 branch-and-bound in arb interval arithmetic on `[0, 1/4]`
+    (`delsarte_dual/grid_bound/G_min.py:min_G_lower_bound`, 32768 cells),
+    certifying a rigorous lower bound on `min G`.
+
+The slack `minGLowerQ = 998/1000 = 0.998` is below the certifier's lower
+endpoint with margin `≈ 2.0 × 10⁻²`, so in particular `0 ≤ min_G_analytic`.
+
+This is logically *decidable* — a statement about the infimum of an
+explicit finite trigonometric polynomial over `[0, 1/4]`, any sufficient
+interval-arithmetic implementation can certify it — and appears as
+`axiom` rather than `theorem` only because mathlib lacks a Taylor-B&B
+interval-arithmetic library to discharge it mechanically (the same
+engineering gap as `K2_analytic_le_K2UpperQ` and
+`gain_analytic_ge_gainLowerQ`).
+
+*Provenance.* The published Matolcsi–Vinuesa (2010) proof asserts the
+analogous floor `min G ≥ 1` for its single-scale 119-cosine `G` (citing
+Mathematica); this axiom plays the strictly-more-rigorous multi-scale
+*analogous role*, certified by `flint.arb`/Taylor-B&B interval
+arithmetic rather than heuristic CAS numerics. It is a *new* numerical
+inequality specific to the re-optimised 200-cosine `G`.
+
+*Independence.* This sign fact is **not** derivable from
+`gain_analytic_ge_gainLowerQ`: the gain axiom constrains only
+`min_G_analytic²` (the gain functional `(4/u)·min_G²/S_1` is invariant
+under `min_G ↦ -min_G`), hence forces `min_G_analytic ≠ 0` but not its
+sign. It is the genuine third conceptual numerical fact (alongside the
+`K_2` bound and lattice-positivity) needed downstream by the MV Eq.(4)
+Cauchy–Schwarz floor (`Sidon.Constructor.cauchy_schwarz_floor`). -/
+axiom min_G_analytic_ge_minGLowerQ : min_G_analytic ≥ (minGLowerQ : ℝ)
+
+/-- `0 ≤ min_G_analytic`, the certifier sign consumed by the MV Eq.(4)
+Cauchy–Schwarz floor (`Sidon.Constructor.cauchy_schwarz_floor`'s
+`hmin_nonneg`), derived trivially from the sanctioned numerical axiom
+`min_G_analytic_ge_minGLowerQ` (`min_G_analytic ≥ 998/1000 > 0`). -/
+theorem min_G_analytic_nonneg : 0 ≤ min_G_analytic := by
+  have h := min_G_analytic_ge_minGLowerQ
+  have hQ : (0 : ℝ) ≤ (minGLowerQ : ℝ) := by unfold minGLowerQ; norm_num
+  linarith [h, hQ]
 
 /-! ## Slack-rational soundness theorems
 
@@ -1087,27 +1306,34 @@ Plus the kernel-specific analytic bounds (discharged externally by the
 The wire-up of (1)-(4) into the master inequality is provided
 unconditionally by `Sidon.Master.master_inequality_from_lemmas`; the
 slack lift (5)-(6) is provided unconditionally by
-`MV_master_via_slack_monotonicity` (above).  What remains:
+`MV_master_via_slack_monotonicity` (above).  The remaining analytic
+inputs are now ALL PROVED in `Sidon.Constructor`:
 
   * The **periodisation lemma** for `f*f` and `f∘f` on `ℝ/uℤ` (needed
     for `h_parseval_split` of `mv_eq2_full`, and `h_torus_split` of
-    `mv_eq3`) — *not* yet in mathlib in a directly usable form (see
-    `Sidon.FourierAux`, the "Gap statement for L¹ ∩ L²").
+    `mv_eq3`) is PROVED axiom-free in
+    `Sidon.Constructor.PoissonSampling` / `Sidon.Constructor.MOLemma21`
+    (the period-`u` Poisson sampling identity for the `L¹ ∩ L²`
+    periodisation; once described as the `Sidon.FourierAux` "Gap
+    statement for L¹ ∩ L²", now closed).
   * The **F-bound** translating `‖f*f‖_{L²}² ≤ ‖f*f‖_{L^∞}` into a
-    discrete Parseval sum.
-  * The **kernel-specific analytic bounds** (5) and (6), currently
-    discharged by the certifier rather than reproved in Lean.
+    discrete Parseval sum (`Sidon.Constructor.Eq2Period1`).
+  * The **kernel-specific analytic bounds** (5) and (6), discharged by
+    the certifier (`flint.arb`) rather than reproved in Lean.
 
-Discharging these in Lean for any concrete `f` would require the
-L¹∩L² Plancherel bridge (see `Sidon.FourierAux`'s documentation of
-the gap).  In the present formalisation the bundle is taken as a
-hypothesis record discharged in the paper by direct citation to MO
-2009 Lemmas 2.1, 2.2, 3.2, 3.3 / MV 2010 Lemma 3.1 applied at
-`(f, K_ms)`; this is the same citation set MV 2010 itself uses at
-the single-arcsine point.  (A Schwartz-class lighter bundle was
-attempted in earlier drafts but its `ParsevalSplitSchwartz`
-predicate turned out to be vacuously satisfiable by Paley-Wiener +
-Carlson, and the variant was retired by the S1+S2 refactor.) -/
+The *conditional* headline `autoconvolution_ratio_ge_1292_1000` (below)
+takes the bundle as a hypothesis record discharged in the paper by
+direct citation to MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 / MV 2010 Lemma 3.1
+applied at `(f, K_ms)` (the same citation set MV 2010 itself uses at
+the single-arcsine point).  The *unconditional* headline
+`Sidon.MultiScale.C1a_ge_1292_unconditional`
+(`Sidon.Constructor.Assembly`) instead CONSTRUCTS the bundle from raw
+admissibility via `ExtremiserPrimitives.of_admissible`, so the period-`u`
+Parseval is no longer only-a-hypothesis — it is proven.  (A Schwartz-class
+lighter bundle was attempted in earlier drafts but its
+`ParsevalSplitSchwartz` predicate turned out to be vacuously satisfiable
+by Paley-Wiener + Carlson, and the variant was retired by the S1+S2
+refactor.) -/
 
 /-! ## Extremiser analytic primitives bundle
 
@@ -1122,13 +1348,15 @@ indexed by the admissible function `f`.  The bundle records:
   * The four MV Lemma 3.1 outputs (Eqs.(1)-(4)), instantiated at the
     **definitional analytic primitive `K2_analytic = ∫ K_ms²`**.
 
-This is an analytic structure on `(f, K_ms)` whose existence is
-proved externally by the L¹∩L² Plancherel + period-`u` Parseval
-infrastructure of `Sidon.TorusParseval` + `Sidon.FourierAux`.  For
-arbitrary admissible `f` (non-Schwartz, only L¹∩L²) the proof
-requires bridging mathlib's `Lp 2`-norm Plancherel to the concrete
-integral `∫ K̂² = K_2_analytic`, which is **not** yet expressible
-as a single mathlib statement.
+This is an analytic structure on `(f, K_ms)` whose existence is now
+PROVED in Lean for arbitrary admissible `f` (non-Schwartz, only
+`L¹ ∩ L²`) by `Sidon.MultiScale.ExtremiserPrimitives.of_admissible`
+(`Sidon.Constructor.Assembly`), built on the L¹∩L² Plancherel +
+period-`u` Poisson sampling of `Sidon.Constructor.PoissonSampling` /
+`Sidon.Constructor.MOLemma21` (with supporting infrastructure in
+`Sidon.TorusParseval` + `Sidon.FourierAux`).  The conditional headline
+below keeps the bundle as a hypothesis; the unconditional
+`C1a_ge_1292_unconditional` feeds the constructed bundle in.
 
 Crucially, the bundle's `hEq2` field references `K2_analytic`
 (the **definition**), not a free real parameter; this forces the
@@ -1141,29 +1369,12 @@ Likewise, the bundle's `hEq4` field is stated against `gain_analytic`
 `gain_analytic ≥ gainLowerQ` from `gain_analytic_ge_gainLowerQ`.
 
 The structure itself, the wire-up theorem
-`MV_master_inequality_for_extremiser`, and the headline theorems are
-**relocated** to `Sidon.BundleDefs` (see the note below) so the binding
-fields can reference the concrete `Sidon.BundleDefs.{S_cos, LHS1, LHS2}`
-functionals (which depend on `K_ms` and `autocorr`, hence live
-downstream of this module). -/
-
-/-! ## Extremiser bundle + headline — relocated to `Sidon.BundleDefs`
-
-The `ExtremiserPrimitives f` structure, the wire-up theorem
 `MV_master_inequality_for_extremiser`, and the headline theorems
-(`autoconvolution_ratio_ge_1292_1000` and its aliases) are defined in
-`Sidon.BundleDefs` (re-opening `namespace Sidon.MultiScale`), so that the
-bundle's binding fields (`S_cos_eq`, `LHS1_eq`, `LHS2_eq`) can reference
-the concrete analytic functionals `Sidon.BundleDefs.S_cos`,
-`Sidon.BundleDefs.LHS1`, `Sidon.BundleDefs.LHS2`.  Those functionals
-depend on `K_ms` (defined here) and `autocorr`, so they live in a module
-that imports this one; the bundle must therefore be declared downstream.
-The fully-qualified names `Sidon.MultiScale.ExtremiserPrimitives`,
-`Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`, etc. are
-preserved by re-opening the namespace in `Sidon.BundleDefs`.
-
-The bundle-independent quadratic-in-`M` inversion
-`master_inequality_M_lower` remains in this module (below). -/
+(`autoconvolution_ratio_ge_1292_1000` and its aliases) live in this
+module, below the bundle-independent quadratic-in-`M` inversion
+`master_inequality_M_lower`.  The binding fields reference the concrete
+analytic functionals `S_cos`, `LHS1`, `LHS2` defined above (which depend
+on `K_ms` and `autocorr`, both available here). -/
 
 /-! ## Quadratic-in-`M` inversion (arithmetic theorem)
 
@@ -1241,16 +1452,194 @@ theorem master_inequality_M_lower :
   have h_strict : (66879 / 20000 : ℝ) < 4267003 / 1276000 := by norm_num
   linarith [h_LHS_le, h_RHS_ge, h_MI, h_strict]
 
-/-! ## Main theorem — relocated to `Sidon.BundleDefs`
+/-! ## Extremiser analytic primitives bundle
 
-The headline `autoconvolution_ratio_ge_1292_1000` (and its aliases
-`autoconvolution_ratio_ge_1_292`, `C1a_ge_1292`) is defined in
-`Sidon.BundleDefs`, re-opening `namespace Sidon.MultiScale`, so its
-`ExtremiserPrimitives f` bundle can bind the analytic functionals
-`Sidon.BundleDefs.S_cos`, `LHS1`, `LHS2` (which depend on `K_ms` and
-`autocorr`, hence live downstream of this module).  The headline keeps
-its fully-qualified name `Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`.
-Its proof uses `master_inequality_M_lower` (above) and the relocated
-`MV_master_inequality_for_extremiser`. -/
+The bundle `ExtremiserPrimitives f` packages the four MV Lemma 3.1
+atomic primitives (Eqs.(1)-(4)) at `(f, K_ms)`, together with the
+positivity facts `K2_ge_1`, `R_ge_1`, `S_G_pos` and the gain identity.
+
+The anchor fields `m_G, S_G, S_cos, LHS1, LHS2` are each **bound** (via
+`m_G_eq, S_G_eq, S_cos_eq, LHS1_eq, LHS2_eq`) to the concrete analytic
+functionals defined above in this module, so any instance forces these
+to be the canonical analytic values, not arbitrary reals. -/
+structure ExtremiserPrimitives (f : ℝ → ℝ) where
+  /-- The cosine `G`'s minimum on `[0, 1/4]`. -/
+  m_G : ℝ
+  /-- The dual sum `S_G = ∑ G̃²/K̂_ms`. -/
+  S_G : ℝ
+  /-- The bilinear cosine sum `S_cos = ∑ Re(f̃)²·K̃`. -/
+  S_cos : ℝ
+  /-- The LHS of MV Eq.(1):  `LHS1 = ∫ (f*f)·K_ms`. -/
+  LHS1 : ℝ
+  /-- The LHS of MV Eq.(2):  `LHS2 = ∫ (f∘f)·K_ms`. -/
+  LHS2 : ℝ
+  /-- Binding: `m_G` is the cosine `G`'s analytic infimum on `[0, 1/4]`. -/
+  m_G_eq : m_G = min_G_analytic
+  /-- Binding: `S_G = u·S_1/2`, so `2·m_G²/S_G = (4/u)·min_G²/S_1 = gain_analytic`. -/
+  S_G_eq : S_G = uQ_real * S_1_analytic / 2
+  /-- Binding: `S_cos` is the analytic bilinear cosine sum at `(f, K_ms)`,
+      **normalised by `u³`** to align the project's full-line Fourier
+      convention with the master inequality's period-`u` coefficient
+      convention.
+
+      The full-line sum `Sidon.MultiScale.S_cos f =
+      ∑'_{j≠0} (Re 𝓕f(j/u))²·K̂_ms(j/u)` (genuine real-line transform
+      `K̂_ms(j/u) = ∑ᵢ λᵢ J₀(πδᵢ·j/u)²`) satisfies the *true* period-`u`
+      Parseval identity `LHS1 f + LHS2 f = 2/u + (2/u)·S_cos_full`
+      (coefficient `2/u`, NOT `2u²`).  The master inequality's wire-up
+      (`MasterFromLemmas`, `MVLemmas.mv_eq3*`) instead uses the
+      period-`u` *Fourier-coefficient* convention, in which the same
+      pairing reads with the coefficient `2u²`.  The two conventions
+      differ by exactly `u³`:
+        `2u² · (S_cos_full / u³) = (2/u) · S_cos_full`,
+      so binding `S_cos := S_cos_full / u³` makes the struct's
+      `hEq3_ge` (`2/u + 2u²·S_cos ≤ LHS1 + LHS2`) the *true* Parseval
+      `≥`-direction, and the struct's `hEq4` (`u²·S_cos ≥ m_G²/S_G`) the
+      genuine Cauchy–Schwarz bound `(1/u)·S_cos_full ≥ 2m_G²/(u·S_1)`,
+      i.e. `S_cos_full ≥ 2·min_G²/S_1`.  Both are TRUE-as-stated. -/
+  S_cos_eq : S_cos = Sidon.MultiScale.S_cos f / uQ_real ^ 3
+  /-- Binding: `LHS1` is the analytic integral `∫ (f*f)·K_ms`. -/
+  LHS1_eq : LHS1 = Sidon.MultiScale.LHS1 f
+  /-- Binding: `LHS2` is the analytic integral `∫ (autocorr f)·K_ms`. -/
+  LHS2_eq : LHS2 = Sidon.MultiScale.LHS2 f
+  /-- `K_2(K_ms) ≥ 1`, forced by `∫ K_ms = 1` and Bochner positivity.
+      TODO: discharge from `Sidon.BundleDefs.K2_analytic_ge_one_of_integral_one`
+      once a one-call constructor supplies `∫ K_ms = 1` together with the
+      `K_ms`/`K_ms²` integrability and support facts (these are *not* among the
+      four admissibility hypotheses on `f`, so the discharge is a `K_ms`-side
+      analytic task, not derivable inside the master-inequality wire-up). -/
+  K2_ge_1 : 1 ≤ K2_analytic
+  /-- The gain identity `gain_analytic = 2·m_G²/S_G`. -/
+  gain_eq : gain_analytic = 2 * m_G ^ 2 / S_G
+  /-- `R(f) ≥ 1`, from the autoconvolution structure (`∫f² ≥ (∫f)²`).
+      TODO: discharge from `Sidon.BundleDefs.R_ge_one_of_data` once a one-call
+      constructor supplies the normalisation `∫f = 1`, the Fubini convolution
+      mass `∫(f*f) = 1`, the support-measure bound, and the `eLpNorm ⊤ ≥ 1`
+      lower bound.  The master-inequality theorem only carries `f ≥ 0`,
+      `supp f ⊆ (-1/4,1/4)`, `∫f > 0`, and `eLpNorm(f*f) ⊤ ≠ ⊤`; deriving the
+      `R_ge_one_of_data` hypotheses from these requires the L¹ Fubini-mass and
+      essSup-lower-bound bridges not yet available as a single lemma. -/
+  R_ge_1 : 1 ≤ autoconvolution_ratio f
+  /-- `S_G > 0` for positive `K̂_ms(j/u)` and any nonzero `G̃`. -/
+  S_G_pos : 0 < S_G
+  /-- MV Eq.(1) output:  `LHS1 ≤ R(f)`. -/
+  hEq1 : LHS1 ≤ autoconvolution_ratio f
+  /-- MV Eq.(2) output:  `LHS2 ≤ 1 + √(R(f) - 1)·√(K2_analytic - 1)`. -/
+  hEq2 : LHS2 ≤ 1 + Real.sqrt (autoconvolution_ratio f - 1)
+                  * Real.sqrt (K2_analytic - 1)
+  /-- MV Eq.(3) inequality form:  `2/u + 2·u²·S_cos ≤ LHS1 + LHS2`.
+      This `≥`-direction of MV Eq.(3) is exactly what the master
+      inequality chains against; crucially, it is discharge-able from
+      Bochner positivity alone (`K̃_ms(j) ≥ 0` for every `j`) by
+      truncating the nonneg-term tsum `∑'_{j ∈ ℤ\{0}} Re(f̃(j))² K̃(j)`
+      to any finite `J ⊆ ℤ\{0}` — no period-`u` Poisson summation
+      required. -/
+  hEq3_ge : 2 / (uQ : ℝ) + 2 * (uQ : ℝ) ^ 2 * S_cos ≤ LHS1 + LHS2
+  /-- MV Eq.(4) output:  `u²·S_cos ≥ m_G²/S_G`. -/
+  hEq4 : (uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G
+
+/-- MV master inequality at the slack rationals for admissible `f`
+under the 3-scale kernel `K_ms`.  Specialises MV (2010) Eq. (6) by
+composing `MV_master_inequality_from_MV_lemmas` (algebraic chain of
+MV Eqs. (1)–(4)) with the two numerical axioms
+`K2_analytic_le_K2UpperQ` and `gain_analytic_ge_gainLowerQ`. -/
+theorem MV_master_inequality_for_extremiser
+    (f : ℝ → ℝ)
+    (_hf_nonneg : ∀ x, 0 ≤ f x)
+    (_hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (_hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (_h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f + 1 +
+      Real.sqrt (autoconvolution_ratio f - 1) * Real.sqrt ((K2UpperQ : ℝ) - 1)
+      ≥ 2 / (uQ : ℝ) + (gainLowerQ : ℝ) := by
+  -- Discharge the two kernel-specific numerical bounds from the axioms.
+  have h_K2_bound : K2_analytic ≤ (K2UpperQ : ℝ) := K2_analytic_le_K2UpperQ
+  have h_gain_bound : 2 * P.m_G ^ 2 / P.S_G ≥ (gainLowerQ : ℝ) := by
+    rw [← P.gain_eq]
+    exact gain_analytic_ge_gainLowerQ
+  -- Apply the wire-up from MV-Lemmas to slack rationals.
+  exact MV_master_inequality_from_MV_lemmas f
+    K2_analytic P.m_G P.S_G P.S_cos P.LHS1 P.LHS2
+    h_K2_bound P.K2_ge_1 h_gain_bound P.R_ge_1 P.S_G_pos
+    P.hEq1 P.hEq2 P.hEq3_ge P.hEq4
+
+/-- **Conditional headline.**  For every admissible `f` for which the
+MV Lemma 3.1 atomic primitives for `(f, K_ms)` exist (packaged as the
+hypothesis bundle `ExtremiserPrimitives f`), the autoconvolution ratio
+satisfies `R(f) ≥ 1292/1000 = 1.292`.
+
+Axiom budget: this theorem depends on the Lean-core trio (`propext`,
+`Classical.choice`, `Quot.sound`) plus exactly **two**
+verifiable-by-computation numerical axioms, `K2_analytic_le_K2UpperQ`
+and `gain_analytic_ge_gainLowerQ`.  The bundle is a hypothesis here, so
+the two further numerical axioms used to *construct* it
+(`min_G_analytic_ge_minGLowerQ`,
+`Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active`)
+do NOT appear in this theorem's closure.  They DO appear in the
+*unconditional* `Sidon.MultiScale.C1a_ge_1292_unconditional`
+(`Sidon.Constructor.Assembly`), which builds the bundle from raw
+admissibility via `ExtremiserPrimitives.of_admissible` and hence
+depends on all **four** numerical axioms. -/
+theorem autoconvolution_ratio_ge_1292_1000 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f ≥ (1292 / 1000 : ℝ) := by
+  have hMI :
+      autoconvolution_ratio f + 1 +
+        Real.sqrt (autoconvolution_ratio f - 1) * Real.sqrt ((K2UpperQ : ℝ) - 1)
+        ≥ 2 / (uQ : ℝ) + (gainLowerQ : ℝ) :=
+    MV_master_inequality_for_extremiser
+      f hf_nonneg hf_supp hf_int_pos h_conv_fin P
+  have h := master_inequality_M_lower
+              (gainLowerQ : ℝ) le_rfl
+              (autoconvolution_ratio f) hMI
+  have hMT : (MTargetQ : ℝ) = (1292 / 1000 : ℝ) := by
+    unfold MTargetQ; push_cast; ring
+  rw [hMT] at h
+  exact h
+
+/-- Decimal restatement: `R(f) ≥ 1.292`. -/
+theorem autoconvolution_ratio_ge_1_292 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f ≥ (1.292 : ℝ) := by
+  have h := autoconvolution_ratio_ge_1292_1000
+              f hf_nonneg hf_supp hf_int_pos h_conv_fin P
+  have hEq : (1.292 : ℝ) = 1292 / 1000 := by norm_num
+  rw [hEq]
+  exact h
+
+/-- Display alias of the *conditional* headline: `1292/1000 ≤ R(f)` for
+    every admissible `f` with a valid `ExtremiserPrimitives f` bundle
+    (2 verifiable-by-computation numerical axioms, as for
+    `autoconvolution_ratio_ge_1292_1000`).  For the *unconditional*
+    statement (bundle constructed from admissibility, 4 numerical axioms)
+    see `Sidon.MultiScale.C1a_ge_1292_unconditional`. -/
+theorem C1a_ge_1292 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    (1292 : ℝ) / 1000 ≤ autoconvolution_ratio f :=
+  autoconvolution_ratio_ge_1292_1000 f hf_nonneg hf_supp hf_int_pos h_conv_fin P
 
 end Sidon.MultiScale
