@@ -79,7 +79,7 @@ PROD_U: fmpq = fmpq(638, 1000)
 PROD_N_COEFFS: int = 200
 
 #: Cutoff in the cross-Bessel ``K_2`` integral; the tail past ``T`` is
-#: bounded by ``4 / (pi^2 delta_i delta_j T)`` per cross pair.
+#: bounded by ``4 / (pi^4 delta_i delta_j T)`` per cross pair.
 PROD_K2_CUTOFF_XI: fmpq = fmpq(10**5)
 
 
