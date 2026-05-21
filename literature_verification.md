@@ -122,7 +122,7 @@ so $\widetilde G(0)=0$, $\widetilde G(\pm j) = a_j\sqrt{u}/2$ for $1\le j\le N$,
 
 $$S_G \;=\; 2\sum_{j=1}^{N}\bigl(a_j\sqrt{u}/2\bigr)^{2}\big/\widetilde K(j) \;=\; \tfrac{u}{2}\,S_1.$$
 
-The bundle is instantiated with $S_G := u_{\mathrm{real}}\cdot S_1/2$, in agreement with this derivation, and the Lemma 3.1(3) gain identity $a = 2 m_G^{2}/S_G$ then reduces to $a = (4/u)\,m_G^{2}/S_1$ — exactly the formula recorded in the anchor table below. The Lean encoding of the underlying inner-product floor is `Sidon.MV.mv_inner_product_floor` in `Sidon.MVLemmas`, whose hypothesis is `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x` — exactly MV's `[-1/4,1/4]` positivity hypothesis, not the larger interval $(-1/2,1/2)$.
+The bundle is instantiated with $S_G := u_{\mathrm{real}}\cdot S_1/2$, in agreement with this derivation, and the Lemma 3.1(3) gain identity $a = 2 m_G^{2}/S_G$ then reduces to $a = (4/u) m_G^{2}/S_1$ — exactly the formula recorded in the anchor table below. The Lean encoding of the underlying inner-product floor is `Sidon.MV.mv_inner_product_floor` in `Sidon.MVLemmas`, whose hypothesis is `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x` — exactly MV's `[-1/4,1/4]` positivity hypothesis, not the larger interval $(-1/2,1/2)$.
 
 **The $z_1$-free reduction (this work).** Equation (10) above carries $z_1$, an uncontrolled Fourier coefficient of the unknown extremiser. We absorb it by Cauchy–Schwarz:
 
@@ -130,7 +130,7 @@ The bundle is instantiated with $S_G := u_{\mathrm{real}}\cdot S_1/2$, in agreem
 
 $$2 z_1^{2} k_1 + \sqrt{(M-1-2 z_1^{4})(K_2-1-2 k_1^{2})} \;\le\; \sqrt{(M-1)(K_2-1)}.$$
 
-*Proof.* Apply the elementary inequality $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ (Cauchy–Schwarz on the vectors $(\sqrt a,\sqrt b),(\sqrt c,\sqrt d)$) to $(a,b,c,d) = (2 z_1^{4},\,M-1-2 z_1^{4},\,2 k_1^{2},\,K_2-1-2 k_1^{2})$. Then $\sqrt{ac} = \sqrt{4 z_1^{4} k_1^{2}} = 2 z_1^{2} k_1$ and $(a+b)(c+d) = (M-1)(K_2-1)$. $\square$
+*Proof.* Apply the elementary inequality $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ (Cauchy–Schwarz on the vectors $(\sqrt a,\sqrt b),(\sqrt c,\sqrt d)$) to $(a,b,c,d) = (2 z_1^{4}, M-1-2 z_1^{4}, 2 k_1^{2}, K_2-1-2 k_1^{2})$. Then $\sqrt{ac} = \sqrt{4 z_1^{4} k_1^{2}} = 2 z_1^{2} k_1$ and $(a+b)(c+d) = (M-1)(K_2-1)$. $\square$
 
 Combining the lemma with Eq.(10) yields the $z_1$-free master inequality
 
@@ -138,12 +138,12 @@ $$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{*}$$
 
 in which only the kernel/multiplier quantities $K_2$ and $a$ appear. This $z_1$-absorption is the one analytic step in the present work beyond MV 2010; the displayed proof is the entire derivation. The corresponding Lean theorem is in `Sidon.MasterFromLemmas`.
 
-**The three-scale kernel.** Let $\eta(x) := (2/\pi)\,(1-4x^2)^{-1/2}\,\mathbf{1}_{|x|<1/2}$ be the arcsine density of half-width $1/2$, and write the $\delta$-rescaled autoconvolution
+**The three-scale kernel.** Let $\eta(x) := (2/\pi) (1-4x^2)^{-1/2} \mathbf{1}_{|x|<1/2}$ be the arcsine density of half-width $1/2$, and write the $\delta$-rescaled autoconvolution
 
 $$K_{\mathrm{arc}}(\delta; x) \;:=\; \delta^{-1}\,(\eta * \eta)(x/\delta).$$
 
 (Equivalently, with the paper's and Lean's $\delta$-scaled density $\eta_\delta(x) := \delta^{-1}(2/\pi)(1-(2x/\delta)^2)^{-1/2}\mathbf{1}_{|x|<\delta/2}$ supported on $(-\delta/2,\delta/2)$, one has $K_{\mathrm{arc}}(\delta;\cdot) = \eta_\delta\ast \eta_\delta$; the two presentations yield the identical kernel on $[-\delta,\delta]$.)
-Then $K_{\mathrm{arc}}(\delta; \cdot)$ is a probability density supported on $[-\delta,\delta]$ (since $\mathrm{supp}(\eta \ast \eta) = [-1, 1]$ and the rescaling contracts by $\delta$), and its continuous Fourier transform, under the convention $\widehat g(\xi) := \int_{\mathbb{R}} g(x) e^{-2\pi i x \xi}\,dx$, is $\widehat{K_{\mathrm{arc}}}(\delta;\xi) = J_0(\pi\delta\xi)^{2}\ge 0$. Any convex combination of such kernels is therefore Bochner-admissible. Matolcsi–Vinuesa used a single
+Then $K_{\mathrm{arc}}(\delta; \cdot)$ is a probability density supported on $[-\delta,\delta]$ (since $\mathrm{supp}(\eta \ast \eta) = [-1, 1]$ and the rescaling contracts by $\delta$), and its continuous Fourier transform, under the convention $\widehat g(\xi) := \int_{\mathbb{R}} g(x) e^{-2\pi i x \xi} dx$, is $\widehat{K_{\mathrm{arc}}}(\delta;\xi) = J_0(\pi\delta\xi)^{2}\ge 0$. Any convex combination of such kernels is therefore Bochner-admissible. Matolcsi–Vinuesa used a single
 arcsine kernel. Here $K = K_{\mathrm{ms}}$ is a convex combination of
 **three**, with half-widths $(\delta_1,\delta_2,\delta_3) = (138,55,25)/1000$, weights $(\lambda_1,\lambda_2,\lambda_3) = (85,10,5)/100$, and period $u = 1/2+\delta_1 = 638/1000$; its periodic
 coefficients are $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i J_0(\pi j\delta_i/u)^{2} \ge 0$. The multiplier $G$ is re-optimised
@@ -192,7 +192,7 @@ $[-\delta_i,\delta_i]$, it is continuous near and vanishes at the
 endpoints $\pm\delta_i$ (there the supports of the two arcsine factors
 $\eta_{\delta_i}\subseteq(-\delta_i/2,\delta_i/2)$ meet only at a
 single point, so the convolution integral is zero), and since
-$\{\pm\delta_i\}$ is Lebesgue-null it may in any case be taken to
+$\lbrace \pm\delta_i\rbrace$ is Lebesgue-null it may in any case be taken to
 represent its $L^{2}$ class as a function supported in the open
 interval $(-\delta_i,\delta_i)$ (note $K_{\mathrm{arc}}$ is *not*
 globally continuous: it carries a logarithmic singularity at the
@@ -217,10 +217,10 @@ in `flint.arb` interval arithmetic at 256-bit precision and rounded
 | $w_{\min} := \min_{1\le j\le 200}\widetilde{K_{\mathrm{ms}}}(j)$ (positivity of QP denominators) | $\ge 1/5000$ | $2.0\times 10^{-4}$ |
 | $S_1 = \sum_{j=1}^{200} a_j^{2}/\widetilde{K_{\mathrm{ms}}}(j)$ (multiplier denominator) | $\le 29841/1000$ | $29.841$ |
 | $m_G = \min_{[0,1/4]} G$ (multiplier minimum) | $\ge 998/1000$ | $0.998$ |
-| $a = (4/u)\,m_G^{2}/S_1$ (gain) | $\ge 20925/100000$ | $0.20925$ |
+| $a = (4/u) m_G^{2}/S_1$ (gain) | $\ge 20925/100000$ | $0.20925$ |
 
 The $z_1$-free inequality consumes only $K_2$ and $a$; through
-$a = (4/u)\,m_G^{2}/S_1$ it depends on $m_G$ and $S_1$. The remaining
+$a = (4/u) m_G^{2}/S_1$ it depends on $m_G$ and $S_1$. The remaining
 quantity $k_1$ does not enter the rational headline — it is used only
 by the sharper *refined* inequality that the Arb cell-search employs
 to certify the tighter $M_{\mathrm{cert}}\approx 1.29232$
@@ -243,7 +243,7 @@ rational sums in arb at radii below $10^{-70}$
 <a href="#PBV-anchors">[PBV-anchors]</a>. The positivity certificate
 $w_{\min} \ge 1/5000$ is obtained by evaluating
 $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i J_0(\pi j\delta_i/u)^{2}$
-in `flint.arb` at $256$-bit precision for each $j\in\{1,\dots,200\}$
+in `flint.arb` at $256$-bit precision for each $j\in\lbrace 1,\dots,200\rbrace$
 and taking the minimum lower endpoint; the rigorous lower endpoint
 of the minimum is $2.0817\times 10^{-4}$ at $j=147$, which majorises
 $1/5000=2.0\times 10^{-4}$. This guarantees $S_1$ is finite and
@@ -301,7 +301,7 @@ concluding `autoconvolution_ratio f ≥ 1292/1000`, where
   `ExtremiserPrimitives.of_admissible`; its dependency closure adds
   **two further** numerical user axioms (`min_G_analytic_ge_minGLowerQ`
   for $\min_{[0,1/4]} G \ge 998/1000$, and `K_ms_fourier_lattice_pos_active`
-  for $\widetilde{K_{\mathrm{ms}}}(j) > 0$ on $j\in\{1,\dots,200\}$),
+  for $\widetilde{K_{\mathrm{ms}}}(j) > 0$ on $j\in\lbrace 1,\dots,200\rbrace$),
   for **four** numerical user axioms in total.
 The bundle has 13
 fields: five real parameters (`m_G`, `S_G`, `S_cos`, `LHS1`, `LHS2`),
@@ -335,14 +335,14 @@ $(4/u)\cdot m_G^{2}/S_1$. The supporting definitions in
   the default $0$ out of range), so no list-length lemma is needed.
 * `noncomputable def G_concrete (x : ℝ) : ℝ` (line 775) — the
   explicit $200$-term cosine multiplier
-  $G(x) = \sum_{i=0}^{199} (a_i/10^{8})\,\cos(2\pi (i+1) x / u)$,
+  $G(x) = \sum_{i=0}^{199} (a_i/10^{8}) \cos(2\pi (i+1) x / u)$,
   with $a_i =$ `qpNumerators.getD i 0`.
 * `noncomputable def Ktilde_ms (j : ℕ) : ℝ` (line 784) — the
   Bessel-form period-$u$ Fourier coefficient
-  $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i\,J_0(\pi j\,\delta_i/u)^{2}$,
+  $\widetilde{K_{\mathrm{ms}}}(j) = \sum_i \lambda_i J_0(\pi j \delta_i/u)^{2}$,
   written in terms of `Sidon.Bessel.besselJ0`.
 * `noncomputable def S_1_analytic : ℝ` (line 792) — the concrete
-  sum $\sum_{i=0}^{199} (a_i/10^{8})^{2}\,/\,\widetilde{K_{\mathrm{ms}}}(i+1)$.
+  sum $\sum_{i=0}^{199} (a_i/10^{8})^{2} / \widetilde{K_{\mathrm{ms}}}(i+1)$.
 * `noncomputable def min_G_analytic : ℝ` (line 797) — the analytic
   infimum $\inf_{x\in[0,1/4]} G_{\mathrm{concrete}}(x)$, encoded as
   `sInf (G_concrete '' Set.Icc (0 : ℝ) (1/4))`.
@@ -439,12 +439,12 @@ Cohn–Elkies sphere-packing):
   (two for the conditional headline — $K_2$ and $a$; four for the
   unconditional headline — additionally $\min G \ge 998/1000$ and the
   lattice positivity $\widetilde{K_{\mathrm{ms}}}(j)>0$ on
-  $j\in\{1,\dots,200\}$) bind
+  $j\in\lbrace 1,\dots,200\rbrace$) bind
   defined analytic functionals over the explicit kernel:
   `K2_analytic_le_K2UpperQ` asserts
-  $\int_{\mathbb{R}} K_{\mathrm{ms}}^{2}\,d\mathrm{vol} \le 47897/10000$,
+  $\int_{\mathbb{R}} K_{\mathrm{ms}}^{2} d\mathrm{vol} \le 47897/10000$,
   and `gain_analytic_ge_gainLowerQ` asserts
-  $(4/u_{\mathrm{real}})\cdot\bigl(\inf_{x\in[0,1/4]} G_{\mathrm{concrete}}(x)\bigr)^{2}\,/\,\sum_{i=0}^{199} (a_i/10^{8})^{2}/\widetilde{K_{\mathrm{ms}}}(i+1) \ge 20925/100000$,
+  $(4/u_{\mathrm{real}})\cdot\bigl(\inf_{x\in[0,1/4]} G_{\mathrm{concrete}}(x)\bigr)^{2} / \sum_{i=0}^{199} (a_i/10^{8})^{2}/\widetilde{K_{\mathrm{ms}}}(i+1) \ge 20925/100000$,
   where $G_{\mathrm{concrete}}$ is the explicit 200-term cosine sum
   with coefficients `qpNumerators[i]/10⁸` and $\widetilde{K_{\mathrm{ms}}}$
   the Bessel-form period-$u$ Fourier coefficient (all of these are
@@ -452,7 +452,7 @@ Cohn–Elkies sphere-packing):
   above). The Lean `S_1_analytic` uses Lean's convention $a/0 = 0$;
   for the specific $(\delta_i, u)$ values, the certifier validates
   $\widetilde{K_{\mathrm{ms}}}(j) \ge 2\times 10^{-4}$ for
-  $j\in\{1,\dots,200\}$ externally (the `w_min` check), so no zero
+  $j\in\lbrace 1,\dots,200\rbrace$ externally (the `w_min` check), so no zero
   terms occur and the Lean expression equals the analytic functional.
   The certifier's positivity check is part of the trust set; a
   Lean-side formalisation would require a Bessel-zero-localisation
@@ -495,7 +495,7 @@ classical analysis + new computer-assisted numerics.
 - <a id="1a-page"></a>**[1a-page]** Tao, Terence (ed.). *An autocorrelation constant related to Sidon sets.* `teorth/optimizationproblems`, `constants/1a.md`. [Page](https://teorth.github.io/optimizationproblems/constants/1a.html)
 	- <a id="1a-def"></a>**[1a-def]**
 	  **loc:** `constants/1a.md`, "Description of constant".
-	  **quote:** "$C_{1a}$ is the largest constant for which one has $\max_{-1/2 \leq t \leq 1/2} \int_{\mathbb{R}} f(t-x) f(x)\,dx \geq C_{1a} (\int_{-1/4}^{1/4} f(x)\,dx)^2$ for all non-negative $f \colon \mathbb{R} \to \mathbb{R}$."
+	  **quote:** "$C_{1a}$ is the largest constant for which one has $\max_{-1/2 \leq t \leq 1/2} \int_{\mathbb{R}} f(t-x) f(x) dx \geq C_{1a} (\int_{-1/4}^{1/4} f(x) dx)^2$ for all non-negative $f \colon \mathbb{R} \to \mathbb{R}$."
 	- <a id="1a-lb"></a>**[1a-lb]**
 	  **loc:** `constants/1a.md`, "Known lower bounds" table.
 	  **quote:** Rows, in order: $1$ (Trivial); $1.182778$ ([MO2004]); $1.262$ ([MO2009]); $1.2748$ ([MV2009]); $1.28$ ([CS2017]); $1.2802$ ([XX2026], "Unpublished improvement, Grok"). The page attributes $1.2802$ to [XX2026] and $1.28$ to [CS2017]; it does not attribute $1.2802$ to Cloninger–Steinerberger.
@@ -518,7 +518,7 @@ classical analysis + new computer-assisted numerics.
 	  **quote:** $(\delta_1,\delta_2,\delta_3)=(138,55,25)/1000$, $(\lambda_1,\lambda_2,\lambda_3)=(85,10,5)/100$, $u=1/2+\delta_1=638/1000$; $K_{\mathrm{ms}}=\sum_i \lambda_i K_{\mathrm{arc}}(\delta_i;\cdot)$ is Bochner-admissible with $\widetilde{K_{\mathrm{ms}}}(j)=\sum_i \lambda_i J_0(\pi j\delta_i/u)^2 \ge 0$; multiplier degree $N=200$.
 	- <a id="PBV-anchors"></a>**[PBV-anchors]**
 	  **loc:** `lower_bound_proof.tex`, Lemmas `lem:k1`, `lem:K2`, `lem:S1`, `lem:mG`, `lem:a` (lines 1041–1135) and table `tab:anchors` (lines 1158–1175).
-	  **quote:** $k_1 := \widehat{K_{\mathrm{ms}}}(1) \ge 9212/10000$; $K_2 := \lVert K_{\mathrm{ms}}\rVert_{2}^{2} \le 47897/10000$ (proof: bulk $[4.78882342,\,4.78890519]$ by arb adaptive Gauss–Legendre on $[0,10^{5}]$, tail $\le 8.19\times 10^{-5}$ via the Watson envelope $\lvert J_0(z)\rvert^{2}\le 2/(\pi z)$ for $z>0$); $S_1 = \sum_{j=1}^{200} a_j^{2}/\widetilde{K_{\mathrm{ms}}}(j) \le 29841/1000$; $m_G := \min_{[0,1/4]} G \ge 998/1000$ (32768-cell second-order Taylor B&B in arb); $a = (4/u)\,m_G^{2}/S_1 \ge 20925/100000$.
+	  **quote:** $k_1 := \widehat{K_{\mathrm{ms}}}(1) \ge 9212/10000$; $K_2 := \lVert K_{\mathrm{ms}}\rVert_{2}^{2} \le 47897/10000$ (proof: bulk $[4.78882342, 4.78890519]$ by arb adaptive Gauss–Legendre on $[0,10^{5}]$, tail $\le 8.19\times 10^{-5}$ via the Watson envelope $\lvert J_0(z)\rvert^{2}\le 2/(\pi z)$ for $z>0$); $S_1 = \sum_{j=1}^{200} a_j^{2}/\widetilde{K_{\mathrm{ms}}}(j) \le 29841/1000$; $m_G := \min_{[0,1/4]} G \ge 998/1000$ (32768-cell second-order Taylor B&B in arb); $a = (4/u) m_G^{2}/S_1 \ge 20925/100000$.
 	- <a id="PBV-fail"></a>**[PBV-fail]**
 	  **loc:** `lower_bound_proof.tex`, Proposition "Strict failure at the rational witness" (`prop:fail`, lines 1219–1227; proof through line 1258).
 	  **quote:** "$\Phi(1292/1000) \le 66879/20000 = 3.34395 < 4267003/1276000 \le \tau$, with margin $\tau-\Phi(1292/1000) \ge 307/3190000 \ge 9.6\times10^{-5} > 0$." The Arb cell-search using the sharper refined inequality (which involves $k_1$) independently re-certifies $M_{\mathrm{cert}}\ge 1.29232$.
@@ -527,40 +527,40 @@ classical analysis + new computer-assisted numerics.
 	  **loc (constructor chain).** The unconditional headline and the admissibility-to-bundle constructor live under `lean/Sidon/Constructor/` (17 axiom-free modules, 7922 LoC): `ExtremiserPrimitives.of_admissible` at `Constructor/Assembly.lean:107`; unconditional headline `C1a_ge_1292_unconditional` at `Constructor/Assembly.lean:246`; the fourth numerical axiom `K_ms_fourier_lattice_pos_active` at `Constructor/LatticePositivity.lean:187`. The whole formalisation totals 30 modules (~15.6 kLoC: 13 core `Sidon/*.lean` at 7655 LoC plus the 17 `Sidon/Constructor/*.lean` at 7922 LoC). The previously exported Schwartz variants (`autoconvolution_ratio_ge_1292_1000_schwartz` and `_schwartz_residual`) and their backing modules (`Sidon.MultiScaleSchwartz` and `Sidon.SchwartzAtomicDischarge`) were retired by the S1+S2 refactor and no longer exist in the repository. (The file names `BundleEq2Schwartz.lean` and `BundleEq3Schwartz.lean` retain the `Schwartz` suffix from the pre-S1+S2 module layout, but their contents now serve the general bundle discharge for the headline; renaming is a deferred cosmetic.)
 	  **axiom inventory (two headlines).** The formalisation exports two headlines with distinct dependency closures:
 	  • *Conditional* `autoconvolution_ratio_ge_1292_1000` takes `(P : ExtremiserPrimitives f)` as a hypothesis and concludes `autoconvolution_ratio f ≥ 1292/1000`; its user-axiom closure is exactly two kernel-specific facts, `K2_analytic_le_K2UpperQ` ($K_2 \le 47897/10000$) and `gain_analytic_ge_gainLowerQ` ($a \ge 20925/100000$).
-	  • *Unconditional* `C1a_ge_1292_unconditional` takes only raw admissibility hypotheses (`Integrable f`, `MemLp f 2`, $\mathrm{supp}\,f \subseteq (-1/4,1/4)$, $f\ge 0$, $\int f = 1$) and *constructs* the bundle via `ExtremiserPrimitives.of_admissible`; its user-axiom closure is four kernel-specific facts — the two above plus `min_G_analytic_ge_minGLowerQ` ($\min_{[0,1/4]} G \ge 998/1000$) and `K_ms_fourier_lattice_pos_active` ($\widetilde{K_{\mathrm{ms}}}(j) > 0$ for every $j\in\{1,\dots,200\}$). All four are logically decidable, `flint.arb`-backed at 256-bit precision, mpmath-corroborated, and SHA-256-anchored. Both closures additionally reach Lean's three core logical axioms (`propext`, `Classical.choice`, `Quot.sound`).
+	  • *Unconditional* `C1a_ge_1292_unconditional` takes only raw admissibility hypotheses (`Integrable f`, `MemLp f 2`, $\mathrm{supp} f \subseteq (-1/4,1/4)$, $f\ge 0$, $\int f = 1$) and *constructs* the bundle via `ExtremiserPrimitives.of_admissible`; its user-axiom closure is four kernel-specific facts — the two above plus `min_G_analytic_ge_minGLowerQ` ($\min_{[0,1/4]} G \ge 998/1000$) and `K_ms_fourier_lattice_pos_active` ($\widetilde{K_{\mathrm{ms}}}(j) > 0$ for every $j\in\lbrace 1,\dots,200\rbrace$). All four are logically decidable, `flint.arb`-backed at 256-bit precision, mpmath-corroborated, and SHA-256-anchored. Both closures additionally reach Lean's three core logical axioms (`propext`, `Classical.choice`, `Quot.sound`).
 	  The four MV Lemma 3.1 output fields `hEq1`, `hEq2`, `hEq3_ge`, `hEq4` of `ExtremiserPrimitives` are Lean restatements of MV 2010 Lemma 3.3 / MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 — see <a href="#MV-primitives">[MV-primitives]</a> and <a href="#MO-primitives">[MO-primitives]</a> for the verbatim source statements. For the conditional headline these fields are assumed; for the unconditional headline `of_admissible` discharges them axiom-free (modulo the two additional certifier axioms). The remaining bundle fields are five real parameters (`m_G`, `S_G`, `S_cos`, `LHS1`, `LHS2`) — bound to the concrete analytic functionals via five `*_eq` hypothesis fields (`m_G_eq`, `S_G_eq`, `S_cos_eq`, `LHS1_eq`, `LHS2_eq`), so the bundle forces the canonical $(f, K_{\mathrm{ms}})$ values rather than arbitrary reals — together with the numerical-sanity hypotheses (`K2_ge_1`, `R_ge_1`, `S_G_pos`, `gain_eq`). The slack-soundness theorems are one-line `norm_num` checks.
 	- <a id="PBV-cert"></a>**[PBV-cert]**
 	  **loc:** `delsarte_dual/grid_bound_alt_kernel/certificates/reference_anchors.json`, `multiscale_arcsine_1292.json`; `audit3_mpmath.py`; `README.md`.
-	  **quote:** `multiscale_arcsine_1292.json` has `sha256_of_body = 5fa9ae372b23d07f73f41d73c1740926115eb494b6ba3840551458ba8143a7c2` and `M_cert = 66167/51200` ($1.29232421875$). `reference_anchors.json` records the anchors ($k_1=0.9212465899364083$, $K_2\in[4.7888234212591545,\,4.7889051816332424]$, $S_1=29.8409064555132666$, $m_G=0.9999798743824747$, $a=0.2100921474866837$) and the kernel parameters (`deltas` $138/55/25\,/1000$, equivalently $69/500$, $11/200$, $1/40$; `lambdas` $85/10/5\,/100$, equivalently $17/20$, $1/10$, $1/20$; `u` $638/1000 = 319/500$; `n_coeffs` $200$; `prec_bits` $256$). `audit3_mpmath.py` recomputes $K_2$ and $a$ at 50 digits independently of `flint.arb`.
+	  **quote:** `multiscale_arcsine_1292.json` has `sha256_of_body = 5fa9ae372b23d07f73f41d73c1740926115eb494b6ba3840551458ba8143a7c2` and `M_cert = 66167/51200` ($1.29232421875$). `reference_anchors.json` records the anchors ($k_1=0.9212465899364083$, $K_2\in[4.7888234212591545, 4.7889051816332424]$, $S_1=29.8409064555132666$, $m_G=0.9999798743824747$, $a=0.2100921474866837$) and the kernel parameters (`deltas` $138/55/25 /1000$, equivalently $69/500$, $11/200$, $1/40$; `lambdas` $85/10/5 /100$, equivalently $17/20$, $1/10$, $1/20$; `u` $638/1000 = 319/500$; `n_coeffs` $200$; `prec_bits` $256$). `audit3_mpmath.py` recomputes $K_2$ and $a$ at 50 digits independently of `flint.arb`.
 
 - <a id="MO2004"></a>**[MO2004]** Martin, Greg; O'Bryant, Kevin. *The symmetric subset problem in continuous Ramsey theory.* Exp. Math. **16** (2007), no. 2, 145–165. [arXiv:math/0410004](https://arxiv.org/abs/math/0410004)
 
 - <a id="MO2009"></a>**[MO2009]** Martin, Greg; O'Bryant, Kevin. *The supremum of autoconvolutions, with applications to additive number theory.* Illinois J. Math. **53** (2009), no. 1, 219–235. [arXiv:0807.5121](https://arxiv.org/abs/0807.5121)
 	- <a id="MO-primitives"></a>**[MO-primitives]** Verbatim source for the four Fourier-analytic primitives invoked by the present work and packaged in Lean as the `hEq1`/`hEq2`/`hEq3_ge`/`hEq4` fields of `ExtremiserPrimitives`.
 	  **loc 1:** MO 2009 (arXiv:0807.5121v2), p. 5, Lemma 2.1 (period-$u$ Parseval — the *foundational* form of the torus split).
-	  **quote 1:** "For $i\in\{1,2\}$, suppose that $g_i$ is a square-integrable function supported on $(-\alpha_i,\alpha_i)$. If $\alpha_1+\alpha_2\le u$, then $\int_{\mathbb{R}} g_1(x)\overline{g_2(x)}\,dx = u\sum_{r\in\mathbb{Z}} \widetilde{g_1}(r)\overline{\widetilde{g_2}(r)}.$"
+	  **quote 1:** "For $i\in\lbrace 1,2\rbrace$, suppose that $g_i$ is a square-integrable function supported on $(-\alpha_i,\alpha_i)$. If $\alpha_1+\alpha_2\le u$, then $\int_{\mathbb{R}} g_1(x)\overline{g_2(x)} dx = u\sum_{r\in\mathbb{Z}} \widetilde{g_1}(r)\overline{\widetilde{g_2}(r)}.$"
 	  **loc 2:** MO 2009, p. 6, Lemma 2.2 (1-periodic Parseval — used in the constant-plus-tail split).
-	  **quote 2:** "If $g_1$ and $g_2$ are square-integrable functions supported on $(-\tfrac12,\tfrac12)$, then $\int_{\mathbb{R}} g_1(x)\overline{g_2(x)}\,dx = \sum_{r\in\mathbb{Z}} \widehat{g_1}(r)\overline{\widehat{g_2}(r)}$; in particular $\lVert g_1\rVert_2^2 = \sum_{r\in\mathbb{Z}}\lvert \widehat{g_1}(r)\rvert^2$."
+	  **quote 2:** "If $g_1$ and $g_2$ are square-integrable functions supported on $(-\tfrac12,\tfrac12)$, then $\int_{\mathbb{R}} g_1(x)\overline{g_2(x)} dx = \sum_{r\in\mathbb{Z}} \widehat{g_1}(r)\overline{\widehat{g_2}(r)}$; in particular $\lVert g_1\rVert_2^2 = \sum_{r\in\mathbb{Z}}\lvert \widehat{g_1}(r)\rvert^2$."
 	  **loc 3:** MO 2009, p. 10, proof of Lemma 3.2 (contains the constant-plus-tail split and the lattice $F$-bound *verbatim*).
-	  **quote 3:** "$\int_{\mathbb{R}}(f\circ f(x))K(x)\,dx = \sum_{r\in\mathbb{Z}} \widehat{f\circ f}(r)\overline{\widehat{K}(r)} = \sum_{r\in\mathbb{Z}}\lvert\widehat{f}(r)\rvert^2\overline{\widehat{K}(r)} = 1 + \sum_{r\ne 0}\lvert\widehat{f}(r)\rvert^2\overline{\widehat{K}(r)}$ … $\sum_{r\in\mathbb{Z}}\lvert\widehat{f}(r)\rvert^4 = \sum_{r\in\mathbb{Z}}\lvert\widehat{f\ast f}(r)\rvert^2 = \lVert f\ast f\rVert_2^2 \le \lVert f\ast f\rVert_\infty$" (the final inequality uses $\lVert f\ast f\rVert_1 = 1$).
+	  **quote 3:** "$\int_{\mathbb{R}}(f\circ f(x))K(x) dx = \sum_{r\in\mathbb{Z}} \widehat{f\circ f}(r)\overline{\widehat{K}(r)} = \sum_{r\in\mathbb{Z}}\lvert\widehat{f}(r)\rvert^2\overline{\widehat{K}(r)} = 1 + \sum_{r\ne 0}\lvert\widehat{f}(r)\rvert^2\overline{\widehat{K}(r)}$ … $\sum_{r\in\mathbb{Z}}\lvert\widehat{f}(r)\rvert^4 = \sum_{r\in\mathbb{Z}}\lvert\widehat{f\ast f}(r)\rvert^2 = \lVert f\ast f\rVert_2^2 \le \lVert f\ast f\rVert_\infty$" (the final inequality uses $\lVert f\ast f\rVert_1 = 1$).
 	  **loc 4:** MO 2009, p. 11, Lemma 3.3 (the period-$u$ torus split applied to $f\ast f + f\circ f$; this is the statement MV 2010 cites as their Eq.(3)).
-	  **quote 4:** "Let $f$ be a square-integrable pdf supported on $(-\tfrac14,\tfrac14)$, and let $K$ be a pdf supported on $(-\delta,\delta)$. Then $\int_{\mathbb{R}}(f\ast f(x) + f\circ f(x))K(x)\,dx = \frac{2}{u} + 2u^2\sum_{j\ne 0}(\Re\widetilde{f}(j))^2\Re\widetilde{K}(j).$"
+	  **quote 4:** "Let $f$ be a square-integrable pdf supported on $(-\tfrac14,\tfrac14)$, and let $K$ be a pdf supported on $(-\delta,\delta)$. Then $\int_{\mathbb{R}}(f\ast f(x) + f\circ f(x))K(x) dx = \frac{2}{u} + 2u^2\sum_{j\ne 0}(\Re\widetilde{f}(j))^2\Re\widetilde{K}(j).$"
 
 - <a id="MV2009"></a>**[MV2009]** Matolcsi, Máté; Vinuesa, Carlos. *Improved bounds on the supremum of autoconvolutions.* J. Math. Anal. Appl. **372** (2010), no. 2, 439–447. [arXiv:0907.1379](https://arxiv.org/abs/0907.1379) — source of the $\ge 1.27481$ bound and of the dual framework underlying <a href="#PBV-master">[PBV-master]</a>.
 	- <a id="MV-primitives"></a>**[MV-primitives]** Verbatim source for the same three Fourier-analytic primitives, as MV 2010 consolidates and sharpens them. MV 2010 explicitly attributes them to MO 2009 (p. 3): *"Lemma 3.1. [Lemmas 3.1, 3.2, 3.3, 3.4 in [6]]"*, where [6] is MO 2009.
 	  **loc 1:** MV 2010 (arXiv:0907.1379v2), p. 3, Lemma 3.1, Eq.(3) (period-$u$ torus split for $f\ast f + f\circ f$, cited from MO 2009 Lemma 3.3).
-	  **quote 1:** "$\int (f\ast f(x) + f\circ f(x))K(x)\,dx = \frac{2}{u} + 2u^2 \sum_{j\ne 0}(\Re\widetilde{f}(j))^2 \widetilde{K}(j).$"
+	  **quote 1:** "$\int (f\ast f(x) + f\circ f(x))K(x) dx = \frac{2}{u} + 2u^2 \sum_{j\ne 0}(\Re\widetilde{f}(j))^2 \widetilde{K}(j).$"
 	  **loc 2:** MV 2010, pp. 5–6, Lemma 3.3 (sharpened master inequality; the proof contains the constant-plus-tail split and the lattice $F$-bound used in the $z_1$-free derivation).
-	  **quote 2 (statement, Eq.(9)):** "Using the notation $z_1 = \lvert\widehat{f}(1)\rvert$ and $k_1 = \widehat{K}(1)$, $\int (f\circ f(x))K(x)\,dx \le 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_\infty - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2}.$"
-	  **quote 2 (proof excerpt, p. 6):** "$\int (f\circ f(x))K(x)\,dx = \sum_{j\in\mathbb{Z}} \widehat{f\circ f}(j)\widehat{K}(j) = 1 + 2 z_1^2 k_1 + \sum_{j\ne 0,\pm 1}\lvert\widehat{f}(j)\rvert^2 \widehat{K}(j) \le 1 + 2 z_1^2 k_1 + \sqrt{\sum_{j\ne 0,\pm 1}\lvert\widehat{f}(j)\rvert^4}\sqrt{\sum_{j\ne 0,\pm 1}\widehat{K}(j)^2} = 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_2^2 - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2} \le 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_\infty - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2}.$"
+	  **quote 2 (statement, Eq.(9)):** "Using the notation $z_1 = \lvert\widehat{f}(1)\rvert$ and $k_1 = \widehat{K}(1)$, $\int (f\circ f(x))K(x) dx \le 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_\infty - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2}.$"
+	  **quote 2 (proof excerpt, p. 6):** "$\int (f\circ f(x))K(x) dx = \sum_{j\in\mathbb{Z}} \widehat{f\circ f}(j)\widehat{K}(j) = 1 + 2 z_1^2 k_1 + \sum_{j\ne 0,\pm 1}\lvert\widehat{f}(j)\rvert^2 \widehat{K}(j) \le 1 + 2 z_1^2 k_1 + \sqrt{\sum_{j\ne 0,\pm 1}\lvert\widehat{f}(j)\rvert^4}\sqrt{\sum_{j\ne 0,\pm 1}\widehat{K}(j)^2} = 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_2^2 - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2} \le 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_\infty - 1 - 2 z_1^4}\sqrt{\lVert K\rVert_2^2 - 1 - 2 k_1^2}.$"
 	  **loc 3:** MV 2010, p. 7, Eq.(10) (master inequality in the assembled form used by the present work).
 	  **quote 3:** "$\frac{2}{u} + a \le \lVert f\ast f\rVert_\infty + 1 + 2 z_1^2 k_1 + \sqrt{\lVert f\ast f\rVert_\infty - 1 - 2 z_1^4}\sqrt{0.5747/\delta - 1 - 2 k_1^2}.$"
 	  **loc 4:** MV 2010 (arXiv:0907.1379v2), p. 3, Lemma 3.1, Eq.(4) (multiplier floor — lower bound on the period-$u$ Fourier energy of $f$ weighted by $\widetilde K$, in terms of the multiplier minimum $m_G$ and the QP denominator).
-	  **quote 4 (verbatim):** "Let $G$ be an even, real-valued, $u$-periodic function that takes positive values on $[-1/4, 1/4]$, and satisfies $\widetilde G(0) = 0$. Then $u^{2} \sum_{j\ne 0} (\Re \widetilde f(j))^{2}\, \widetilde K(j) \ge \big(\min_{0\le x\le 1/4} G(x)\big)^{2} \cdot \big(\sum_{j:\,\widetilde G(j)\ne 0} \widetilde G(j)^{2} / \widetilde K(j)\big)^{-1}.$" This is precisely the `hEq4` field of `ExtremiserPrimitives` (Lean literal: `(uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G`) displayed under "The 'Eq.(4) floor'" above — the inequality is stated by MV in this squared form directly; no Sedrakyan/Engel step is interposed in MV's statement (the underlying lattice Cauchy–Schwarz step is, however, used in the manuscript's proof of Lemma 2.5(4) when *deriving* this floor from the atomic MO 2009 primitives, cf. `lower_bound_proof.tex` lines 675–682). The positivity hypothesis is on $[-1/4, 1/4]$ (matching the Lean `mv_inner_product_floor` hypothesis `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x`), and via evenness of $G$ reduces to $[0, 1/4]$, which is exactly the interval over which the certifier's 32768-cell Taylor B&B in `delsarte_dual/grid_bound/G_min.py` proves $m_G \ge 998/1000$.
+	  **quote 4 (verbatim):** "Let $G$ be an even, real-valued, $u$-periodic function that takes positive values on $[-1/4, 1/4]$, and satisfies $\widetilde G(0) = 0$. Then $u^{2} \sum_{j\ne 0} (\Re \widetilde f(j))^{2} \widetilde K(j) \ge \big(\min_{0\le x\le 1/4} G(x)\big)^{2} \cdot \big(\sum_{j: \widetilde G(j)\ne 0} \widetilde G(j)^{2} / \widetilde K(j)\big)^{-1}.$" This is precisely the `hEq4` field of `ExtremiserPrimitives` (Lean literal: `(uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G`) displayed under "The 'Eq.(4) floor'" above — the inequality is stated by MV in this squared form directly; no Sedrakyan/Engel step is interposed in MV's statement (the underlying lattice Cauchy–Schwarz step is, however, used in the manuscript's proof of Lemma 2.5(4) when *deriving* this floor from the atomic MO 2009 primitives, cf. `lower_bound_proof.tex` lines 675–682). The positivity hypothesis is on $[-1/4, 1/4]$ (matching the Lean `mv_inner_product_floor` hypothesis `∀ x ∈ Icc (-1/4) (1/4), m_G ≤ G x`), and via evenness of $G$ reduces to $[0, 1/4]$, which is exactly the interval over which the certifier's 32768-cell Taylor B&B in `delsarte_dual/grid_bound/G_min.py` proves $m_G \ge 998/1000$.
 
 - <a id="MV-reduction"></a>**[MV-reduction]** Verbatim source for the $\mathcal{F}\to$ square-integrable reduction invoked by the present work, exactly as in MV 2010.
 	  **loc:** MV 2010 (arXiv:0907.1379v2), p. 2, §2 ("Notation"), opening paragraph.
-	  **quote:** "Let $\mathcal{F}$ denote the set of nonnegative real functions $f$ supported in $[-1/4,1/4]$ such that $\int f(x)\,dx = 1$. We define the autoconvolution of $f$, $f\ast f(x) = \int f(t)f(x-t)\,dt$ and its autocorrelation, $f\circ f(x) = \int f(t)f(x+t)\,dt$. We are interested in $S = \inf_{f\in\mathcal{F}}\lVert f\ast f\rVert_\infty$. **We remark here that the value of $S$ does not change if one considers nonnegative step functions in $\mathcal{F}$ only. This is proved in Theorem 1 in [4]. Therefore the reader may assume that $f$ is square integrable whenever this is needed.**" The "[4]" here is Schinzel–Schmidt 2002 <a href="#SS2002">[SS2002]</a>.
+	  **quote:** "Let $\mathcal{F}$ denote the set of nonnegative real functions $f$ supported in $[-1/4,1/4]$ such that $\int f(x) dx = 1$. We define the autoconvolution of $f$, $f\ast f(x) = \int f(t)f(x-t) dt$ and its autocorrelation, $f\circ f(x) = \int f(t)f(x+t) dt$. We are interested in $S = \inf_{f\in\mathcal{F}}\lVert f\ast f\rVert_\infty$. **We remark here that the value of $S$ does not change if one considers nonnegative step functions in $\mathcal{F}$ only. This is proved in Theorem 1 in [4]. Therefore the reader may assume that $f$ is square integrable whenever this is needed.**" The "[4]" here is Schinzel–Schmidt 2002 <a href="#SS2002">[SS2002]</a>.
 
 - <a id="SS2002"></a>**[SS2002]** Schinzel, Andrzej; Schmidt, Wolfgang M. *Comparison of $L^1$- and $L^\infty$-norms of squares of polynomials.* Acta Arithmetica **104** (2002), no. 3, 283–296. [DOI](https://doi.org/10.4064/aa104-3-4) — reference [4] of MV 2010. Theorem 1, jointly with the step-function construction in its §2, supplies the $L^{1}\to$step$\subset L^{2}$ reduction in MV §2 and inherited by the present work.
 	  **loc:** SS 2002, Introduction (p. 283), Theorem 1; with the bridging identity stated at the top of p. 284 and the step-function construction proving assertion (ii) on p. 285 (also cited as "Theorem 1 in [4]" of MV 2010).
