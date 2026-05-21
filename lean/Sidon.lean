@@ -19,7 +19,11 @@ Headline theorems.
     (in `Sidon.Constructor.Assembly`) — the unconditional headline:
     the bundle is constructed from raw admissibility hypotheses
     (`ExtremiserPrimitives.of_admissible`), so it carries only
-    admissibility hypotheses, no bundle.
+    admissibility hypotheses, no bundle.  The `L¹ ∩ L²` membership is
+    part of admissibility, not an extra assumption: the full
+    nonnegative-`L¹` constant `C₁ₐ` reduces to the `L²` class by the
+    Schinzel–Schmidt 2002 step-function reduction — the identical step
+    Matolcsi–Vinuesa 2010 invoke (their reference [4], §2).
 
 Axioms.    The bundle headline `autoconvolution_ratio_ge_1292_1000`
            reaches exactly **two** numerical-only user axioms in its

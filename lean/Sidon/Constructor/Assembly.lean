@@ -218,6 +218,15 @@ The theorem takes ONLY the five admissibility hypotheses (`hf_int`,
 `hf_L2`, `hf_supp`, `hf_nonneg`, `hf_one`); there are NO residual
 analytic hypotheses.
 
+Note on "unconditional": this refers to the absence of an
+`ExtremiserPrimitives` bundle hypothesis (the bundle is *constructed*
+from admissibility), NOT to the `L²` membership `hf_L2`, which is part
+of admissibility.  The literature constant `C₁ₐ = inf R(f)` over the
+full nonnegative `L¹` class reduces to this `L¹ ∩ L²` statement by the
+Schinzel–Schmidt 2002 step-function argument — the *identical* step
+Matolcsi–Vinuesa 2010 invoke (their reference [4], §2); see
+`lower_bound_proof.tex` §1 and `literature_verification.md`.
+
 ALL former residuals — `hProd_int`, `h_joint`, the certifier sign
 `0 ≤ min_G_analytic`, the MV Eq.(4) Cauchy–Schwarz floor `h_cs`, the MV
 Eq.(2) data, and the MV Eq.(3) full period-`u` Parseval equality
