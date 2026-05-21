@@ -1,7 +1,6 @@
 # delsarte_dual
 
-The **Piterbarg-Bajaj-Vincent Bound**: a rigorous lower bound on the
-Sidon autocorrelation constant
+A rigorous lower bound on the Sidon autocorrelation constant
 
 ```
 C_{1a}  :=  inf { ||f * f||_inf / (int f)^2
@@ -15,11 +14,10 @@ master inequality, with all transcendentals computed in `flint.arb`
 interval arithmetic at 256-bit precision and all algebraic inputs as
 exact `flint.fmpq`.
 
-The bound improves on the previously announced value `1.2802` of
-Cloninger and Steinerberger (2017, arXiv:1403.7988) and on the rigorous
-analytic bound `1.27481` of Matolcsi and Vinuesa (2010, arXiv:0907.1379).
-The accompanying writeup *A New Lower Bound for the Supremum of
-Autoconvolutions* is at the repository root in
+Improves on prior bounds (see root [`README.md`](../README.md) for
+the published-vs-unaudited prior-bounds discussion). The accompanying
+writeup *A New Lower Bound for the Supremum of Autoconvolutions* is
+at the repository root in
 [`lower_bound_proof.pdf`](../lower_bound_proof.pdf); the Lean 4
 formalisation of the same statement is at
 [`lean/Sidon/MultiScale.lean`](../lean/Sidon/MultiScale.lean).
@@ -153,11 +151,13 @@ Exit code `0` on success; `1` on any failure.
 | Headline rational       | `1292/1000` (used in the paper and Lean)|
 
 These are the values quoted by the writeup and by the slack rationals
-in `lean/Sidon/MultiScale.lean`; the sole user axiom in that module
-(`MV_master_inequality_for_extremiser`) substitutes these rational
-slacks for the analytic `K_2` and `a`.  The values are reproduced
-exactly by the production driver above, and recomputed independently
-by `certify.py`.
+in `lean/Sidon/MultiScale.lean`; the module's two verifiable-by-computation
+user axioms (`K2_analytic_le_K2UpperQ` and `gain_analytic_ge_gainLowerQ`)
+substitute these rational slacks for the analytic `K_2` and gain
+`(4/u)·min_G²/S_1`.  (`MV_master_inequality_for_extremiser` is a Lean
+*theorem* assembled from those two axioms plus the `ExtremiserPrimitives f`
+bundle, not itself an axiom.)  The values are reproduced exactly by the
+production driver above, and recomputed independently by `certify.py`.
 
 ## Tests
 

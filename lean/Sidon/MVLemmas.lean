@@ -269,6 +269,119 @@ theorem mv_eq3
     _ = 2 / u + 2 * u^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j := by
           rw [h_tail_form]
 
+/-! ## MV Lemma 3.1 Eq. (3) — inequality form (Bochner-discharge-able)
+
+For the master inequality only the `≥`-direction of MV Eq.(3) is needed:
+
+  `∫((f*f)+(f∘f)) K  ≥  2/u + 2u² · ∑_{j ∈ J} Re(f̃(j))² · K̃(j)`
+
+for any finite frequency set `J ⊆ ℤ\{0}`.
+
+This inequality is **strictly weaker** than the full Eq.(3) equality —
+and crucially, it is discharge-able from **Bochner positivity alone**
+(`K̃(j) ≥ 0` for every `j`), without invoking full period-`u` Poisson
+summation:
+
+  * If the **full** Parseval identity is available
+    (`tail_sum = 2u² · ∑'_{j ∈ ℤ\{0}} Re(f̃(j))² K̃(j)`, a `tsum` over
+    all nonzero `j`), then truncating to any finite `J ⊆ ℤ\{0}`
+    weakens the equality to the inequality
+    `tail_sum ≥ 2u² · ∑_{j ∈ J} Re(f̃(j))² K̃(j)`
+    because each omitted summand `Re(f̃(j))² · K̃(j)` is non-negative
+    (`Re(f̃(j))² ≥ 0` always; `K̃(j) ≥ 0` by Bochner).
+
+  * Even without the full Parseval identity, the inequality form is
+    available from any Plancherel-style **lower bound** on `tail_sum`
+    over `J` — e.g. a finite-cosine pairing on `ℝ/uℤ`.
+
+The Lean theorem `mv_eq3_ge` packages this as an atomic-primitive
+reduction: given `h_torus_split` (the Parseval split equality of
+`mv_eq3`), `h_constant_term` (the same constant-term identity), and
+the **inequality-form** tail primitive
+`h_tail_form_ge : tail_sum ≥ 2u² · ∑_J ...`, conclude the inequality
+form of MV Eq.(3).  Proof: substitute and chain.
+
+This is exactly the form consumed by the bundle field
+`ExtremiserPrimitives.hEq3_ge` and the wire-up
+`Sidon.Master.master_inequality_from_lemmas`. -/
+
+/-- MV Lemma 3.1, Eq. (3), **inequality form** (Bochner-discharge-able).
+
+The hypothesis triple `(h_torus_split, h_constant_term, h_tail_form_ge)`
+is identical to that of `mv_eq3` except the third primitive is in the
+`≥` direction.  The conclusion is the `≥` direction of MV Eq.(3),
+which is exactly what the master inequality chains against. -/
+theorem mv_eq3_ge
+    (f K : ℝ → ℝ) (u : ℝ) (_hu_pos : 0 < u)
+    (realFparts Ktilde : ℤ → ℝ)
+    (J : Finset ℤ) (_hJ_no_zero : (0 : ℤ) ∉ J)
+    (_hf_nonneg : ∀ x, 0 ≤ f x)
+    (_hK_nonneg : ∀ x, 0 ≤ K x)
+    -- Atomic primitives (Steps A–C of MV's torus-Parseval argument):
+    (constant_term tail_sum : ℝ)
+    -- A: Period-u Parseval split (same equality as `mv_eq3`).
+    (h_torus_split :
+      ∫ x, ((convolution f f (ContinuousLinearMap.mul ℝ ℝ) volume) x
+                + autocorr f x) * K x ∂volume
+        = constant_term + tail_sum)
+    -- B: Constant-term mass identity (same equality as `mv_eq3`).
+    (h_constant_term : constant_term = 2 / u)
+    -- C: **Inequality-form** Fourier lower bound on the tail.
+    --    Bochner-discharge-able: each summand `Re(f̃(j))² · K̃(j) ≥ 0`,
+    --    so truncating the full tsum to any finite `J ⊆ ℤ\{0}` yields
+    --    this inequality.
+    (h_tail_form_ge :
+      tail_sum ≥ 2 * u^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j) :
+    ∫ x, ((convolution f f (ContinuousLinearMap.mul ℝ ℝ) volume) x
+              + autocorr f x) * K x ∂volume
+      ≥ 2 / u + 2 * u^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j := by
+  -- Substitute Steps A and B, then chain Step C as an inequality.
+  rw [h_torus_split, h_constant_term]
+  linarith [h_tail_form_ge]
+
+/-- **Soundness of the inequality reduction.**  If the full MV Eq.(3)
+holds (the equality form of `mv_eq3`) on a frequency set `J_full` and
+the omitted summands (those in `J_full \ J`) are non-negative — which
+is automatic when `Re(f̃(j))² ≥ 0` (always) and `K̃(j) ≥ 0` (Bochner) —
+then the inequality form `mv_eq3_ge` holds on the **truncated** subset
+`J ⊆ J_full`.
+
+This demonstrates that `hEq3_ge` is **at most as strong** as the
+former `hEq3` plus Bochner positivity: any caller able to produce the
+old equality form (and verify `K̃(j) ≥ 0`) automatically obtains the
+new inequality form.  The new architecture is therefore a strict
+generalisation that strictly broadens the set of discharge-able
+`(f, K)` pairs — in particular, it admits direct discharge from a
+finite-J Plancherel lower bound without requiring full period-`u`
+Poisson summation. -/
+theorem mv_eq3_ge_of_eq
+    (u : ℝ)
+    (realFparts Ktilde : ℤ → ℝ)
+    (J J_full : Finset ℤ)
+    (hJ_subset : J ⊆ J_full)
+    (hRe_sq_K_nonneg : ∀ j ∈ J_full, 0 ≤ (realFparts j)^2 * Ktilde j)
+    (tail_sum : ℝ)
+    -- The equality form of MV Eq.(3) tail on the full frequency set:
+    (h_tail_form_eq :
+      tail_sum = 2 * u^2 * ∑ j ∈ J_full, (realFparts j)^2 * Ktilde j)
+    -- Non-negativity of the prefactor `2u²` (e.g. when `u > 0`):
+    (hu_sq_nonneg : 0 ≤ 2 * u^2) :
+    tail_sum ≥ 2 * u^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j := by
+  -- Step 1: the sum over `J` is `≤` the sum over `J_full` (truncation
+  -- of a nonneg-term finite sum).
+  have h_sum_le :
+      (∑ j ∈ J, (realFparts j)^2 * Ktilde j)
+        ≤ (∑ j ∈ J_full, (realFparts j)^2 * Ktilde j) :=
+    Finset.sum_le_sum_of_subset_of_nonneg hJ_subset
+      (fun j hj_full _ => hRe_sq_K_nonneg j hj_full)
+  -- Step 2: multiply by `2u² ≥ 0` to preserve the direction.
+  have h_scaled :
+      2 * u^2 * (∑ j ∈ J, (realFparts j)^2 * Ktilde j)
+        ≤ 2 * u^2 * (∑ j ∈ J_full, (realFparts j)^2 * Ktilde j) :=
+    mul_le_mul_of_nonneg_left h_sum_le hu_sq_nonneg
+  -- Step 3: substitute `h_tail_form_eq` and conclude.
+  linarith [h_tail_form_eq, h_scaled]
+
 /-! ## MV Lemma 3.1 Eq. (4) — Weighted Cauchy-Schwarz (Titu / Engel)
 
 The MV form combines two ingredients:

@@ -125,37 +125,45 @@
 \maketitle
 
 \begin{abstract}
-We establish a lower bound on the
-autoconvolution constant
+We establish a lower bound on the autoconvolution constant
 $C_{1a}=\inf_f \|f*f\|_{\Linf}/(\int f)^2$, taken over nonnegative
 $f\in L^1(\R)$ supported on $(-1/4,1/4)$:
 \[
   C_{1a}\;\ge\;1292/1000\;=\;1.292.
 \]
-This improves on the previously announced bound of
-$1.28$ due to Cloninger and Steinerberger~\cite{CS17} and on the
-rigorous analytic bound of $1.27481$ established by Matolcsi and
-Vinuesa~\cite{MV10}.  The argument extends the Matolcsi--Vinuesa
-master inequality: the single arcsine kernel is
+This improves on the published lower bound of $1.28$ due to
+Cloninger and Steinerberger~\cite{CS17}\footnote{An unpublished
+$1.2802$ figure is attributed in Tao's
+\texttt{optimizationproblems} repository to Xie (2026, AI-assisted,
+unaudited)~\cite{Xie26}; it is not part of the published CS17
+result.} and on the rigorous analytic bound of $1.27481$ established
+by Matolcsi and Vinuesa~\cite{MV10}.  The argument extends the
+Matolcsi--Vinuesa master inequality: the single arcsine kernel is
 replaced by a convex combination of three arcsine kernels, and the
 trigonometric multiplier $G$ is re-optimized as a $200$-cosine
-expansion.
-\par\medskip
+expansion.  An internal arb-coupled enclosure yields the slightly
+sharper $\Mcert\ge 66167/51200\approx 1.29232$, recorded for
+completeness but not encoded in the headline Lean theorem (see
+Section~\ref{sec:proof}).
+
 The five resulting functionals are evaluated rigorously in
 \texttt{flint.arb} interval arithmetic at $256$-bit precision.  The
 no-$z_1$ quadratic master inequality, applied to the rounded rational
 anchors, yields strict failure at $M=1292/1000$ with margin
 $\tau-\Phi(M)\ge 9.6\times 10^{-5}$.  The analytic reduction is
-formalized in Lean~4 across $15$ modules ($\approx 8650$ lines of
-code) rooted at \texttt{lean/Sidon/MultiScale.lean}; the headline
-theorem \texttt{autoconvolution\_ratio\_ge\_1292\_1000} reaches the
-three Lean core axioms (\texttt{propext}, \texttt{Classical.choice},
-\texttt{Quot.sound}) and exactly two numerical user axioms
-(\texttt{K2\_analytic\_le\_K2UpperQ} and
-\texttt{gain\_analytic\_ge\_gainLowerQ}) that record the certifier's
-outputs at the rational slacks; the quadratic inversion and the
-slack-soundness statements are Lean theorems (see
-Section~\ref{sec:proof}).
+formalized in Lean~4 across $13$ modules ($\approx 7500$ lines)
+rooted at \texttt{lean/Sidon/MultiScale.lean}; the headline theorem
+\texttt{autoconvolution\_ratio\_ge\_1292\_1000} reaches Lean's three
+core axioms together with exactly two numerical user axioms recording
+the certifier's outputs at the rational slacks (the $L^2$ integral
+of $\Kms$ and the gain ratio $(4/u)\,m_G^{\,2}/S_1$; see
+Section~\ref{subsec:proof-lean}). The quadratic inversion and the
+slack-soundness statements are Lean theorems.  The Lean headline
+takes an \texttt{ExtremiserPrimitives}\,$f$ hypothesis record
+encoding the outputs of MO~2009 Lemmas~3.1--3.4 / MV~2010
+Lemma~3.1 at $(f,\Kms)$; the paper discharges those record fields
+by direct citation, exactly as MV~2010 cited MO~2009 for the
+single-arcsine instance.
 \end{abstract}
 
 % ======================================================================
@@ -216,7 +224,7 @@ valid pair $(K,G)$ yields \emph{some} bound; the entire game is to
 construct a pair that yields a \emph{good} one.  With a single arcsine
 kernel and a $119$-term cosine multiplier, Matolcsi and Vinuesa
 obtained $C_{1a}\ge 1.27481$; on the other side, the constant is known
-to be at most $\approx 1.5032$~\cite{AlphaEvolve25}.
+to be at most $\approx 1.502862$~\cite{AlphaEvolve26}.
 
 \paragraph{What is new here.}
 We enlarge the class of certificates.  Matolcsi and Vinuesa worked with
@@ -239,7 +247,7 @@ the new lower bound
 \[
   C_{1a}\ \ge\ 1292/1000\ =\ 1.292,
 \]
-which we call the \emph{PBV bound} (Theorem~\ref{thm:main}).
+(Theorem~\ref{thm:main}).
 
 \paragraph{In what sense this is rigorous.}
 Closing the certificate reduces to controlling five real numbers
@@ -250,18 +258,35 @@ precision~\cite{Flint}, and each interval is then rounded
 \emph{outward} to an exact rational.  The final quadratic step that
 produces $1.292$ is carried out in exact rational arithmetic, so the
 conclusion is independent of any floating-point rounding.
+The trust base for the numerical step is therefore Lean's logical
+core together with the soundness of \texttt{flint.arb}'s interval
+arithmetic~\cite{Flint}, a standard assumption in computer-assisted
+real-number results (cf.\ Flyspeck for Kepler).
+
 Independently, the entire analytic reduction --- the master
 inequality, its inversion, and the admissibility of the three-scale
 kernel --- is mechanized in the Lean~4 proof
-assistant~\cite{Lean,Mathlib} ($15$ modules, $\approx 8650$ lines, no
+assistant~\cite{Lean,Mathlib} ($13$ modules, $\approx 7500$ lines, no
 \texttt{sorry}).  The machine-checked headline theorem rests only on
 Lean's three logical axioms together with exactly two explicitly
-identified numerical inputs: decidable inequalities about specific real
-numbers, the precise analogues of the ``Mathematica computed this
-value'' citations in~\cite{MV10}, but here backed by certified interval
-arithmetic rather than heuristic numerics.  A bundle of standard
-Fourier-analytic facts is taken as a hypothesis of the general theorem
-and discharged outright for Schwartz-class $f$
+identified numerical inputs: decidable inequalities about concrete
+real analytic expressions inside Lean --- the $L^2$ integral of the
+three-scale kernel $\Kms$, and the gain ratio $(4/u)\,m_G^{\,2}/S_1$
+formed from the embedded $200$ rational QP coefficients and the
+closed-form Bessel-based periodic Fourier coefficients of $\Kms$ ---
+that play the role of the ``Mathematica computed this value''
+citations in~\cite{MV10}, here backed by certified interval
+arithmetic rather than heuristic numerics.
+
+The standard Fourier-analytic facts of MO~2009 Lemmas~3.1--3.4 /
+MV~2010 Lemma~3.1 are applied directly to the admissible
+kernel~$\Kms$ (a pdf supported in $[-\delta_1,\delta_1]$ with
+nonnegative periodic Fourier coefficients and $\Kms\in L^2$); the
+paper discharges those outputs at $(f,\Kms)$ by direct citation,
+exactly as MV~2010 cited MO~2009 for the single-arcsine application.
+The Lean formalization retains them as named hypothesis fields
+because mathlib~v4.29.1 does not yet expose a one-call $L^1\cap L^2$
+Plancherel + period-$u$ Parseval constructor in the form consumed
 (Section~\ref{subsec:proof-lean}).
 
 \paragraph{Roadmap.}
@@ -277,8 +302,13 @@ summarizes the Lean formalization.
 \subsection{The Constant \texorpdfstring{$C_{1a}$}{C1a}}\label{subsec:intro-constant}
 
 Let $\mathcal{F}=\{f\in L^1(\R) : f\ge 0,\
-\supp(f)\subseteq(-1/4,1/4),\ \int f>0\}$.  The
-\emph{autoconvolution constant} is
+\supp(f)\subseteq(-1/4,1/4),\ \int f>0\}$.  (By the
+Schinzel--Schmidt reduction~\cite{SS2002}, we may further assume
+$f\in L^2(\R)$ without loss of generality when controlling the
+ratio~$R(f)$ from below; the period-$1$ Plancherel identity
+$\sum_{j\in\Z}|\widehat{f}(j)|^{4}=\|f*f\|_{L^{2}}^{2}$
+used in the master inequality's tail bound is consequently
+well-defined.)  The \emph{autoconvolution constant} is
 \[
   C_{1a}
   \;=\;
@@ -301,13 +331,14 @@ Prior lower bounds on $C_{1a}$ are summarized in
 Table~\ref{tab:published-bounds}.  Matolcsi--Vinuesa~\cite{MV10}
 established the rigorous analytic value $1.27481$ in 2010, and
 Cloninger and Steinerberger~\cite{CS17} announced a computational
-improvement to $1.28$ via a discrete branch-and-prune search.  All
-subsequent progress on the constant has been on the upper-bound
-side, where a recent AI-assisted search lowered the ceiling to
-$1.5032$~\cite{AlphaEvolve25}.  The present work raises the
-lower bound to $1.292$ (Theorem~\ref{thm:main}), which we refer to as
-the \emph{Piterbarg--Bajaj--Vincent Bound} (henceforth, the
-\emph{PBV~bound}), by refining the kernel class entering the
+improvement to $1.28$ via a discrete branch-and-prune search.  An
+unpublished improvement to $1.2802$ is attributed in Tao's
+\texttt{optimizationproblems} repository~\cite{Xie26} to Xie (2026,
+AI-assisted, unaudited).  All subsequent published progress on the
+constant has been on the upper-bound side, where a recent AI-assisted
+search lowered the ceiling to $1.502862$~\cite{AlphaEvolve26}.  The
+present work raises the lower bound to $1.292$
+(Theorem~\ref{thm:main}) by refining the kernel class entering the
 Matolcsi--Vinuesa dual framework.
 
 \begin{table}[ht]
@@ -316,11 +347,12 @@ Matolcsi--Vinuesa dual framework.
   \toprule
   \textbf{Bound} & \textbf{Value} & \textbf{Reference} \\
   \midrule
-  Upper bound & $\le 1.5032$  & Georgiev et al.~\cite{AlphaEvolve25} (AlphaEvolve) \\
+  Upper bound & $\le 1.502862$  & Georgiev et al.~\cite{AlphaEvolve26} (AlphaEvolve) \\
   Upper bound & $\le 1.50972$ & Matolcsi \& Vinuesa~\cite{MV10} \\
   Lower bound & $\ge 1.262$   & Martin \& O'Bryant~\cite{MO2009} \\
   Lower bound & $\ge 1.27481$ & Matolcsi \& Vinuesa~\cite{MV10} \\
   Lower bound & $\ge 1.28$    & Cloninger \& Steinerberger~\cite{CS17} \\
+  Lower bound & $\ge 1.2802$  & Xie~\cite{Xie26} (unpublished, AI-assisted, unaudited) \\
   Lower bound & $\ge 1.292$   & \textbf{This work} \\
   \bottomrule
 \end{tabular}
@@ -459,6 +491,40 @@ quadruple
 $(a,b,c,d)=(2z_1^{\,4},\,M-1-2z_1^{\,4},\,2k_1^{\,2},\,K_2-1-2k_1^{\,2})$.
 \end{proof}
 
+\begin{remark}[From MV's $0.5747/\delta$ to the abstract $K_2$, and the $z_1$-absorption]
+\label{rem:mv-eq10-translation}
+Two translations separate the form~\eqref{eq:mv-sharp} we use from the
+literal statement of~\cite[Lemma~3.3, Eq.~(10)]{MV10}, and we record
+both explicitly.  First, MV~2010's Eq.~(10) is stated for the
+\emph{single-arcsine} specialization: its radicand contains
+$\sqrt{0.5747/\delta-1-2k_1^{\,2}}$, where $0.5747/\delta$ is the
+Martin--O'Bryant Lemma~3.2 plug-in
+$\|\Karc(\delta;\cdot)\|_{L^2}^{2}=\delta^{-1}\int J_0(\pi\xi)^{4}\,d\xi
+\le 0.5747/\delta$ for the single arcsine kernel.  We replace
+$0.5747/\delta$ throughout by the abstract quantity
+$K_2=\|K\|_{L^2(\R)}^{2}$.  This substitution is valid for any
+Bochner-admissible $K$ because MV's proof of Eq.~(10)
+(\cite[\S 3, proof of Lemma~3.3]{MV10}) uses the kernel only through
+(i) $K\in L^2$ with $K_2=\|K\|_{L^2}^{2}$, (ii) $K\ge 0$, and (iii)
+the Bochner positivity $\widetilde{K}(j)\ge 0$ --- it never uses the
+arcsine shape beyond these three facts, and the value $0.5747/\delta$
+enters only as the numerical evaluation of $\|K\|_{L^2}^{2}$ at the
+single-arcsine choice.  All three facts hold for $\Kms$
+(Definition~\ref{def:bochner}, established in
+Section~\ref{sec:kernel}), so the same proof yields~\eqref{eq:mv-sharp}
+with $K_2=K_2(\Kms)$.  Second, the passage from the sharp
+$z_1$,$k_1$-form~\eqref{eq:mv-sharp} to the $z_1$-free
+form~\eqref{eq:master} is the present paper's Cauchy--Schwarz step
+$\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$, applied to the nonnegative
+quadruple $(2z_1^{\,4},\,M-1-2z_1^{\,4},\,2k_1^{\,2},\,K_2-1-2k_1^{\,2})$
+of the proof above; nonnegativity of its entries is exactly the
+period-1 Plancherel bounds $2z_1^{\,4}\le M-1$ (for $f*f$) and
+$2k_1^{\,2}\le K_2-1$ (for $\Kms$).  In short: the cite to MV Eq.~(10)
+supplies the underlying $z_1$,$k_1$ structure; the $0.5747/\delta\to
+K_2$ substitution and the $z_1$-absorption are this paper's
+translations, each justified above.
+\end{remark}
+
 \begin{lemma}[Quadratic inversion]
 \label{lem:inversion}
 For fixed $K_2\ge 1$, the function
@@ -481,6 +547,223 @@ intermediate value theorem and Theorem~\ref{thm:mv-master}.
 
 The MV~2010 single-arcsine optimum yields $M_*\approx 1.2748$.  The
 remainder of the paper raises $M_*$ by enlarging the kernel class.
+
+\subsection{Extension to Convex Combinations}\label{subsec:mv-extension}
+
+Matolcsi--Vinuesa~\cite[Lemma~3.1]{MV10} (which itself rests on
+Martin--O'Bryant~\cite[Lemmas~3.1--3.4]{MO2009}) was stated for a
+single arcsine kernel, but its proof uses $K$ only through the
+Bochner-admissibility hypotheses
+(K1)--(K4) of Definition~\ref{def:bochner}.  We record the
+elementary extension to convex combinations here, since the kernel
+$\Kms$ of Section~\ref{sec:kernel} is constructed by precisely such a
+combination.  Throughout, $(f\circ f)(x):=\int_{\R}f(t)\,f(x+t)\,dt$
+denotes the convolutional autocorrelation in MV's
+notation~\cite[\S 3]{MV10}.
+
+\begin{lemma}[MV~Lemma~3.1 extension to convex-combination kernels]
+\label{lem:mv-extension}
+Let $K=\sum_{i=1}^{n}\lambda_i K_i$ be a finite convex combination
+of kernels $K_i$, each Bochner-admissible at some scale
+$\delta_i\in(0,1/4]$ in the sense of
+Definition~\ref{def:bochner}, with $\lambda_i\ge 0$ and
+$\sum_i\lambda_i=1$.  Then $K$ is also Bochner-admissible at scale
+$\delta_{\max}:=\max_i\delta_i$, and for every
+$f\in\mathcal{F}$ with $\int f=1$ the four atomic identities of
+\cite[Lemma~3.1]{MV10} / \cite[Lemmas~3.1--3.4]{MO2009}, together
+with the $z_1$-absorption Cauchy--Schwarz step in the proof of
+Theorem~\ref{thm:mv-master}, deliver the following bounds at the
+pair $(f,K)$:
+\begin{enumerate}[label=\textnormal{(\arabic*)}, leftmargin=2.6em]
+\item $\displaystyle\int_{\R}(f*f)(x)\,K(x)\,dx \;\le\; \|f*f\|_{\Linf}$.
+\item $\displaystyle\int_{\R}(f\circ f)(x)\,K(x)\,dx \;\le\;
+       1 + \sqrt{\|f*f\|_{\Linf}-1}\,\sqrt{K_2-1}$.
+\item $\displaystyle\frac{2}{u} \;+\; 2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
+       \;\le\;
+       \int_{\R}\bigl((f*f)(x)+(f\circ f)(x)\bigr)K(x)\,dx$,
+       where $u=1/2+\delta_{\max}$ and $\widetilde{f}(j),\widetilde{K}(j)$
+       are the period-$u$ Fourier coefficients (see
+       Remark~\ref{rem:eq3-inequality}).
+\item For every even, real-valued, $u$-periodic trigonometric polynomial
+       $G$ with $\widetilde{G}(0)=0$ and $\min_{x\in[0,1/4]}G(x)\ge m_G>0$,
+\[
+  u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
+  \;\ge\;
+  \frac{m_G^{\,2}}{\displaystyle\sum_{j:\widetilde{G}(j)\ne 0}\widetilde{G}(j)^{2}/\widetilde{K}(j)}.
+\]
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+\emph{Preservation of (K1)--(K4) under convex combination.}
+Nonnegativity, evenness, and the support inclusion
+$\supp K\subseteq\bigcup_i\supp K_i\subseteq[-\delta_{\max},\delta_{\max}]$
+are immediate.  Unit mass and Fourier positivity follow from linearity:
+$\int K=\sum_i\lambda_i\int K_i=\sum_i\lambda_i=1$, and
+$\widetilde{K}(j)=\widehat{K}(j/u)=\sum_i\lambda_i\widetilde{K_i}(j)\ge 0$
+since each $\widetilde{K_i}(j)\ge 0$ and $\lambda_i\ge 0$.  Hence
+$K$ satisfies (K1)--(K4) at scale $\delta_{\max}$.
+
+\emph{Identities (1)--(4) transport.}
+Each identity uses $K$ only through (K1)--(K4):
+\begin{itemize}[leftmargin=2em]
+\item (1) is the pointwise bound $(f*f)\cdot K\le\|f*f\|_{\Linf}\cdot K$
+       integrated using $K\ge 0$ and $\int K=1$ (K1, K3).
+\item (2) is MV~2010 Lemma~3.3 / MO~2009 Lemma~3.2 (period-$1$
+       Parseval applied to $f\circ f$ paired against $K$, followed by
+       a sequence Cauchy--Schwarz, in their sharp $z_1$,$k_1$-form
+       Eq.~\eqref{eq:mv-sharp}'s analogue for the $f\circ f$~piece),
+       followed by the $z_1$-absorption Cauchy--Schwarz step
+       $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ of
+       Theorem~\ref{thm:mv-master}.  Both steps use $K$ only through
+       $\widetilde{K}(j)\ge 0$ (K4) and $\|K\|_{2}^{2}<\infty$ (a
+       consequence of (K1), (K3), and~$K\in L^{\infty}_{\rm loc}$ on
+       the compact support).
+\item (3) is the $\ge$-direction of the torus Parseval identity
+       \[
+         \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
+         \;=\;\frac{2}{u}+2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
+       \]
+       which combines the torus Parseval split for $(f*f)+(f\circ f)$
+       against $K$, the constant-term mass $\widetilde{K}(0)=1/u$
+       (from (K3)), and the Fourier expansion of the tail.  We retain
+       only the inequality direction; see
+       Remark~\ref{rem:eq3-inequality} for why the $\ge$-direction
+       alone suffices and follows from $\widetilde{K}(j)\ge 0$ (K4)
+       without the full period-$u$ summation.
+\item (4) is the discrete weighted Cauchy--Schwarz
+       (Sedrakyan / Titu / Engel form)
+       $\bigl(\sum a_j b_j\bigr)^{2}\le\bigl(\sum a_j^{2}\widetilde{K}(j)\bigr)\bigl(\sum b_j^{2}/\widetilde{K}(j)\bigr)$
+       applied with
+       $a_j=\operatorname{Re}\widetilde{f}(j)\sqrt{\widetilde{K}(j)}$ and
+       $b_j=\widetilde{G}(j)/\sqrt{\widetilde{K}(j)}$
+       (well-defined for $j$ with $\widetilde{K}(j)>0$),
+       combined with the inner-product floor
+       \begin{equation}\label{eq:inner-product-floor}
+         u\cdot\sum_{j\ne 0}\operatorname{Re}\widetilde{f}(j)\,\widetilde{G}(j)\;\ge\; m_G,
+       \end{equation}
+       established as follows.  By admissibility $f\ge 0$ with
+       $\supp f\subseteq(-1/4,1/4)$, and $\int_{\R}f\,dx=1$ under the
+       normalization $\int f=1$ (Section~\ref{subsec:intro-constant}).
+       Since $f$ is real-valued and even, $\widetilde{f}(j)\in\R$, and
+       the period-$u$ Parseval pairing of the $u$-periodic, real,
+       even multiplier $G$ against $f$ reads
+       \[
+         \int_{\R}f(x)\,G(x)\,dx
+         \;=\;u\sum_{j\in\Z}\operatorname{Re}\widetilde{f}(j)\,\widetilde{G}(j)
+       \]
+       (MO~2009 Lemma~2.1, applied to the pairing of $f$, supported in
+       $(-1/4,1/4)$, against $G$).  The $j=0$ term is
+       $\operatorname{Re}\widetilde{f}(0)\,\widetilde{G}(0)=(\int f)\,\widetilde{G}(0)$,
+       which vanishes because the cosine multiplier
+       $G(x)=\sum_{j=1}^{N}a_j\cos(2\pi jx/u)$ of
+       Definition~\ref{def:multiplier} has no constant term, i.e.
+       $\widetilde{G}(0)=0$.  Finally $G(x)\ge m_G$ for
+       $x\in[-1/4,1/4]\supseteq\supp f$ together with $f\ge 0$ gives
+       the pointwise bound $m_G\,f(x)\le f(x)\,G(x)$ for all $x$
+       (trivially for $x\notin\supp f$), so that
+       \[
+         u\sum_{j\ne 0}\operatorname{Re}\widetilde{f}(j)\,\widetilde{G}(j)
+         \;=\;\int_{\R}f(x)\,G(x)\,dx
+         \;\ge\;m_G\int_{\R}f(x)\,dx
+         \;=\;m_G,
+       \]
+       which is~\eqref{eq:inner-product-floor}.  (The Lean witness is
+       \texttt{Sidon.MVLemmas.mv\_inner\_product\_floor}, which
+       integrates the pointwise bound $m_G\,f\le f\,G$ and substitutes
+       the torus-Parseval identity.)
+\end{itemize}
+Each step invokes (K1)--(K4) alone; no specific kernel structure is
+used.  Hence the identities transport unchanged to any
+$K=\sum_i\lambda_i K_i$ satisfying (K1)--(K4).  The formal Lean
+witness of this extension is the module \texttt{Sidon.MVLemmas},
+where identities (1)--(4) are proven for a \emph{generic} admissible
+$K$ (with the four atomic primitives of (2) and (3) carried as
+named hypotheses, exactly mirroring the Fourier-analytic ingredients
+listed above).
+\end{proof}
+
+\begin{remark}[Why item~(3) is invoked only in its $\ge$-direction]
+\label{rem:eq3-inequality}
+MO~2009 Lemma~3.3 / MV~2010 Lemma~3.3 state item~(3) as an
+\emph{equality},
+\[
+  \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
+  \;=\;\frac{2}{u}+2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
+\]
+and the master inequality of Theorem~\ref{thm:mv-master} chains
+against this only through the lower bound on the left-hand side, i.e.
+the $\ge$-direction printed in Lemma~\ref{lem:mv-extension}(3).  The
+equality of course implies the inequality by reflexivity, so the
+citation to MO~2009 / MV~2010 remains valid; we record here that the
+$\ge$-direction needs strictly less.  Indeed, since
+$\widetilde{K}(j)\ge 0$ for every $j$ (K4) and $(\operatorname{Re}\widetilde{f}(j))^{2}\ge 0$,
+every term of the tail sum is nonnegative, so for any finite
+$J\subseteq\Z\setminus\{0\}$ the truncated identity
+\[
+  \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
+  \;\ge\;\frac{2}{u}+2u^{2}\sum_{j\in J}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
+\]
+follows from finite-$J$ Parseval and Bochner positivity alone, with
+the full sum recovered by monotone convergence; no period-$u$ Poisson
+summation over all of $\Z$ is required.  This is precisely the
+refactor that lets the Lean formalization
+(\texttt{Sidon.MultiScale}, field \texttt{hEq3\_ge}; supported by
+\texttt{Sidon.MVLemmas.mv\_eq3\_ge}) discharge item~(3) from
+mathlib's $L^{1}\cap L^{2}$ Plancherel and finite-$J$ Parseval
+primitives, without a full period-$u$ Parseval API.
+\end{remark}
+
+\begin{remark}[Boundary case of MO~2009 Lemma~2.1]\label{rem:mo-boundary}
+The period-$u$ Parseval identity invoked in step~(3) above is
+MO~2009 Lemma~2.1 applied to the \emph{bilinear} pairing of
+$(f*f)+(f\circ f)$ (supported in $(-1/2,1/2)$) against $K=K_{\mathrm{ms}}$
+(supported in $[-\delta_{\max},\delta_{\max}]$).  The hypothesis of MO
+Lemma~2.1 requires $\alpha_1+\alpha_2\le u$ where $\alpha_1$, $\alpha_2$
+are the support half-widths of the two functions in the pairing.  Here
+$\alpha_1=1/2$ and $\alpha_2=\delta_{\max}$, so the hypothesis reads
+$1/2+\delta_{\max}\le u$, satisfied with equality by our choice
+$u=1/2+\delta_{\max}$ --- the same boundary case used by MV~2010 at the
+single-arcsine point $\delta=\delta_1=0.138$.  In particular, the
+hypothesis is NOT that each of $f*f$, $f\circ f$, $K$ individually fit
+in one period $(-u/2,u/2)$; only the bilinear sum-of-supports condition
+is needed.
+
+We are explicit that MO~2009 Lemma~2.1 is \emph{stated} with the weak
+inequality $\alpha_1+\alpha_2\le u$ and that we invoke it at the
+boundary equality $\alpha_1+\alpha_2=u$; the justification of the
+equality case below is the present paper's analytic argument, not a
+verbatim invocation of MO.  The argument is a passage to $L^2$-class
+representatives.  Lemma~2.1 is a statement about $L^2$ equivalence
+classes: its bilinear pairing is unchanged when either factor is
+modified on a Lebesgue-null set~\cite[\S 2.1]{Folland}.  Now
+$K_{\mathrm{ms}}=\sum_i\lambda_i\eta_{\delta_i}*\eta_{\delta_i}$ is
+continuous and vanishes pointwise at $\pm\delta_{\max}$ (the
+autoconvolution of an indicator has empty support-overlap at the
+boundary), so it represents the same $L^2$ class as a function
+supported in the \emph{open} interval $(-\delta_{\max},\delta_{\max})$;
+likewise $f\in L^2$ may be taken supported in the open
+$(-1/4,1/4)$.  For these representatives
+$\alpha_1+\alpha_2<u$ holds with strict inequality on the (open)
+support sets, and the pairing value is in any case insensitive to the
+measure-zero modification.  This is consistent with how MO~2009
+themselves treat the boundary: their proof of Lemma~3.3 reads
+``\emph{Since the inequality $\tfrac12+\delta\le u$ is satisfied, we
+may apply Lemma~2.1}'' at exactly $u=\tfrac12+\delta$, so the equality
+case is one already exercised in the source.
+
+The period-1 Parseval identity used in step~(2) is MO~2009
+Lemma~2.2, applied to $f\circ f$ and $K$ both supported in
+$(-1/2,1/2)$ (the standard $L^2$ Parseval on a single period).
+\end{remark}
+
+The master inequality~\eqref{eq:mv-sharp} of
+Theorem~\ref{thm:mv-master} is the algebraic combination
+(1)+(2)+(3)+(4) of these four identities together with the
+Parseval-type bounds $2z_1^{\,4}\le\|f*f\|_{\Linf}-1$ and
+$2k_1^{\,2}\le K_2-1$.  Lemma~\ref{lem:mv-extension} therefore
+justifies the application of Theorem~\ref{thm:mv-master} to the
+three-scale kernel $\Kms$ of Section~\ref{sec:kernel}.
 
 % ======================================================================
 \section{The Three-Scale Arcsine Kernel}\label{sec:kernel}
@@ -600,7 +883,68 @@ We check conditions (K1)--(K4) of Definition~\ref{def:bochner}.
 \end{itemize}
 \end{proof}
 
-The motivation is structural: in~\eqref{eq:S1-a}, $S_1$ blows up at
+Two analytical properties of $\Kms$ used silently in
+Sections~\ref{sec:cert}--\ref{sec:proof} merit explicit
+statement.  Both are immediate from the convex-combination
+structure and the corresponding single-scale facts; we record them as
+sub-lemmas to make the dependence on (K1)--(K4) of
+Definition~\ref{def:bochner} transparent.
+
+\begin{lemma}[$\Kms\in L^{2}(\R)$]
+\label{lem:Kms-L2}
+$\|\Kms\|_{L^{2}(\R)}
+\;\le\;\sum_{i=1}^{3}\lambda_i\,\|\eta_{\delta_i}*\eta_{\delta_i}\|_{L^{2}(\R)}
+\;<\;\infty$.
+\end{lemma}
+
+\begin{proof}
+By Minkowski's inequality on $L^{2}(\R)$ applied to the finite
+combination $\Kms=\sum_i\lambda_i(\eta_{\delta_i}*\eta_{\delta_i})$,
+$\|\Kms\|_{2}\le\sum_i\lambda_i\,\|\eta_{\delta_i}*\eta_{\delta_i}\|_{2}$.
+Each autoconvolution $\eta_{\delta_i}*\eta_{\delta_i}$ is supported on
+$[-\delta_i,\delta_i]$, and its closed form on
+$(-\delta_i,\delta_i)\setminus\{0\}$ involves complete elliptic
+integrals~\cite[\S 10.9.4]{DLMF} which are bounded away from the
+endpoints; explicitly $\eta_{\delta_i}*\eta_{\delta_i}$ lies in
+$L^{2}([-\delta_i,\delta_i])$, since the only singularities of
+$\eta_{\delta_i}$ are integrable arcsine endpoint singularities and
+their convolution removes one order of singularity.  Hence the
+right-hand side is finite.
+\end{proof}
+
+\begin{lemma}[Bochner positivity of $\widehat{\Kms}$]
+\label{lem:Kms-pos}
+For every $\xi\in\R$,
+\[
+  \widehat{\Kms}(\xi)
+  \;=\;\sum_{i=1}^{3}\lambda_i\,J_0(\pi\delta_i\xi)^{2}
+  \;\ge\; 0.
+\]
+In particular $\widetilde{\Kms}(j)\ge 0$ for every $j\in\Z$.
+\end{lemma}
+
+\begin{proof}
+By linearity of the Fourier transform,
+$\widehat{\Kms}=\sum_i\lambda_i\widehat{\eta_{\delta_i}*\eta_{\delta_i}}$.
+The convolution theorem and the Mehler--Sonine
+identity~\eqref{eq:sonine} give
+$\widehat{\eta_{\delta_i}*\eta_{\delta_i}}(\xi)
+=\widehat{\eta_{\delta_i}}(\xi)^{2}=J_0(\pi\delta_i\xi)^{2}$.
+Each summand $\lambda_i J_0(\pi\delta_i\xi)^{2}$ is nonnegative
+($\lambda_i\ge 0$, squares are nonnegative), and the sum of
+nonnegatives is nonnegative.  Setting $\xi=j/u$ for $j\in\Z$ yields
+the periodic statement.
+\end{proof}
+
+\noindent
+Lemma~\ref{lem:Kms-L2} discharges the finite-$K_2$ hypothesis
+underlying identity~(2) of
+Lemma~\ref{lem:mv-extension}; Lemma~\ref{lem:Kms-pos} discharges
+(K4), which is the only kernel-dependent hypothesis used in (3)
+and (4).
+
+The motivation for the multi-scale construction is structural:
+in~\eqref{eq:S1-a}, $S_1$ blows up at
 frequencies $j$ where the single-scale $J_0(\pi j\delta/u)^2$ is close
 to a Bessel zero.  Mixing three scales shifts the zeros of each
 summand, so the sum stays bounded away from zero on $1\le j\le 200$
@@ -669,7 +1013,7 @@ $K_2 = 2\int_0^{T}\widehat{\Kms}(\xi)^2\,d\xi
 The bulk integral is computed by arb adaptive Gauss--Legendre
 quadrature and certified at $4.78882342\ldots$ with arb radius
 below $10^{-10}$.  For the tail, the uniform bound
-$|J_0(z)|^2\le 2/(\pi z)$~\cite{Landau} holds for $z>0$;
+$|J_0(z)|^2\le 2/(\pi z)$~\cite{Watson} holds for $z>0$;
 since $\xi\ge T=10^{5}$ in the tail forces $z=\pi\delta_i\xi\ge
 \pi(25/1000)(10^{5})\approx 7854$, the bound applies, and applied to
 both Bessel factors gives
@@ -894,8 +1238,8 @@ gives $C_{1a}\ge 1292/1000=1.292$.\qedhere
 
 \subsection{Lean Formalization}\label{subsec:proof-lean}
 
-The analytic chain above is mechanized in Lean~4 across $15$ modules
-totalling $\approx 8650$ lines of code rooted at
+The analytic chain above is mechanized in Lean~4 across $13$ modules
+totalling $\approx 7500$ lines of code rooted at
 \texttt{lean/Sidon/MultiScale.lean}, which builds cleanly under
 Mathlib~\cite{Mathlib,Lean} with zero \texttt{sorry} tactics and
 produces the headline theorem
@@ -903,31 +1247,46 @@ produces the headline theorem
 factors the proof into:
 \texttt{Sidon.\{Defs, Bessel, FourierAux, TorusParseval, MVLemmas,
 MasterFromLemmas, BundleDefs, BundleEq1, BundleEq2Schwartz,
-BundleEq3Schwartz, BundleEq4, BilinearParseval, MultiScale,
-MultiScaleSchwartz, SchwartzAtomicDischarge\}}.
+BundleEq3Schwartz, BundleEq4, BilinearParseval, MultiScale\}}.
 The headline theorem reaches exactly \emph{two} numerical user axioms
 in its dependency closure (alongside the three Lean core axioms
 \texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}):
 \begin{itemize}[leftmargin=2em]
 \item \texttt{K2\_analytic\_le\_K2UpperQ}: the certified upper bound
 $K_2(\Kms)\le\texttt{K2UpperQ}=47897/10000$ from
-Lemma~\ref{lem:K2}.
+Lemma~\ref{lem:K2}.  Here \texttt{K2\_analytic} is the concrete real
+analytic functional $\int_\R \Kms(x)^2\,dx$ built from the explicit
+multi-scale kernel $\Kms$ of
+Definition~\ref{def:Kms}.
 \item \texttt{gain\_analytic\_ge\_gainLowerQ}: the certified lower bound
-$a\ge\texttt{gainLowerQ}=20925/100000$ from Lemma~\ref{lem:a}.
+$a\ge\texttt{gainLowerQ}=20925/100000$ from Lemma~\ref{lem:a}.  Here
+\texttt{gain\_analytic} is the concrete real analytic functional
+$(4/u)\cdot m_G^{\,2}/S_1$, with $m_G=\inf_{x\in[0,1/4]}G(x)$ and
+$S_1=\sum_{j=1}^{200}a_j^{\,2}/\widetilde{\Kms}(j)$ both formed from
+the explicit cosine multiplier $G_{\rm concrete}(x)
+=\sum_{j=1}^{200}(\texttt{qpNumerators}[j-1]/10^{8})\cos(2\pi j x/u)$
+(the $200$ rational coefficients embedded in \texttt{Sidon.MultiScale}
+as the integer list \texttt{qpNumerators}) and the closed-form
+Bessel-based periodic coefficients $\widetilde{\Kms}(j)
+=\sum_i\lambda_i\,\texttt{besselJ0}(\pi j\delta_i/u)^2$ (using the
+power-series Bessel function from \texttt{Sidon.Bessel}).
 \end{itemize}
-Both are analogues of \emph{``Mathematica computed this value''} in
-MV~2010~\cite{MV10}, with the underlying numerical work performed
-here by the \texttt{flint.arb} certifier at $256$-bit precision (in
+Both axioms bind concrete real expressions in the Lean term
+language and are decidable in principle by any sufficient
+interval-arithmetic implementation; they play the role of MV~2010's
+``Mathematica computed this value'' citations~\cite{MV10}, with the
+underlying numerical work performed here by the \texttt{flint.arb}
+certifier at $256$-bit precision (in
 \texttt{delsarte\_dual/grid\_bound\_alt\_kernel/}).  The three-scale
 master inequality at the analytic anchors is itself a Lean
 \emph{theorem} (\texttt{MV\_master\_inequality\_from\_MV\_lemmas},
-composed from the four MV-Lemma-3.1 atomic conclusions formalised in
+composed from the four MV-Lemma-3.1 atomic conclusions formalized in
 \texttt{Sidon.MVLemmas}); slack-monotonicity then lifts it to the
 rational anchors used in the strict-failure step.
 
 \paragraph{Sound definitions of \texorpdfstring{$f\circ f$}{f circ f}
 and \texorpdfstring{$\Karc$}{K\_arc}.}
-The Lean formalisation defines the convolutional autocorrelation as
+The Lean formalization defines the convolutional autocorrelation as
 $(f\circ f)(x):=\int_{\R}f(t)\,f(x+t)\,dt$ (matching the MV
 notation~\cite[\S 3]{MV10}; this is \texttt{autocorr} in
 \texttt{Sidon.FourierAux}), and the arcsine kernel as the
@@ -939,17 +1298,28 @@ paper and the Python certifier.
 
 \paragraph{Theorem statements.}
 The headline theorem
-\texttt{autoconvolution\_ratio\_ge\_1292\_1000} takes a bundle
-\texttt{ExtremiserPrimitives f} packaging the four MV-Lemma-3.1
-atomic primitives for $(f,\Kms)$ as hypotheses; the Schwartz
-specialisation
-\texttt{autoconvolution\_ratio\_ge\_1292\_1000\_schwartz}
-discharges the bundle from a single record
-\texttt{SchwartzAtomic f\_s} of Schwartz-class atomic Fourier
-identities, and the slim variant
-\texttt{autoconvolution\_ratio\_ge\_1292\_1000\_schwartz\_residual}
-reduces the latter to the residual \texttt{SchwartzAtomicResidual}
-hypotheses.
+\texttt{autoconvolution\_ratio\_ge\_1292\_1000} carries a record
+\texttt{ExtremiserPrimitives f} whose fields are Lean restatements of
+the outputs of MO~2009 Lemmas~3.1--3.4 / MV~2010 Lemma~3.1 at the
+pair $(f,\Kms)$; those lemmas apply to~$\Kms$ directly (as a pdf
+supported in $[-\delta_1,\delta_1]$ with $\widetilde{\Kms}(j)\ge 0$
+and $\Kms\in L^2$), and the paper discharges the bundle fields by
+direct citation. The Lean theorem retains them as hypothesis fields
+only because mathlib~v4.29.1 does not yet expose a reusable $L^1\cap
+L^2$ Plancherel + period-$u$ Parseval API in the form the bundle
+consumes.  The bundle's $m_G$ and $S_G$ fields are reals constrained
+by the gain identity $\texttt{gain\_analytic}=2\,m_G^{\,2}/S_G$
+(field \texttt{gain\_eq}); the bundle's third inequality field
+\texttt{hEq3\_ge} (replacing an earlier equality form \texttt{hEq3})
+is Lean-derivable from finite-$J$ Parseval plus Bochner
+positivity $\widetilde{\Kms}(j)\ge 0$ alone, via the supporting
+theorems \texttt{mv\_eq3\_ge} and \texttt{mv\_eq3\_ge\_of\_eq} in
+\texttt{Sidon.MVLemmas} (no period-$u$ Poisson summation required).
+A Schwartz-class specialisation that previously bypassed the
+\texttt{ExtremiserPrimitives} hypothesis was retired as vacuous:
+Paley--Wiener combined with Carlson's theorem prevents any
+nontrivial Schwartz $f$ from being compactly supported in
+$(-1/4,1/4)$, so the Schwartz headline had no nontrivial witness.
 
 Six further statements are Lean \emph{theorems}: the algebraic
 inversion \texttt{master\_inequality\_M\_lower} (corresponding to
@@ -993,7 +1363,7 @@ each.
 
 \begin{thebibliography}{ABC10}
 
-\bibitem[GGTW26]{AlphaEvolve25}
+\bibitem[GGTW26]{AlphaEvolve26}
 Bogdan Georgiev, Javier G\'omez-Serrano, Terence Tao, and Adam~Zsolt
 Wagner, \emph{Mathematical exploration and discovery at scale},
 preprint, 2026, arXiv:2511.02864,
@@ -1008,6 +1378,11 @@ Soc.\ \textbf{145} (2017), no.~8, 3191--3200, arXiv:1403.7988.
 Paul Erd\H{o}s and P\'al Tur\'an, \emph{On a problem of Sidon in additive
 number theory, and on some related problems}, J. London Math. Soc.
 \textbf{s1-16} (1941), no.~4, 212--215.
+
+\bibitem[Fol99]{Folland}
+Gerald B. Folland, \emph{Real Analysis: Modern Techniques and Their
+Applications}, 2nd ed., Pure and Applied Mathematics, John Wiley \& Sons,
+New York, 1999.
 
 \bibitem[Joh17]{Flint}
 Fredrik Johansson, \emph{Arb: efficient arbitrary-precision midpoint-radius
@@ -1034,13 +1409,20 @@ The mathlib community, \emph{The Lean mathematical library}, Proc.
 9th ACM SIGPLAN Int. Conf. Certified Programs and Proofs, 2020,
 pp.~367--381.
 
+\bibitem[SS02]{SS2002}
+A.~Schinzel and W.~M.~Schmidt,
+\emph{Comparison of $L^{1}$- and $L^{\infty}$-norms of squares of polynomials},
+Acta Arith. \textbf{104} (2002), no.~3, 283--296.
+
 \bibitem[Wat44]{Watson}
 George Neville Watson, \emph{A Treatise on the Theory of Bessel
 Functions}, 2nd ed., Cambridge University Press, 1944.
 
-\bibitem[Lan00]{Landau}
-L.~J. Landau, \emph{Bessel functions: monotonicity and bounds},
-J. London Math. Soc.\ (2) \textbf{61} (2000), no.~1, 197--215.
+\bibitem[Xie26]{Xie26}
+Y.~Xie, \emph{Lower bound entry for $C_{1a}$}, in T.~Tao,
+\texttt{optimizationproblems} repository, 2026 (AI-assisted with Grok;
+not independently audited).
+\url{https://github.com/teorth/optimizationproblems}.
 
 \bibitem[DLMF]{DLMF}
 NIST Digital Library of Mathematical Functions,

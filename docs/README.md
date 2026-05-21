@@ -16,10 +16,10 @@ instructions, audit specification, and an archive of dead-end attempts.
 | Path | Content |
 |------|---------|
 | [`proof_outline.md`](proof_outline.md) | Mathematical summary: the Matolcsi--Vinuesa master inequality, the three-scale arcsine kernel, the five certified anchors, the strict-failure witness at $M = 1.292$, and the axiom-budget comparison with MV 2010. |
-| [`formalization.md`](formalization.md) | Description of the fifteen-module Lean formalisation under [`../lean/Sidon/`](../lean/Sidon/): the three headline theorems (`autoconvolution_ratio_ge_1292_1000`, `_schwartz`, `_schwartz_residual`), the two verifiable-by-computation axioms (rigorously certified `flint.arb` numerical assertions), the `ExtremiserPrimitives` / `SchwartzAtomic` / `SchwartzAtomicResidual` records, and the correspondence with the paper. |
+| [`formalization.md`](formalization.md) | Description of the thirteen-module Lean formalisation under [`../lean/Sidon/`](../lean/Sidon/): the headline theorem `autoconvolution_ratio_ge_1292_1000`, the two verifiable-by-computation axioms (rigorously certified `flint.arb` numerical assertions), the `ExtremiserPrimitives` record, and the correspondence with the paper. |
 | [`reproducibility.md`](reproducibility.md) | Build instructions for the `flint.arb` certifier and the Lean formalisation; expected outputs and certificate hash. |
 | [`verification.md`](verification.md) | Public audit specification: fourteen independent checks that exhaust the surface of the proof. |
-| [`attempts/`](attempts/) | Archive of historical research directions (single-kernel sweeps, Lasserre/SOS, cascade estimators, interval branch-and-bound, GPU SCS, conditional Hölder, and others). See [`attempts/README.md`](attempts/README.md). |
+| [`../archive/attempts/`](../archive/attempts/) | Archive of historical research directions (single-kernel sweeps, Lasserre/SOS, cascade estimators, interval branch-and-bound, GPU SCS, conditional Hölder, and others). See [`../archive/attempts/README.md`](../archive/attempts/README.md). |
 | [`presentation/`](presentation/) | Slide deck and figure-generation scripts. |
 
 ## Conventions

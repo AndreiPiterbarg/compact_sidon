@@ -38,15 +38,23 @@ namespace Sidon.Master
 /-- MV master inequality (paper Eq.(6)).
 
 The hypotheses are the four MV Lemma 3.1 conclusions expressed as
-numerical inequalities / identity between scalars:
+numerical inequalities between scalars:
 
-  * `hEq1`: `LHS₁ ≤ Minf`                       (Eq.(1) conclusion)
-  * `hEq2`: `LHS₂ ≤ 1 + √(Minf-1)·√(K2-1)`     (Eq.(2) conclusion)
-  * `hEq3`: `LHS₁ + LHS₂ = 2/u + 2·u²·S_cos`   (Eq.(3) identity)
-  * `hEq4`: `u²·S_cos ≥ m_G² / S_G`            (Eq.(4) bound)
+  * `hEq1`: `LHS₁ ≤ Minf`                          (Eq.(1) conclusion)
+  * `hEq2`: `LHS₂ ≤ 1 + √(Minf-1)·√(K2-1)`        (Eq.(2) conclusion)
+  * `hEq3_ge`: `2/u + 2·u²·S_cos ≤ LHS₁ + LHS₂`   (Eq.(3) inequality form)
+  * `hEq4`: `u²·S_cos ≥ m_G² / S_G`               (Eq.(4) bound)
 
-where `LHS₁ = ∫(f*f)·K`, `LHS₂ = ∫(f∘f)·K`, `S_cos = ∑ Re(f̃)²·K̃`,
-`S_G = ∑ G̃²/K̃`.  The proof is purely algebraic. -/
+where `LHS₁ = ∫(f*f)·K`, `LHS₂ = ∫(f∘f)·K`, `S_cos = ∑_{j ∈ J} Re(f̃)²·K̃`,
+`S_G = ∑ G̃²/K̃`.  The proof is purely algebraic.
+
+The `hEq3_ge` form (an inequality, not the equality of MV Eq.(3)) is
+exactly the direction used by the master inequality: chaining
+`2/u + 2u²·S_cos ≤ LHS₁ + LHS₂ ≤ Minf + 1 + √(...)`.  Importantly,
+this form is **Bochner-discharge-able** from finite-J Parseval
+(no full period-`u` Poisson summation required): truncating the
+nonneg-term tsum `∑'_{j ∈ ℤ\{0}} Re(f̃(j))² K̃(j)` to any finite
+`J ⊆ ℤ\{0}` weakens the equality to the inequality stated here. -/
 theorem master_inequality_from_lemmas
     (Minf K2 m_G S_G u S_cos LHS1 LHS2 : ℝ)
     (hu : 0 < u)
@@ -54,7 +62,7 @@ theorem master_inequality_from_lemmas
     -- Hypotheses corresponding to the four MV Lemma 3.1 equations:
     (hEq1 : LHS1 ≤ Minf)
     (hEq2 : LHS2 ≤ 1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1))
-    (hEq3 : LHS1 + LHS2 = 2 / u + 2 * u^2 * S_cos)
+    (hEq3_ge : 2 / u + 2 * u^2 * S_cos ≤ LHS1 + LHS2)
     (hEq4 : u^2 * S_cos ≥ m_G^2 / S_G) :
     Minf + 1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1)
       ≥ 2 / u + 2 * m_G^2 / S_G := by
@@ -62,11 +70,11 @@ theorem master_inequality_from_lemmas
   have h_sum_upper :
       LHS1 + LHS2 ≤ Minf + (1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1)) :=
     add_le_add hEq1 hEq2
-  -- Step 2: 2/u + 2·u²·S_cos ≤ Minf + 1 + √(Minf-1)·√(K2-1)  by Eq.(3).
+  -- Step 2: 2/u + 2·u²·S_cos ≤ Minf + 1 + √(Minf-1)·√(K2-1)  by chaining hEq3_ge.
   have h_three :
       2 / u + 2 * u^2 * S_cos
-        ≤ Minf + (1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1)) := by
-    rw [← hEq3]; exact h_sum_upper
+        ≤ Minf + (1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1)) :=
+    le_trans hEq3_ge h_sum_upper
   -- Step 3: 2/u + 2·m_G²/S_G ≤ 2/u + 2·u²·S_cos  by Eq.(4).
   have h_four :
       2 / u + 2 * (m_G^2 / S_G) ≤ 2 / u + 2 * u^2 * S_cos := by
@@ -110,13 +118,13 @@ theorem master_inequality_assembled
     (hEq1 : LHS1 ≤ Minf)
     -- MV Eq.(2) output:
     (hEq2 : LHS2 ≤ 1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1))
-    -- MV Eq.(3) identity:
-    (hEq3 : LHS1 + LHS2 = 2 / u + 2 * u^2 * S_cos)
+    -- MV Eq.(3) (inequality form):
+    (hEq3_ge : 2 / u + 2 * u^2 * S_cos ≤ LHS1 + LHS2)
     -- MV Eq.(4) output:
     (hEq4 : u^2 * S_cos ≥ m_G^2 / S_G) :
     Minf + 1 + Real.sqrt (Minf - 1) * Real.sqrt (K2 - 1)
       ≥ 2 / u + 2 * m_G^2 / S_G :=
   master_inequality_from_lemmas Minf K2 m_G S_G u S_cos LHS1 LHS2
-    hu hS_G_pos hEq1 hEq2 hEq3 hEq4
+    hu hS_G_pos hEq1 hEq2 hEq3_ge hEq4
 
 end Sidon.Master

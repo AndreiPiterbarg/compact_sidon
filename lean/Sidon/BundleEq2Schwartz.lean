@@ -1,41 +1,32 @@
 /-
-Sidon Autocorrelation Project — Bundle Eq.(2) Discharge for Schwartz `f`
+Sidon Autocorrelation Project — Bundle Eq.(2) K-side period-1 Plancherel
 ========================================================================
 
-This file discharges (or precisely packages) the MV Lemma 3.1 Eq.(2)
-atomic primitives for *Schwartz* admissible test functions `f`, with
-the goal of producing the bundle field
+This file provides the unconditional K-side discharge of MV Lemma 3.1
+Eq.(2) for the multi-scale kernel `K_ms`, in both the period-`u` and
+period-`1` normalisations.  Concretely, it proves
+
+```
+  ∑_{r ∈ J} (Re 𝓕K_ms(r))² ≤ K2_analytic - 1   (period-1)
+  ∑_{j ∈ J} (Re 𝓕K_ms(j/u))² ≤ K2_analytic - 1 (period-u, via u ≤ 1 slack)
+```
+
+via mathlib period-`u` Plancherel applied to `K_ms` (supported in
+`[-δ₁, δ₁] ⊂ Ioc(-u/2, u/2)` for `u = 0.638`).  These are the K-side
+ingredients for the general bundle field
 
 ```
   hEq2 : LHS2 ≤ 1 + √(autoconvolution_ratio f - 1) * √(K2_analytic - 1)
 ```
 
-(see `Sidon.MultiScale.ExtremiserPrimitives`) for Schwartz `f`.
+(see `Sidon.MultiScale.ExtremiserPrimitives`).
 
-**Strategy.** Discharge `mv_eq2_full`'s three atomic primitives.
-
-1. `h_K_bound` — `∑ K̂_ms(j/u)² ≤ K_2 - 1`: closed unconditionally
-   via period-`u` Plancherel at lattice
-   (`TorusParseval.plancherel_at_lattice_period_u`) applied to `K_ms`,
-   which is supported in `[-δ₁, δ₁] = [-0.138, 0.138] ⊂ Ioc(-u/2, u/2)`
-   for `u = 0.638`.
-
-2. `h_F_bound` — `∑ |𝓕f(j/u)|⁴ ≤ R(f) - 1`: the continuous form
-   `∫|𝓕f|⁴ ≤ R(f) - 1` would follow from Schwartz Plancherel applied
-   to `f * f`, combined with `∫|f*f|² ≤ ‖f*f‖_∞·‖f*f‖_1 = R(f)·1`.
-   Bridging to the lattice sum requires Poisson summation on `f*f`,
-   which is **supported in `(-1/2, 1/2) ⊄ (-u/2, u/2)`**.
-   We expose the lattice form as a precise hypothesis.
-
-3. `h_parseval_split` — the period-`u` bilinear Parseval identity
-   for `∫(f∘f)·K_ms`: a genuine analytic gap, requiring 300-500
-   lines of bilinear period-`u` Parseval bridging.  Exposed as a
-   precise hypothesis.
-
-The K-side discharge (1) is proved unconditionally for Schwartz `f`.
-For (2) and (3) we provide precise hypothesis-form `Prop`s and prove
-the full assembly `hEq2_schwartz_from_atomic` that wires them into
-`mv_eq2_full`.
+The Schwartz-specific F-side and bilinear Parseval-split `Prop`s and
+their assembly into `hEq2_schwartz_from_atomic` previously also lived
+in this file; they have been removed because the Schwartz instance
+they served was vacuous (`SchwartzAtomic f_s` is unsatisfiable: the
+Parseval split required `f̂(r) = 0` for cofinite `r`, which combined
+with Paley–Wiener + Carlson forces `f ≡ 0`).
 
 No `sorry`, no new axioms.
 -/
@@ -627,116 +618,6 @@ theorem K_bound_for_mv_eq2_period1
   have h_sum_re_le := Finset.sum_le_sum h_re_le
   have h_lattice := K_bound_lattice_period1 hK_L2 h_K_int_one J hJ_no_zero
   linarith
-
-/-- **The F-side lattice bound, packaged as a `Prop`.**
-
-`∑ r ∈ J, ‖𝓕f(r)‖⁴ ≤ R(f) - 1`,
-where `R(f) = autoconvolution_ratio f` and `r` ranges over the
-**period-1 integer lattice** (consistent with `ParsevalSplitSchwartz`,
-since `autocorr f` is supported in `(-1/2, 1/2)`).
-
-This is the lattice-sum form of `∫_ℝ |𝓕f(ξ)|⁴ dξ ≤ R(f) - 1`, which
-follows from continuous-`ℝ` Plancherel on `f * f` + Hölder.  The
-lattice form requires Poisson summation on `f * f` (the bridge from
-continuous Plancherel to a period-1 lattice sum). -/
-def FBoundLatticeSchwartz (f : 𝓢(ℝ, ℝ)) (J : Finset ℤ) : Prop :=
-  (∑ r ∈ J, ‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ))
-                                  ((r : ℝ))‖ ^ 4)
-    ≤ autoconvolution_ratio (f : ℝ → ℝ) - 1
-
-/-- **The period-1 bilinear Parseval split, packaged as a `Prop`.**
-
-`∫(autocorr f)·K_ms = 1 + ∑ r ∈ J, ‖𝓕f(r)‖² · Re(𝓕K_ms(r))`,
-where `r` ranges over the **period-1 integer lattice** and the RHS
-finite sum is the truncation of the (in general infinite) period-1
-tsum to `J`.
-
-This is the *correct* normalisation: both `autocorr f` (supported in
-`(-1/2, 1/2)`) and `K_ms` (supported in `[-δ₁, δ₁] ⊂ (-1/2, 1/2)`) fit
-a single period-1 interval, so period-1 Parseval applies with prefactor
-`1` and integer frequencies `r ∈ ℤ`.  (The period-`u` lattice `j/u`
-would be inconsistent here, since `autocorr f` overflows `(-u/2, u/2)`.)
-
-With `autocorr f := ∫ t, f(t)·f(x+t) dt`, we have
-`widehat(autocorr f)(r) = |f̂(r)|²` (Wiener-Khinchin for real `f`), the
-`r = 0` term is `|f̂(0)|²·𝓕K_ms(0) = 1·1 = 1`, and the split takes the
-canonical form `∫(autocorr f)·K = ⟨|f̂|², K̂⟩ = ⟨autocorr f, K⟩` (period-1
-Parseval, both functions supported in `(-1/2, 1/2)`). -/
-def ParsevalSplitSchwartz (f : 𝓢(ℝ, ℝ)) (J : Finset ℤ) : Prop :=
-  ∫ x, autocorr (f : ℝ → ℝ) x * K_ms x ∂volume
-    = 1 + ∑ r ∈ J,
-            ‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ)) ((r : ℝ))‖ ^ 2
-            * (Real.fourierIntegral (fun x => ((K_ms x : ℝ) : ℂ))
-                                     ((r : ℝ))).re
-
-/-! ## Main theorem: `hEq2_schwartz`
-
-Combine the K-side discharge (proved above) with the F-side and
-parseval-split hypotheses, and apply `mv_eq2_full`. -/
-
-/-- **Headline statement (Schwartz-class `hEq2`).**
-
-For Schwartz `f` real-valued, nonneg, with `support f ⊆ (-1/4, 1/4)`
-and `∫f = 1`, the bundle's `hEq2` field follows from:
-  * `h_F_lat` (Poisson on f*f at lattice — open analytic gap), and
-  * `h_split` (period-u bilinear Parseval for f∘f·K_ms),
-combined with the K-side bound proved unconditionally here. -/
-theorem hEq2_schwartz_from_atomic
-    (f : 𝓢(ℝ, ℝ))
-    (hf_nonneg : ∀ x, 0 ≤ f x)
-    (hf_one : ∫ x, f x ∂volume = 1)
-    (hM_ge_1 : 1 ≤ autoconvolution_ratio (f : ℝ → ℝ))
-    (hK2_ge_1 : 1 ≤ K2_analytic)
-    (hK_int : Integrable (fun x => K_ms x) volume)
-    (hK_int_one : ∫ x, K_ms x ∂volume = 1)
-    (hK_L2_torus : MemLp (fun x => ((K_ms x : ℝ) : ℂ)) 2
-              (volume.restrict (Set.Ioc (-(uQ_real/2)) (uQ_real/2))))
-    (hProd_int : Integrable (fun x => autocorr (f : ℝ → ℝ) x * K_ms x) volume)
-    (hFofF_int : Integrable (autocorr (f : ℝ → ℝ)) volume)
-    (hFofF_one : ∫ x, autocorr (f : ℝ → ℝ) x ∂volume = 1)
-    (J : Finset ℤ)
-    (hJ_no_zero : (0 : ℤ) ∉ J)
-    (h_F_lat : FBoundLatticeSchwartz f J)
-    (h_split : ParsevalSplitSchwartz f J) :
-    LHS2_schwartz f
-      ≤ 1 + Real.sqrt (autoconvolution_ratio (f : ℝ → ℝ) - 1)
-              * Real.sqrt (K2_analytic - 1) := by
-  unfold LHS2_schwartz
-  -- Define Fsq, Khat as in mv_eq2_full's expected signature
-  -- (period-1 integer-lattice frequencies, consistent with the
-  -- corrected `ParsevalSplitSchwartz`).
-  set Fsq : ℤ → ℝ :=
-    fun r => ‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ))
-                                    ((r : ℝ))‖ ^ 2 with hFsq_def
-  set Khat : ℤ → ℝ :=
-    fun r => (Real.fourierIntegral (fun x => ((K_ms x : ℝ) : ℂ))
-                                    ((r : ℝ))).re with hKhat_def
-  -- F-bound: `Fsq r² = ‖𝓕f(r)‖⁴`.
-  have h_F_bound : (∑ r ∈ J, Fsq r ^ 2) ≤ autoconvolution_ratio (f : ℝ → ℝ) - 1 := by
-    have h_eq : ∀ r ∈ J, Fsq r ^ 2 =
-        ‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ)) ((r : ℝ))‖ ^ 4 := by
-      intro r _
-      show (‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ))
-                                   ((r : ℝ))‖ ^ 2) ^ 2 =
-           ‖Real.fourierIntegral (fun x => ((f x : ℝ) : ℂ)) ((r : ℝ))‖ ^ 4
-      ring
-    rw [Finset.sum_congr rfl h_eq]
-    exact h_F_lat
-  -- K-bound: from the period-1 K-bound (exact, no `u ≤ 1` slack).
-  have h_K_bound : (∑ r ∈ J, Khat r ^ 2) ≤ K2_analytic - 1 :=
-    K_bound_for_mv_eq2_period1 hK_L2_torus hK_int_one J hJ_no_zero
-  -- Parseval split: directly from h_split.
-  have h_split_subst : ∫ x, autocorr (f : ℝ → ℝ) x * K_ms x ∂volume
-                      = 1 + ∑ r ∈ J, Fsq r * Khat r := h_split
-  -- Apply mv_eq2_full.
-  exact Sidon.MV.mv_eq2_full
-    (f := (f : ℝ → ℝ)) (K := K_ms)
-    (Minf := autoconvolution_ratio (f : ℝ → ℝ)) (K2 := K2_analytic)
-    hf_nonneg f.integrable hf_one
-    K_ms_nonneg hK_int hK_int_one
-    rfl
-    hM_ge_1 hK2_ge_1 hProd_int hFofF_int hFofF_one
-    Fsq Khat J h_split_subst h_F_bound h_K_bound
 
 end -- noncomputable section
 

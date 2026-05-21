@@ -11,8 +11,7 @@ surfaces against the freshly-computed ground truth:
                                   certificates/reference_anchors.json``
   4. delsarte_dual README        ``delsarte_dual/README.md``
   5. Public docs                 ``docs/{verification,reproducibility,
-                                  formalization,proof_outline}.md`` and
-                                  ``docs/attempts/multiscale_arcsine.md``
+                                  formalization,proof_outline}.md``
 
 The audit groups checks into eight sections:
 

@@ -1,0 +1,61 @@
+========================================================================
+PARALLEL V2/V4/V14 audit (2026-05-20). mpmath dps=30, T=100000.0.
+chunk_size=50.0, ~2000 chunks per pair.
+6 cross-Bessel pairs + 1 MO surrogate; running on 7 cores.
+========================================================================
+
+Workers done. Wall time: 897.8s.
+
+C_11 (delta_i=0.138, delta_j=0.138):  main=2.0822196749008675833  tail_UB<=2.1563e-5  t=897.6s
+C_12 (delta_i=0.138, delta_j=0.055):  main=2.7239415031017399563  tail_UB<=5.4103e-5  t=567.4s
+C_13 (delta_i=0.138, delta_j=0.025):  main=3.293717740608156344  tail_UB<=0.00011903  t=561.2s
+C_22 (delta_i=0.055, delta_j=0.055):  main=5.224447838177257424  tail_UB<=0.00013575  t=587.3s
+C_23 (delta_i=0.055, delta_j=0.025):  main=6.5993326562600542847  tail_UB<=0.00029865  t=590.4s
+C_33 (delta_i=0.025, delta_j=0.025):  main=11.493650836357467719  tail_UB<=0.00065702  t=312.9s
+
+K_2 main (mpmath, [0, T=100000.0]):  4.788823421260265394226
+K_2 Watson tail past T:                  <= 8.17604e-5
+K_2 mpmath enclosure:  [4.78882342126026539, 4.78890518163213175]
+
+Cert arb enclosure:    [4.7888234212591545, 4.7889051816332424]
+Cert axiom UB:         47897/10000 = 4.7897
+
+V2 verdict:
+  mpmath enclosure contains cert midpoint 4.788864...?  True
+  mpmath upper 4.788905181632132 <= axiom 4.7897?  True
+  slack to axiom = 0.000794818
+  V2: PASS
+
+========================================================================
+V4: MO surrogate int_0^infty J_0(pi xi)^4 dxi
+========================================================================
+mpmath: int_0^10000 J_0(pi xi)^4 dxi = 0.2873458910910994466283  (t=242.4s)
+Watson tail past 10000: <= 4.10639e-6
+half-line enclosure: [0.287345891091099447, 0.28734999748400132]
+full-line (2x):       [0.574691782182198893, 0.574699994968002641]
+
+V4 verdict:
+  doubled mpmath value matches literature 0.574695 (<1e-5)?  True
+  half-line UB <= 0.5747?  True
+  full-line UB <= 0.5747?  True  (literature convention)
+  V4: PASS
+
+========================================================================
+V14: per-pair cross-Bessel cross-check (mpmath vs flint anchor values)
+========================================================================
+  C_11: mpmath=2.0822196749008675833  flint=2.08221967490086746
+        diff=1.23279e-16  rel_err=5.921e-17  |diff|<1e-10: True
+  C_12: mpmath=2.7239415031017399563  flint=2.72394150310173977
+        diff=1.86278e-16  rel_err=6.839e-17  |diff|<1e-10: True
+  C_13: mpmath=3.293717740608156344  flint=3.29371774060815614
+        diff=2.04032e-16  rel_err=6.195e-17  |diff|<1e-10: True
+  C_22: mpmath=5.224447838177257424  flint=5.224447838177257
+        diff=4.23993e-16  rel_err=8.116e-17  |diff|<1e-10: True
+  C_23: mpmath=6.5993326562600542847  flint=6.59933265626005472
+        diff=-4.35255e-16  rel_err=6.595e-17  |diff|<1e-10: True
+  C_33: mpmath=11.493650836357467719  flint=11.4936508363574674
+        diff=3.18691e-16  rel_err=2.773e-17  |diff|<1e-10: True
+
+V14: PASS
+
+TOTAL wall time: 897.8s

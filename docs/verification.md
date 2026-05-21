@@ -64,6 +64,16 @@ discharges it, and the failure mode that should be reported. The
 verifier is expected to report a verdict (CONFIRM or FLAG) per item; a
 single FLAG that is mathematically substantive blocks acceptance.
 
+**Audit transport scope.** The original V1--V14 audit was run on the
+two-scale 1.28984 precursor. Framework-level checks (V1, V3, V5, V6,
+V10, V11, V13) transport unchanged to the three-scale 1.292 headline
+because they concern the pipeline structure, the universality of MV
+Lemma 3.1, and the build/hash reproducibility, none of which depend on
+the specific weights or scales. Instance-specific anchors (V2, V4, V7,
+V8, V9, V12, V14) were re-verified at the 3-scale 1.292 point on
+2026-05-20; the parallel re-audit results are documented in
+[`audit_3scale_reverification.md`](audit_3scale_reverification.md).
+
 ### 1. Pipeline sanity vs. single-scale baseline
 
 When the certifier is run at the single-arcsine anchors used by
@@ -157,35 +167,45 @@ the certificate's $S_1 \le 29.841$.
 ### 10. Lean module sanity
 
 `lake build Sidon` returns exit code zero with no `sorry` warnings,
-across all fifteen Lean modules under `lean/Sidon/` (`Defs`, `Bessel`,
+across all thirteen Lean modules under `lean/Sidon/` (`Defs`, `Bessel`,
 `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`,
 `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`,
-`BundleEq4`, `BilinearParseval`, `MultiScale`, `MultiScaleSchwartz`,
-`SchwartzAtomicDischarge`; ~8650 lines total on top of `mathlib`
-pinned to `v4.29.1` / commit
+`BundleEq4`, `BilinearParseval`, `MultiScale`; ~7.5 kLoC total on top
+of `mathlib` pinned to `v4.29.1` / commit
 `5e932f97dd25535344f80f9dd8da3aab83df0fe6`). All modules are
 axiom-free except `MultiScale`, which declares exactly **two
 verifiable-by-computation axioms** (rigorously certified numerical
 assertions) in the headline's dependency closure:
 
 - `K2_analytic_le_K2UpperQ` -- the analytic functional
-  $K_2(K_{\rm ms}) := \int K_{\rm ms}(x)^2\,dx$ is at most
-  $\texttt{K2UpperQ} = 47897/10000$; verified by `flint.arb` at
-  256-bit precision (analogue of MV 2010's Mathematica citation of
+  $K_2(K_{\rm ms}) := \int K_{\rm ms}(x)^2\,\mathrm{d}\mathrm{volume}$
+  is at most $\texttt{K2UpperQ} = 47897/10000$; verified by `flint.arb`
+  at 256-bit precision (analogue of MV 2010's Mathematica citation of
   $K_2$).
-- `gain_analytic_ge_gainLowerQ` -- the analytic gain
-  $\texttt{gain\_analytic} = (4/u) \cdot m_G^2 / S_G$ is at least
-  $\texttt{gainLowerQ} = 20925/100000$; certifier-coupled in arb
-  (analogue of MV 2010's Mathematica citation of $a$).
+- `gain_analytic_ge_gainLowerQ` -- the *concrete defined* analytic
+  gain $\texttt{gain\_analytic} := (4 / u_{\rm real}) \cdot
+  \texttt{min\_G\_analytic}^2 / \texttt{S\_1\_analytic}$ is at least
+  $\texttt{gainLowerQ} = 20925/100000$. After **Option B** (2026-05-20)
+  the RHS is a non-opaque `noncomputable def` built from the 200
+  embedded QP coefficients (`Sidon.MultiScale.qpNumerators : List ℤ`,
+  common denominator $10^8$, length verified by `native_decide`) and
+  the Bessel-form period-$u$ Fourier coefficient
+  `Ktilde_ms j := Σᵢ λᵢ · besselJ0(πjδᵢ/u)²` (using
+  `Sidon.Bessel.besselJ0`). Certifier-coupled in arb (analogue of MV
+  2010's Mathematica citation of $a$). Cross-binding of the 200
+  coefficients between the JSON certificate and the Lean embedding
+  is checked by the sibling script `audit_qp_coeffs.py`.
 
 The previous macro axiom `MV_master_inequality_for_extremiser` is
 now a Lean *theorem*, derived from the two verifiable-by-computation
-axioms plus the analytic admissibility-bundle hypothesis
+axioms plus the analytic admissibility-bundle record
 `ExtremiserPrimitives f` that the headline takes as its fifth
-argument. The bundle encodes the four MV Lemma 3.1 outputs
-(Eqs.(1)--(4)) for the pair $(f, K_{\rm ms})$; its existence for an
-arbitrary admissible $f$ is the analogue of MV invoking "by Lemma
-3.1 (Martin--O'Bryant)" and is the residual gap on the Lean side.
+argument. The bundle fields are Lean restatements of MO~2009 /
+MV~2010 Lemma 3.1 outputs (Eqs.(1)--(4)) at the pair $(f, K_{\rm ms})$,
+discharged in the paper by direct citation (those lemmas apply to
+$K_{\rm ms}$ directly). They are retained as Lean hypothesis fields
+only because the corresponding mathlib bridge has not yet been
+packaged into a one-call constructor.
 
 The quadratic inversion `master_inequality_M_lower`, the
 slack-monotonicity lift `MV_master_via_slack_monotonicity`, the

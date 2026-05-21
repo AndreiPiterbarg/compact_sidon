@@ -138,24 +138,24 @@ The present Lean proof of $C_{1a} \ge 1.292$ adopts the same
 axiom architecture, but with each of the three layers strengthened:
 
 1. **Formally proves the analytic content in Lean.** Approximately
-   8650 axiom-free lines spread across fifteen modules (`Sidon.Defs`,
+   ~7.5 kLoC across thirteen modules (~6.1 kLoC axiom-free; the
+   1394-line `Sidon.MultiScale` houses the 2 verifiable-by-computation
+   axioms) (`Sidon.Defs`,
    `Sidon.Bessel`, `Sidon.FourierAux`, `Sidon.TorusParseval`,
    `Sidon.MVLemmas`, `Sidon.MasterFromLemmas`, `Sidon.BundleDefs`,
    `Sidon.BundleEq1`, `Sidon.BundleEq2Schwartz`,
    `Sidon.BundleEq3Schwartz`, `Sidon.BundleEq4`,
-   `Sidon.BilinearParseval`, `Sidon.MultiScale`,
-   `Sidon.MultiScaleSchwartz`, `Sidon.SchwartzAtomicDischarge`)
+   `Sidon.BilinearParseval`, `Sidon.MultiScale`)
    covering the (autoconvolution) arcsine Fourier-transform identity,
    the $L^2$-Plancherel and Schwartz infrastructure (on top of
    `mathlib`'s `MeasureTheory.Lp.fourierTransformₗᵢ`, introduced
    in the `v4.29.1` bump used by this project), the period-$u$
    torus Parseval and lattice-Fourier identities, the four MV
    Lemma 3.1 atomic primitives (Eqs.(1)--(4)) together with their
-   dedicated discharge modules, the bilinear Parseval pairings, the
-   partial Schwartz atomic-primitive discharge, and the algebraic
-   assembly of the master inequality. None of these modules
-   declares a `sorry`; only `Sidon.MultiScale` declares user axioms
-   (exactly two, both verifiable-by-computation).
+   dedicated discharge modules, the bilinear Parseval pairings, and
+   the algebraic assembly of the master inequality. None of these
+   modules declares a `sorry`; only `Sidon.MultiScale` declares user
+   axioms (exactly two, both verifiable-by-computation).
 2. **2 verifiable-by-computation axioms** (also: "rigorously
    certified numerical assertions"). Each is a logically decidable
    inequality about a specific real number, backed by `flint.arb`
@@ -163,20 +163,30 @@ axiom architecture, but with each of the three layers strengthened:
    `delsarte_dual/grid_bound_alt_kernel/bisect_alt_kernel.py`; the only reason
    they appear as `axiom` rather than `theorem` is that mathlib
    does not yet have a Bessel interval-arithmetic library to
-   discharge them mechanically. They are exact analogues of MV's
-   Mathematica citations but strictly more rigorous (proven
-   interval bounds vs. heuristic numerics), independently audited
-   by 14 agents, and anchored to a SHA-256-stamped reproducible
-   certificate. The FlySpeck formalisation of Kepler's conjecture
-   used the same convention.
-3. **1 admissibility-bundle hypothesis.** The structure
-   `ExtremiserPrimitives f` collects the conclusions of MV Lemma
-   3.1 Eqs.(1)--(4) instantiated at the specific pair $(f, K_{\rm
-   ms})$. It is the analogue of MV invoking "by Lemma 3.1
-   (Martin--O'Bryant)"; the bundle's existence for a specific
-   admissible $f$ is the same analytic assertion MV makes about
-   his arbitrary admissible $f$. This is a *hypothesis* of the
-   headline theorem, not an axiom.
+   discharge them mechanically. After **Option B** (2026-05-20)
+   both axioms bound *concrete defined* real analytic functionals
+   (`gain_analytic := (4/u_real) · min_G_analytic² / S_1_analytic` is
+   a non-opaque `noncomputable def` built from the 200 embedded QP
+   coefficients `qpNumerators` and the Bessel-form Fourier coefficient
+   `Ktilde_ms`), not opaque symbols. They play the role of MV's
+   Mathematica citations with the stricter numerical guarantee of
+   proven interval bounds (rather than heuristic floating-point),
+   anchored to a SHA-256-stamped reproducible certificate and
+   re-derived independently via mpmath at 30–50 decimal digits.  The
+   FlySpeck formalisation of Kepler's conjecture used the same
+   convention.
+3. **1 admissibility-bundle record.** The structure
+   `ExtremiserPrimitives f` collects Lean restatements of MO~2009
+   Lemmas~3.1--3.4 / MV~2010 Lemma 3.1 outputs (Eqs.(1)--(4))
+   instantiated at the specific pair $(f, K_{\rm ms})$. Those lemmas
+   apply to $K_{\rm ms}$ directly (a pdf supported in
+   $[-\delta_1, \delta_1]$ with $\widetilde{K_{\rm ms}}(j) \ge 0$ and
+   $K_{\rm ms} \in L^2$ — the only hypotheses they require), and the
+   paper discharges the bundle fields by direct citation. The Lean
+   theorem retains them as named hypothesis fields only because
+   mathlib `v4.29.1` does not yet expose a reusable
+   $L^1 \cap L^2$ Plancherel + period-$u$ Parseval API in the form
+   the bundle consumes.
 
 **Categorisation of the axiom budget.** Lean's `#print axioms`
 output mixes three categorically distinct kinds of dependency,
@@ -204,14 +214,14 @@ system -- they are statements about specific integers that any
 sufficient implementation of interval arithmetic and the Bessel
 power series can decide.
 
-**Why this is publication-valid.** It exceeds MV's standard --
-~8650 lines of formal Lean for what MV proved on ~5 pages of text --
-and adopts the same axiom architecture used by every published
-computer-assisted proof of a real-number constant (Flyspeck cited
-Kepler's interval arithmetic; the polynomial-method cap-set proof
-cited specific Lagrange polynomial bounds; the Polynomial
-Freiman--Ruzsa formalisation cited numerical Plünnecke--Ruzsa
-constants). The mathematical content of the proof is in the Lean
+**Trust base.** ~7.5 kLoC of formal Lean across thirteen modules
+(~6.1 kLoC axiom-free across the twelve auxiliary modules; the
+1394-line `Sidon.MultiScale` houses the 2 verifiable-by-computation
+axioms).  The axiom architecture is standard for computer-assisted
+real-number proofs (Flyspeck cited Kepler's interval arithmetic;
+the polynomial-method cap-set proof cited specific Lagrange
+polynomial bounds; the Polynomial Freiman--Ruzsa formalisation cited
+numerical Plünnecke--Ruzsa constants). The mathematical content of the proof is in the Lean
 theorems; the verifiable-by-computation axioms encode only "evaluate
 this specific integral and compare it to this specific rational".
 
@@ -226,13 +236,17 @@ mathematical claim.
 
 **Honesty caveats.** Three points the reader should hold in mind:
 
-- The headline is conditional on the analytic admissibility bundle
-  `ExtremiserPrimitives f`, not unconditional. Producing the bundle
-  for an arbitrary admissible $f$ requires the $L^1 \cap L^2$
-  periodisation bridge for $f * f$ and $f \circ f$ on
-  $\mathbb{R}/u\mathbb{Z}$; the relevant infrastructure is in
-  `Sidon.TorusParseval` and `Sidon.FourierAux`, but the final
-  stitching is not yet a one-line mathlib call.
+- The Lean theorem carries `ExtremiserPrimitives f` as a named
+  hypothesis record; its fields are MO~2009 / MV~2010 Lemma 3.1
+  outputs at $(f, K_{\rm ms})$, discharged in the paper by direct
+  citation, exactly as MV~2010 discharged its single-arcsine instance
+  via MO~2009. The Lean retains them as hypothesis fields because the
+  $L^1 \cap L^2$ periodisation bridge for $f * f$ and $f \circ f$
+  on $\mathbb{R}/u\mathbb{Z}$ has not yet been packaged into a
+  one-call mathlib constructor (the building blocks live in
+  `Sidon.TorusParseval` and `Sidon.FourierAux`). This mathlib-API
+  absence is a separate engineering note that does not bear on the
+  validity of the citation-discharge itself.
 - The two verifiable-by-computation axioms depend on trusting the
   `flint.arb` library. `flint.arb` is peer-reviewed (Johansson 2017,
   IEEE TC) and widely used for rigorous mathematics, but it is not

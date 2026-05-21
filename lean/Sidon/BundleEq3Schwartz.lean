@@ -7,8 +7,14 @@ Parseval identity
 
   `∫_ℝ ((f*f) + (f∘f)) · K_ms  =  2/u + 2·u² · ∑_{j ∈ J} Re(f̃(j))² · K̃(j)`
 
-— for *Schwartz* admissible `f`.  This is the `hEq3` bundle field
-for the multi-scale arcsine kernel.
+— for *Schwartz* admissible `f`.  This provides the equality form
+behind the `hEq3_ge` bundle field for the multi-scale arcsine
+kernel (the bundle stores the inequality direction; the equality
+weakens to `≥` via Bochner positivity, see `MVLemmas.mv_eq3_ge`).
+The Schwartz-class headline that consumed this discharge directly
+was retired by the S1+S2 refactor as vacuous (Paley–Wiener); this
+file is preserved as supporting infrastructure for a future
+non-Schwartz bundle constructor.
 
 The strategy is the one described in the plan: rather than fighting
 through periodisation of `f*f` (whose support `(-1/2, 1/2)` exceeds one
@@ -116,8 +122,8 @@ theorem pAuto_apply (f : ℝ → ℝ) (x : ℝ) : pAuto f x = autocorr f x := rf
 
 These are the canonical definitions of `LHS1`, `LHS2`, `S_cos` mirroring
 the `Sidon.BundleDefs` module.  We duplicate them here under a
-`BundleDefs` namespace inside this file so that the headline theorem
-`hEq3_schwartz` is self-contained.  The algebraic form is fixed by the
+`BundleDefs` namespace inside this file so the local Schwartz-support
+infrastructure is self-contained.  The algebraic form is fixed by the
 MV master inequality and matches `Sidon.MultiScale.ExtremiserPrimitives`
 exactly.
 
@@ -317,337 +323,19 @@ theorem pAuto_bounded (f_s : 𝓢(ℝ, ℝ)) :
   refine ⟨(SchwartzMap.seminorm ℝ 0 0 f_s) * ∫ t, |f_s t| ∂volume, ?_⟩
   exact pAuto_norm_le f_s
 
-/-! ## Connection to `mv_eq3`
+/-! ## Even-ness facts about K_ms (general, not Schwartz-specific)
 
-`Sidon.MV.mv_eq3` consumes three atomic primitives.  For the Schwartz
-setting we package the call by providing concrete forms of each
-primitive.  The "constant term" is mathematically determined: it is
-the `j=0` contribution to the Parseval expansion of `LHS1 + LHS2`,
-which equals `(K̃(0))·(∫(f*f) + ∫(f∘f)) = (1/u) · 2 = 2/u` (using
-`∫(f*f) = (∫f)² = ∫(f∘f) = 1` for `∫f = 1`).  The "tail sum" is the
-`j ≠ 0` cosine series.
+The MV Lemma 3.1 Eq.(3) assembly for Schwartz `f_s` used to live in
+this file, taking the three Fourier atomic primitives
+(`SchwartzTorusSplit`, `ConstantTermEqTwoOverU`, `TailFormSchwartz`)
+as hypotheses.  That assembly has been removed because the Schwartz
+instance it served was vacuous (`SchwartzAtomic f_s` is unsatisfiable:
+the Parseval split required `f̂(r) = 0` for cofinite `r`, which combined
+with Paley–Wiener + Carlson forces `f ≡ 0`).
 
-The three primitives are:
-
-  * **`SchwartzTorusSplit`**: LHS decomposes as constant + tail.
-    For Schwartz `f` this is the **bilinear Parseval pairing** of the
-    `L²` function `f*f + f∘f` against `K_ms` (the latter supported in
-    `[-δ₁, δ₁] ⊊ (-u/2, u/2)` so its period-`u` Fourier coefficients
-    are exactly `(1/u)·K̂_ms(j/u)`).
-
-  * **`ConstantTermEqTwoOverU`**: Constant-term mass identity.
-    Discharged by `∫(f*f) = (∫f)² = 1`, `∫(f∘f) = (∫f)² = 1` (Fubini),
-    and `K̃(0) = 1/u`.
-
-  * **`TailFormSchwartz`**: Tail-Fourier expansion.  For real `f`,
-    pairing the `j` and `-j` terms collapses
-    `K̂(j/u)·f̂(j/u)² + K̂(-j/u)·f̂(-j/u)² + K̂(j/u)·|f̂(j/u)|² +
-    K̂(-j/u)·|f̂(-j/u)|²` into `4·K̂(j/u)·Re(f̂(j/u))²` (using conjugate
-    symmetry `f̂(-ξ) = conj(f̂(ξ))` for real `f`, even-ness of `K_ms`,
-    and the algebraic identity `(a-ib)² + (a+ib)² = 2(a²-b²)`).
-
-We state each as a `Prop`-level lemma; the actual proofs of the
-three primitives are deferred to the bilinear period-`u` Parseval
-bridge.  The combiner below assembles the conclusion.
--/
-
-/-- The MV Lemma 3.1 Eq.(3) atomic primitive A: torus Parseval split.
-
-This identity *decomposes* the LHS of Eq.(3) into a constant term and
-a tail sum; the constant term equals `(K̃(0)) · (∫(f*f) + ∫(f∘f))`,
-and the tail is the `j ≠ 0` cosine series.  For Schwartz `f` this is
-a consequence of the bilinear Parseval identity for `f*f + f∘f` paired
-against `K_ms` (whose support `[-δ₁, δ₁]` is contained in one period
-`(-u/2, u/2]`).
-
-This is one of the three atomic Fourier identities consumed by
-`Sidon.MV.mv_eq3`; the Schwartz hypothesis is what makes its
-discharge tractable (continuity, integrability, polynomial decay). -/
-def SchwartzTorusSplit (f_s : 𝓢(ℝ, ℝ)) (J : Finset ℤ)
-    (Ktilde : ℤ → ℝ) (constant_term tail_sum : ℝ) : Prop :=
-  ∫ x, (conv (fun y => f_s y) x + pAuto (fun y => f_s y) x)
-        * Sidon.MultiScale.K_ms x ∂volume
-    = constant_term + tail_sum
-
-/-- The MV Lemma 3.1 Eq.(3) atomic primitive B: constant-term identity.
-
-The constant term equals `2/u`, coming from
-  `(K̃(0)) · (∫(f*f) + ∫(f∘f)) = (1/u) · 2 · (∫f)²`
-when `∫f = 1`.  This is the special case `j = 0` of the Parseval
-expansion: `K̂(0) = ∫K_ms = 1`, `𝓕(f*f)(0) = (∫f)²`, and
-`𝓕(f∘f)(0) = (∫f) · (∫f)` (both equal to `1` when `∫f = 1`). -/
-def ConstantTermEqTwoOverU (constant_term : ℝ) : Prop :=
-  constant_term = 2 / uReal
-
-/-- The MV Lemma 3.1 Eq.(3) atomic primitive C: tail-Fourier form.
-
-The tail equals `2·u²·∑_{j ∈ J} Re(f̃(j))² · K̃(j)`, where `f̃(j) =
-(1/u)·𝓕f(j/u)`.  The combinatorial coefficient `2` comes from pairing
-the `j` and `-j` modes for real `f` (via conjugate symmetry of `f̂`
-and even-ness of `K_ms`).
-
-The cosine indices live in any finite `J ⊂ ℤ \ {0}`; in the bundle
-the canonical choice is the QP-active support of the optimised
-cosine `G` (which is the only place the tail sum is actually
-constrained — see the `hEq4` bundle field). -/
-def TailFormSchwartz
-    (f_s : 𝓢(ℝ, ℝ)) (J : Finset ℤ)
-    (realFparts : ℤ → ℝ) (Ktilde : ℤ → ℝ) (tail_sum : ℝ) : Prop :=
-  tail_sum = 2 * uReal^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j
-
-/-! ## Assembly of `mv_eq3` for Schwartz `f`
-
-The headline lemma combines the three primitives above via
-`Sidon.MV.mv_eq3` to produce the bundle-target form
-  `∫((f*f) + (f∘f))·K_ms = 2/u + 2·u²·∑_{j ∈ J} Re(f̃)²·K̃`.
-
-The proof body is a single invocation of `mv_eq3` (with the three
-primitives supplied) plus the trivial unfolding `LHS1 + LHS2 =
-∫(f*f)·K_ms + ∫(f∘f)·K_ms = ∫((f*f) + (f∘f))·K_ms`. -/
-
-/-- Bundle-target conversion (LHS side): rewrite `LHS1 + LHS2` as
-`∫((f*f) + (f∘f))·K_ms`, which is the form consumed by `mv_eq3`.
-
-This is just bilinearity of the integral combined with the definitions
-of `LHS1` and `LHS2`; the integrability hypothesis is needed for
-`integral_add`. -/
-theorem lhs1_plus_lhs2_eq_combined_integral
-    (f : ℝ → ℝ)
-    (h_conv_K_int : Integrable (fun x => conv f x * Sidon.MultiScale.K_ms x) volume)
-    (h_pAuto_K_int : Integrable (fun x => pAuto f x * Sidon.MultiScale.K_ms x) volume) :
-    BundleDefs.LHS1 f + BundleDefs.LHS2 f
-      = ∫ x, (conv f x + pAuto f x) * Sidon.MultiScale.K_ms x ∂volume := by
-  unfold BundleDefs.LHS1 BundleDefs.LHS2
-  rw [← integral_add h_conv_K_int h_pAuto_K_int]
-  refine integral_congr_ae (Filter.Eventually.of_forall fun x => ?_)
-  ring
-
-/-- The Schwartz convolution `(f_s) * (f_s)` (viewed as ℝ → ℝ) is
-*continuous*.  This is needed for the integrability of
-`(f*f) · K_ms` (which uses `Continuous.integrable_of_compactSupport`
-on the support of `K_ms`). -/
-theorem conv_continuous (f_s : 𝓢(ℝ, ℝ)) :
-    Continuous (conv (fun x => f_s x)) := by
-  -- For Schwartz `f`, `f*f` is continuous: `f` is `L^∞` (bounded by seminorm 0 0)
-  -- and `f` is `L¹` (integrable), so convolution is continuous.
-  unfold conv
-  refine BddAbove.continuous_convolution_right_of_integrable
-    (ContinuousLinearMap.mul ℝ ℝ) ?_ f_s.integrable f_s.continuous
-  -- The range of `f_s` is bounded (by the seminorm).
-  refine ⟨SchwartzMap.seminorm ℝ 0 0 f_s, ?_⟩
-  rintro y ⟨x, rfl⟩
-  exact SchwartzMap.norm_le_seminorm ℝ f_s x
-
-/-- `(f*f) · K_ms` is integrable when `f` is Schwartz.
-
-The conv is continuous (above) and bounded, while `K_ms` is `L¹`
-(provable from arcsine mass + sum to 1; we take this as a side
-hypothesis since the discharge lives in `BundleEq1`, not this
-file). -/
-theorem conv_K_ms_integrable
-    (f_s : 𝓢(ℝ, ℝ))
-    (h_K_ms_int : Integrable Sidon.MultiScale.K_ms volume)
-    (h_conv_bdd : ∃ C : ℝ, ∀ x, |conv (fun y => f_s y) x| ≤ C) :
-    Integrable (fun x => conv (fun y => f_s y) x * Sidon.MultiScale.K_ms x) volume := by
-  obtain ⟨C, hC⟩ := h_conv_bdd
-  -- conv is measurable + bounded; K_ms is L¹.  Apply Integrable.bdd_mul.
-  exact Integrable.bdd_mul (f := conv (fun y => f_s y))
-    (g := Sidon.MultiScale.K_ms) (c := C) h_K_ms_int
-    (conv_continuous f_s).aestronglyMeasurable
-    (Filter.Eventually.of_forall fun x => by rw [Real.norm_eq_abs]; exact hC x)
-
-/-- `(autocorr f) · K_ms` is integrable when `f` is Schwartz. -/
-theorem pAuto_K_ms_integrable
-    (f_s : 𝓢(ℝ, ℝ))
-    (h_K_ms_int : Integrable Sidon.MultiScale.K_ms volume) :
-    Integrable (fun x => pAuto (fun y => f_s y) x * Sidon.MultiScale.K_ms x) volume := by
-  -- `pAuto = autocorr` is bounded uniformly by `σ · ∫|f_s|`, and `K_ms ∈ L¹`.
-  set C : ℝ := (SchwartzMap.seminorm ℝ 0 0 f_s) * ∫ t, |f_s t| ∂volume with hC_def
-  exact Integrable.bdd_mul (f := pAuto (fun y => f_s y))
-    (g := Sidon.MultiScale.K_ms) (c := C) h_K_ms_int
-    (pAuto_continuous f_s).aestronglyMeasurable
-    (Filter.Eventually.of_forall fun x => by
-      rw [Real.norm_eq_abs]
-      exact pAuto_norm_le f_s x)
-
-/-! ## Main theorem: Eq.(3) for Schwartz `f` from atomic primitives
-
-Given a Schwartz function `f_s` together with:
-  * the period-`u` Fourier coefficients `f̃(j) = (1/u)·𝓕f(j/u)`
-    packaged as `realFparts j : ℝ` (their real parts);
-  * the period-`u` Fourier coefficients `K̃(j) = (1/u)·K̂_ms(j/u)`
-    packaged as `Ktilde j : ℝ`;
-  * a finite indexing set `J : Finset ℤ` with `0 ∉ J`;
-  * the three atomic Fourier primitives (torus split, constant term,
-    tail form);
-  * the two integrability side-conditions for `K_ms ∈ L¹` (which
-    follows from F1 = arcsine mass);
-
-then `LHS1 f_s + LHS2 f_s = 2/u + 2·u²·∑ Re(f̃)²·K̃`.
-
-This is the bundle-target form of MV Lemma 3.1 Eq.(3) for Schwartz
-admissible `f`, with the Fourier work isolated into three named
-primitives. -/
-theorem hEq3_schwartz_atomic
-    (f_s : 𝓢(ℝ, ℝ))
-    (J : Finset ℤ) (hJ_no_zero : (0 : ℤ) ∉ J)
-    (realFparts Ktilde : ℤ → ℝ)
-    (constant_term tail_sum : ℝ)
-    (hf_nonneg : ∀ x, 0 ≤ f_s x)
-    (h_K_ms_int : Integrable Sidon.MultiScale.K_ms volume)
-    (h_conv_bdd : ∃ C : ℝ, ∀ x, |conv (fun y => f_s y) x| ≤ C)
-    -- Atomic Fourier primitives:
-    (h_torus_split :
-      SchwartzTorusSplit f_s J Ktilde constant_term tail_sum)
-    (h_constant_term : ConstantTermEqTwoOverU constant_term)
-    (h_tail_form :
-      TailFormSchwartz f_s J realFparts Ktilde tail_sum) :
-    BundleDefs.LHS1 (fun x => f_s x) + BundleDefs.LHS2 (fun x => f_s x)
-      = 2 / uReal + 2 * uReal^2 * ∑ j ∈ J, (realFparts j)^2 * Ktilde j := by
-  -- Step 1: assemble the integrability side-conditions.
-  have h_conv_K_int :
-      Integrable (fun x => conv (fun y => f_s y) x * Sidon.MultiScale.K_ms x) volume :=
-    conv_K_ms_integrable f_s h_K_ms_int h_conv_bdd
-  have h_pAuto_K_int :
-      Integrable (fun x => pAuto (fun y => f_s y) x * Sidon.MultiScale.K_ms x) volume :=
-    pAuto_K_ms_integrable f_s h_K_ms_int
-  -- Step 2: rewrite the bundle-target LHS as the combined integral form.
-  rw [lhs1_plus_lhs2_eq_combined_integral (fun x => f_s x) h_conv_K_int h_pAuto_K_int]
-  -- Step 3: apply `mv_eq3` with the three primitives.
-  -- `mv_eq3` proves
-  --   `∫ ((f*f) + (f∘f)) · K = 2/u + 2·u²·∑ Re(f̃)²·K̃`
-  -- given the atomic hypotheses.
-  -- Unfold our wrappers `SchwartzTorusSplit`, `ConstantTermEqTwoOverU`,
-  -- `TailFormSchwartz` to feed `mv_eq3`.
-  unfold SchwartzTorusSplit at h_torus_split
-  unfold ConstantTermEqTwoOverU at h_constant_term
-  unfold TailFormSchwartz at h_tail_form
-  -- `conv f = convolution f f (mul ℝ ℝ) volume` by `rfl`, and
-  -- `pAuto f x = autocorr f x` by `rfl`.  Rewrite the integrand to
-  -- match the shape consumed by `mv_eq3`.
-  have h_integrand_eq :
-      (fun x => (conv (fun y => f_s y) x + pAuto (fun y => f_s y) x)
-                  * Sidon.MultiScale.K_ms x)
-      = (fun x => ((convolution (fun y => f_s y) (fun y => f_s y)
-                      (ContinuousLinearMap.mul ℝ ℝ) volume) x
-                    + autocorr (fun y => f_s y) x)
-                  * Sidon.MultiScale.K_ms x) := by
-    funext x; rfl
-  rw [h_integrand_eq] at h_torus_split
-  -- Now `mv_eq3` applies directly.
-  have h := Sidon.MV.mv_eq3 (f := fun x => f_s x) (K := Sidon.MultiScale.K_ms)
-    (u := uReal) uReal_pos realFparts Ktilde J hJ_no_zero
-    hf_nonneg Sidon.MultiScale.K_ms_nonneg
-    constant_term tail_sum
-    h_torus_split h_constant_term h_tail_form
-  -- The conclusion of `h` is exactly what we need.
-  exact h
-
-/-! ## Bundle headline (with the three primitives still as hypotheses)
-
-The headline theorem `hEq3_schwartz` takes a Schwartz function `f_s`
-and produces the Eq.(3) identity.  The three atomic primitives are
-still hypotheses; their discharge is the subject of the bilinear
-period-`u` Parseval bridge.  This file's role is to **isolate** what's
-needed and **assemble** Eq.(3) once the primitives are available.
-
-For the bundle target shape
-
-  `LHS1 + LHS2 = 2/uQ_real + 2·uQ_real² · S_cos`
-
-we observe that `S_cos f = S_cos_finset f J Ktilde` for some
-canonical finite indexing set `J` (typically the QP-active support
-of `G`).  This identification is provided by F3 (`S_cos`'s
-definition) which routes through `BundleDefs.S_cos_finset`. -/
-
-/-- The MV Lemma 3.1 Eq.(3) identity for Schwartz admissible `f`,
-expressed against `BundleDefs.S_cos_finset`.
-
-This is the bundle-target form `hEq3` for the case where `S_cos` is
-truncated to a finite indexing set `J ⊂ ℤ \ {0}`.
-
-The result is unconditional given:
-  * Schwartz `f_s` with `f_s ≥ 0`,
-  * `K_ms ∈ L¹` (the kernel-integrability fact from `BundleEq1`),
-  * `f*f` bounded (immediate from Schwartz),
-  * the three atomic Fourier primitives.
-
-The constant `realFparts j` is the real part of `f̃(j) = (1/u)·𝓕f(j/u)`,
-and `Ktilde j` is `K̃(j) = (1/u)·K̂_ms(j/u)`. -/
-theorem hEq3_schwartz_finset
-    (f_s : 𝓢(ℝ, ℝ))
-    (J : Finset ℤ) (hJ_no_zero : (0 : ℤ) ∉ J)
-    (Ktilde : ℤ → ℝ)
-    (constant_term tail_sum : ℝ)
-    (hf_nonneg : ∀ x, 0 ≤ f_s x)
-    (h_K_ms_int : Integrable Sidon.MultiScale.K_ms volume)
-    (h_conv_bdd : ∃ C : ℝ, ∀ x, |conv (fun y => f_s y) x| ≤ C)
-    -- Atomic Fourier primitives:
-    (h_torus_split :
-      SchwartzTorusSplit f_s J Ktilde constant_term tail_sum)
-    (h_constant_term : ConstantTermEqTwoOverU constant_term)
-    (h_tail_form :
-      TailFormSchwartz f_s J
-        (fun j => (Real.fourierIntegral (fun x => ((f_s x : ℝ) : ℂ))
-                    (j / uReal : ℝ)).re / uReal) Ktilde tail_sum) :
-    BundleDefs.LHS1 (fun x => f_s x) + BundleDefs.LHS2 (fun x => f_s x)
-      = 2 / uReal
-        + 2 * uReal^2 * BundleDefs.S_cos_finset (fun x => f_s x) J Ktilde := by
-  -- Apply `hEq3_schwartz_atomic` with
-  --   realFparts j := (𝓕f(j/u)).re / u.
-  have h := hEq3_schwartz_atomic f_s J hJ_no_zero
-    (fun j => (Real.fourierIntegral (fun x => ((f_s x : ℝ) : ℂ))
-                (j / uReal : ℝ)).re / uReal)
-    Ktilde
-    constant_term tail_sum
-    hf_nonneg h_K_ms_int h_conv_bdd
-    h_torus_split h_constant_term h_tail_form
-  -- Recognise the RHS as `2/uReal + 2·uReal²·S_cos_finset f_s J Ktilde`.
-  unfold BundleDefs.S_cos_finset
-  exact h
-
-/-! ## Notes on the path to a fully discharged Eq.(3)
-
-The remaining work to remove the atomic-primitive hypotheses is the
-bilinear period-`u` Parseval identity, discharged in
-`Sidon.BilinearParseval`.  Once the bilinear bridge is available as a
-callable lemma
-`bilinear_parseval_period_u_concrete : ∫ g · h = u · ∑ 𝓕g(j/u) · conj(𝓕h(j/u))`
-for real-valued `g, h ∈ L²` both supported in `(-u/2, u/2)`, the three
-primitives `SchwartzTorusSplit`, `ConstantTermEqTwoOverU`, `TailFormSchwartz`
-can be discharged for Schwartz `f` as follows:
-
-  * **`SchwartzTorusSplit`**: Apply the bilinear bridge with
-    `g = f*f + f∘f`, `h = K_ms`.  Note `K_ms` is supported in
-    `[-δ₁, δ₁] ⊊ (-u/2, u/2)`, but `g = f*f` is supported in
-    `(-1/2, 1/2)` — exceeding one period `(-u/2, u/2)` for
-    `u = 0.638 < 1`.  The MV workaround is to apply the bilinear
-    bridge only on the `K_ms` side: split the LHS as
-    `∫(f*f)·K_ms + ∫(f∘f)·K_ms` and use the L¹-pairing form
-        `∫ g · K_ms = ∑'_j (period-u coef of K_ms at j) · ∫ g(x) e^{2πi j x/u} dx`
-    which factors through *only* the period-u expansion of `K_ms`
-    (not of `g`).  See `Sidon.TorusParseval.period_u_coef_eq_fourierIntegral_at_lattice`
-    for the K-side coefficient identity.
-
-  * **`ConstantTermEqTwoOverU`**: Discharged by `K̂_ms(0) = ∫ K_ms = 1`
-    and `𝓕(f*f)(0) = (∫f)² = 1`, `𝓕(f∘f)(0) = (∫f)·(∫f) = 1` (latter
-    from Fubini on `∫∫ f(x)·f(-x) dx`, which reduces to `(∫f)²`).
-    Both summands contribute `(1/u)·1 = 1/u`, giving `2/u`.
-
-  * **`TailFormSchwartz`**: For real `f`, the `j ≠ 0` modes pair as
-      `K̂(j/u) · f̂(j/u)² + K̂(-j/u) · f̂(-j/u)² + K̂(j/u) · |f̂(j/u)|²
-       + K̂(-j/u) · |f̂(-j/u)|²`,
-    where each individual term comes from the L¹ pairing of the
-    `j`-th Fourier coefficient.  Using
-    `f̂(-j/u) = conj(f̂(j/u))` (real `f`), `K̂(-j/u) = K̂(j/u)` (even
-    `K_ms`), and the algebraic identity `(a-ib)² + (a+ib)² = 2(a²-b²)`,
-    the four-term sum collapses to `2·K̂(j/u)·Re(f̂(j/u))²` per pair
-    `{j, -j}`.  Summing over pairs gives the `2·u²` coefficient.
-
-The conjugate-symmetry input `f̂(-ξ) = conj(f̂(ξ))` for real `f` is
-already in `Sidon.FourierAux.fourierIntegral_real_conj`; the
-even-ness of `K_ms` is by inspection (each `K_arc(δᵢ, ·)` is even
-in `x`, and even functions sum to even). -/
+We retain the even-ness facts about `K_ms` (and its convolution
+factor `η_δ`), which are general statements about the multi-scale
+kernel that do not depend on Schwartz admissibility. -/
 
 /-- Even-ness of the half-arcsine density:  `η_δ (-x) = η_δ x`. -/
 theorem eta_even (δ x : ℝ) :
@@ -675,66 +363,6 @@ theorem K_ms_even (x : ℝ) :
   unfold Sidon.MultiScale.K_ms
   rw [K_arc_even, K_arc_even, K_arc_even]
 
-/-! ## Composite headline
-
-The fully composed headline theorem `hEq3_schwartz` matches the
-target signature from the bundle plan:
-```
-theorem hEq3_schwartz (f_s : SchwartzMap ℝ ℝ) (...) :
-    Sidon.BundleDefs.LHS1 (f_s : ℝ → ℝ) + Sidon.BundleDefs.LHS2 (f_s : ℝ → ℝ)
-    = 2 / Sidon.MultiScale.uQ_real
-      + 2 * Sidon.MultiScale.uQ_real ^ 2 * Sidon.BundleDefs.S_cos (f_s : ℝ → ℝ)
-```
-
-We state this version using our local `BundleDefs.LHS1`, `BundleDefs.LHS2`,
-and `BundleDefs.S_cos_finset` (since `S_cos` proper is an infinite sum;
-`S_cos_finset` is the finite version consumed by `mv_eq3`, which is
-the only form that's algebraically wired up in the project).  The
-identification `S_cos = S_cos_finset J ⋯` is the subject of F3
-(definition of `S_cos`), and is handled in `Sidon.MultiScale`. -/
-
-/-- The headline of this file: MV Lemma 3.1 Eq.(3) for Schwartz `f_s`,
-stated against `BundleDefs.LHS1`, `BundleDefs.LHS2`,
-`BundleDefs.S_cos_finset`.
-
-This is the bundle target form of the `hEq3` field of
-`ExtremiserPrimitives` restricted to Schwartz admissibility.
-
-Hypotheses:
-  * `f_s : 𝓢(ℝ, ℝ)`                — Schwartz admissibility (sup-norm
-                                       finite, derivatives all rapidly
-                                       decaying);
-  * `f_s ≥ 0`                       — MV nonnegativity;
-  * `K_ms ∈ L¹`                     — kernel integrability (from the
-                                       arcsine mass identity);
-  * `f*f` bounded                   — immediate from Schwartz;
-  * `J : Finset ℤ` with `0 ∉ J`     — finite Fourier indexing set;
-  * `Ktilde : ℤ → ℝ`                — period-u K coefs (= K̃(j));
-  * The three atomic Fourier primitives `SchwartzTorusSplit`,
-    `ConstantTermEqTwoOverU`, `TailFormSchwartz` (consequences of the
-    bilinear period-`u` Parseval identity). -/
-theorem hEq3_schwartz
-    (f_s : 𝓢(ℝ, ℝ))
-    (J : Finset ℤ) (hJ_no_zero : (0 : ℤ) ∉ J)
-    (Ktilde : ℤ → ℝ)
-    (constant_term tail_sum : ℝ)
-    (hf_nonneg : ∀ x, 0 ≤ f_s x)
-    (h_K_ms_int : Integrable Sidon.MultiScale.K_ms volume)
-    (h_conv_bdd : ∃ C : ℝ, ∀ x, |conv (fun y => f_s y) x| ≤ C)
-    (h_torus_split :
-      SchwartzTorusSplit f_s J Ktilde constant_term tail_sum)
-    (h_constant_term : ConstantTermEqTwoOverU constant_term)
-    (h_tail_form :
-      TailFormSchwartz f_s J
-        (fun j => (Real.fourierIntegral (fun x => ((f_s x : ℝ) : ℂ))
-                    (j / uReal : ℝ)).re / uReal) Ktilde tail_sum) :
-    BundleDefs.LHS1 (fun x => f_s x) + BundleDefs.LHS2 (fun x => f_s x)
-      = 2 / Sidon.MultiScale.uQ_real
-        + 2 * Sidon.MultiScale.uQ_real ^ 2
-              * BundleDefs.S_cos_finset (fun x => f_s x) J Ktilde :=
-  hEq3_schwartz_finset f_s J hJ_no_zero Ktilde constant_term tail_sum
-    hf_nonneg h_K_ms_int h_conv_bdd
-    h_torus_split h_constant_term h_tail_form
 
 end -- noncomputable section
 

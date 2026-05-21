@@ -30,7 +30,10 @@ pip install python-flint numpy mpmath cvxpy mosek
 ```
 
 `mosek` may be replaced by `clarabel`; the driver selects the first solver
-it finds.
+it finds. The loose-pin dependency floor used by the broader repository is
+recorded in [`../requirements.txt`](../requirements.txt) (`numpy>=2.0`,
+`mpmath>=1.3`, `python-flint>=0.6`, etc.); the certifier driver runs on any
+combination satisfying those floors.
 
 ## Reproducing the certificate
 
@@ -105,11 +108,14 @@ Expected result: exit code `0`, no `sorry` warnings.
 
 ```bash
 cd lean
-lake env lean AxiomCheck.lean
+lake env lean AxiomCheckMV.lean        # MV-lemmas axiom closure
+lake env lean AxiomCheckBundleDefs.lean # bundle definitions axiom closure
+lake env lean AxiomCheckFourier.lean   # Fourier-aux axiom closure
+lake env lean AxiomCheckTorus.lean     # torus-Parseval axiom closure
 ```
 
-This prints the axiom dependency closure of the headline theorem.
-Equivalently, after `lake build`, `#print axioms
+The four per-module check files print the axiom dependency closure of
+their respective imports. After `lake build`, `#print axioms
 Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000` reports
 
 ```
@@ -131,20 +137,49 @@ formalisation of Kepler's conjecture used the same convention.
 - `K2_analytic_le_K2UpperQ`: $K_2(K_{\rm ms}) := \int K_{\rm ms}^2 \le
   47897/10000$. Analogue of "Mathematica computed $K_2 \approx 4.788$"
   in MV 2010, but backed by `flint.arb` at 256-bit precision (paper
-  Lemma 4.2).
-- `gain_analytic_ge_gainLowerQ`: $\texttt{gain\_analytic} = (4/u) \cdot
-  m_G^2 / S_G \ge 20925/100000$. Analogue of MV's Mathematica citation
-  of $a$, certifier-coupled in arb (paper Lemmas 4.3--4.5).
+  Lemma 4.2). The integrand $K_{\rm ms}^2$ is the explicit three-scale
+  arcsine autoconvolution.
+- `gain_analytic_ge_gainLowerQ`: $\texttt{gain\_analytic} =
+  (4/u_{\rm real}) \cdot \texttt{min\_G\_analytic}^2 /
+  \texttt{S\_1\_analytic} \ge 20925/100000$. The RHS is a *concrete
+  defined* `noncomputable def` (post-Option-B, 2026-05-20) built from
+  (i) the 200 QP coefficient numerators
+  `Sidon.MultiScale.qpNumerators : List ℤ` embedded with common
+  denominator $10^8$ (length verified by `native_decide`), and (ii) the
+  Bessel-form period-$u$ Fourier coefficient
+  `Ktilde_ms j := Σᵢ λᵢ · besselJ0(πjδᵢ/u)²` built on
+  `Sidon.Bessel.besselJ0`. Analogue of MV's Mathematica citation of $a$,
+  certifier-coupled in arb (paper Lemmas 4.3--4.5).
 
-In addition to these two axioms, the headline theorem takes an
-**analytic admissibility-bundle hypothesis** `ExtremiserPrimitives f`
-encoding the four MV Lemma 3.1 outputs (Eqs.(1)--(4)) for the
-specific pair $(f, K_{\rm ms})$. The bundle's existence for an
-arbitrary admissible $f$ is the analogue of MV invoking "by Lemma 3.1
-(Martin--O'Bryant)"; closing it for general $f$ in mathlib requires
-the $L^1 \cap L^2$ Plancherel + period-$u$ Parseval bridge that
-`Sidon.TorusParseval` and `Sidon.FourierAux` are built around but
-that is not yet a one-line mathlib call.
+#### Cross-binding the 200 QP coefficients
+
+Because the 200 QP coefficients now appear in two locations -- the
+JSON certificate and the Lean `qpNumerators` list -- the sibling
+script `audit_qp_coeffs.py` verifies that the integer numerators
+agree exactly between the certificate body (under the
+`qp_coefficients` field) and the Lean embedding at
+[`lean/Sidon/MultiScale.lean:523`](../lean/Sidon/MultiScale.lean).
+Run
+
+```bash
+python audit_qp_coeffs.py
+```
+
+after either source is regenerated; exit code `0` iff the 200
+integer numerators are bit-identical in both files.
+
+In addition to these two axioms, the headline theorem carries an
+**analytic admissibility-bundle record** `ExtremiserPrimitives f`
+whose fields are Lean restatements of MO~2009 Lemmas~3.1--3.4 /
+MV~2010 Lemma 3.1 outputs (Eqs.(1)--(4)) at the specific pair
+$(f, K_{\rm ms})$. Those lemmas apply to $K_{\rm ms}$ directly
+(a pdf supported in $[-\delta_1, \delta_1]$ with
+$\widetilde{K_{\rm ms}}(j) \ge 0$ and $K_{\rm ms} \in L^2$), and the
+paper discharges the bundle fields by direct citation. The Lean
+theorem retains them as named hypothesis fields only because the
+$L^1 \cap L^2$ Plancherel + period-$u$ Parseval bridge that
+`Sidon.TorusParseval` and `Sidon.FourierAux` are built around has not
+yet been packaged into a one-line mathlib call.
 
 The previous macro axiom `MV_master_inequality_for_extremiser` is
 **now a Lean theorem** (post-Wave-12 restructuring); its
@@ -157,12 +192,12 @@ statements (`K_two_upper_bound`, `k_one_lower_bound`,
 `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound`) are also
 Lean *theorems* -- none of them contributes an axiom to the dependency
 closure. See [`formalization.md`](formalization.md) for the axiom
-statements, the theorem statements, and the module layout (fifteen
-modules totalling roughly 8650 lines). The repository additionally
-exports two Schwartz-class headlines
-(`autoconvolution_ratio_ge_1292_1000_schwartz` consuming
-`SchwartzAtomic`, and
-`autoconvolution_ratio_ge_1292_1000_schwartz_residual` consuming the
-slimmer `SchwartzAtomicResidual`) under
-`Sidon.MultiScaleSchwartz` and
-`Sidon.SchwartzAtomicDischarge` respectively.
+statements, the theorem statements, and the module layout (thirteen
+modules totalling roughly 7.5 kLoC). The Schwartz-class headline
+variants previously listed here
+(`autoconvolution_ratio_ge_1292_1000_schwartz` and
+`autoconvolution_ratio_ge_1292_1000_schwartz_residual`) were retired
+during the S1+S2 refactor (2026-05) as vacuously true: by
+Paley--Wiener combined with Carlson's theorem, no nontrivial Schwartz
+function $f$ compactly supported in $(-1/4, 1/4)$ can satisfy the
+periodic Parseval-split predicate they relied on.

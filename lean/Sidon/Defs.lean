@@ -10,8 +10,8 @@ This module provides the core definitions used by the main proof:
 * `convolution_nonneg` — pointwise nonnegativity of the convolution of
   two nonneg functions.
 
-The headline theorems in `Sidon.MultiScale` and `Sidon.MultiScaleSchwartz`
-bound `autoconvolution_ratio f` from below.
+The headline theorem in `Sidon.MultiScale` bounds
+`autoconvolution_ratio f` from below.
 -/
 
 import Mathlib

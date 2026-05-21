@@ -595,3 +595,176 @@ theorem K_ms_fourier_lattice_zero :
   linarith [h_sum]
 
 end Sidon.BundleDefs
+
+/-! ## Extremiser analytic primitives bundle + headline theorem
+
+These declarations were relocated here from `Sidon/MultiScale.lean` so
+that the bundle's binding fields can reference the concrete analytic
+functionals `Sidon.BundleDefs.S_cos`, `Sidon.BundleDefs.LHS1`,
+`Sidon.BundleDefs.LHS2` (which depend on `K_ms` and `autocorr`, hence
+must live downstream of `Sidon.MultiScale`).  We re-open
+`namespace Sidon.MultiScale` so the fully-qualified names
+`Sidon.MultiScale.ExtremiserPrimitives`,
+`Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`,
+`Sidon.MultiScale.autoconvolution_ratio_ge_1_292`,
+`Sidon.MultiScale.C1a_ge_1292`, and
+`Sidon.MultiScale.MV_master_inequality_for_extremiser` are preserved
+exactly.  The bundle-independent quadratic inversion
+`Sidon.MultiScale.master_inequality_M_lower` stays in `Sidon/MultiScale.lean`. -/
+
+namespace Sidon.MultiScale
+
+/-- The bundle of analytic primitives needed to instantiate the MV
+master inequality at `(f, K_ms)`.  Field types reference the
+*definitional* analytic primitives `K2_analytic` and `gain_analytic`,
+forcing the two numerical kernel-specific axioms into the headline's
+dependency closure.
+
+Field values are bound by `m_G_eq, S_G_eq, S_cos_eq, LHS1_eq, LHS2_eq`
+to the concrete analytic functionals at `(f, K_ms)` defined in
+`Sidon.BundleDefs` and `Sidon.MultiScale`, so any instance forces these
+to be the canonical analytic values, not arbitrary reals. -/
+structure ExtremiserPrimitives (f : ℝ → ℝ) where
+  /-- The cosine `G`'s minimum on `[0, 1/4]`. -/
+  m_G : ℝ
+  /-- The dual sum `S_G = ∑ G̃²/K̂_ms`. -/
+  S_G : ℝ
+  /-- The bilinear cosine sum `S_cos = ∑ Re(f̃)²·K̃`. -/
+  S_cos : ℝ
+  /-- The LHS of MV Eq.(1):  `LHS1 = ∫ (f*f)·K_ms`. -/
+  LHS1 : ℝ
+  /-- The LHS of MV Eq.(2):  `LHS2 = ∫ (f∘f)·K_ms`. -/
+  LHS2 : ℝ
+  /-- Binding: `m_G` is the cosine `G`'s analytic infimum on `[0, 1/4]`. -/
+  m_G_eq : m_G = min_G_analytic
+  /-- Binding: `S_G = u·S_1/2`, so `2·m_G²/S_G = (4/u)·min_G²/S_1 = gain_analytic`. -/
+  S_G_eq : S_G = uQ_real * S_1_analytic / 2
+  /-- Binding: `S_cos` is the analytic bilinear cosine sum at `(f, K_ms)`. -/
+  S_cos_eq : S_cos = Sidon.BundleDefs.S_cos f
+  /-- Binding: `LHS1` is the analytic integral `∫ (f*f)·K_ms`. -/
+  LHS1_eq : LHS1 = Sidon.BundleDefs.LHS1 f
+  /-- Binding: `LHS2` is the analytic integral `∫ (autocorr f)·K_ms`. -/
+  LHS2_eq : LHS2 = Sidon.BundleDefs.LHS2 f
+  /-- `K_2(K_ms) ≥ 1`, forced by `∫ K_ms = 1` and Bochner positivity.
+      TODO: discharge from `Sidon.BundleDefs.K2_analytic_ge_one_of_integral_one`
+      once a one-call constructor supplies `∫ K_ms = 1` together with the
+      `K_ms`/`K_ms²` integrability and support facts (these are *not* among the
+      four admissibility hypotheses on `f`, so the discharge is a `K_ms`-side
+      analytic task, not derivable inside the master-inequality wire-up). -/
+  K2_ge_1 : 1 ≤ K2_analytic
+  /-- The gain identity `gain_analytic = 2·m_G²/S_G`. -/
+  gain_eq : gain_analytic = 2 * m_G ^ 2 / S_G
+  /-- `R(f) ≥ 1`, from the autoconvolution structure (`∫f² ≥ (∫f)²`).
+      TODO: discharge from `Sidon.BundleDefs.R_ge_one_of_data` once a one-call
+      constructor supplies the normalisation `∫f = 1`, the Fubini convolution
+      mass `∫(f*f) = 1`, the support-measure bound, and the `eLpNorm ⊤ ≥ 1`
+      lower bound.  The master-inequality theorem only carries `f ≥ 0`,
+      `supp f ⊆ (-1/4,1/4)`, `∫f > 0`, and `eLpNorm(f*f) ⊤ ≠ ⊤`; deriving the
+      `R_ge_one_of_data` hypotheses from these requires the L¹ Fubini-mass and
+      essSup-lower-bound bridges not yet available as a single lemma. -/
+  R_ge_1 : 1 ≤ autoconvolution_ratio f
+  /-- `S_G > 0` for positive `K̂_ms(j/u)` and any nonzero `G̃`. -/
+  S_G_pos : 0 < S_G
+  /-- MV Eq.(1) output:  `LHS1 ≤ R(f)`. -/
+  hEq1 : LHS1 ≤ autoconvolution_ratio f
+  /-- MV Eq.(2) output:  `LHS2 ≤ 1 + √(R(f) - 1)·√(K2_analytic - 1)`. -/
+  hEq2 : LHS2 ≤ 1 + Real.sqrt (autoconvolution_ratio f - 1)
+                  * Real.sqrt (K2_analytic - 1)
+  /-- MV Eq.(3) inequality form:  `2/u + 2·u²·S_cos ≤ LHS1 + LHS2`.
+      This `≥`-direction of MV Eq.(3) is exactly what the master
+      inequality chains against; crucially, it is discharge-able from
+      Bochner positivity alone (`K̃_ms(j) ≥ 0` for every `j`) by
+      truncating the nonneg-term tsum `∑'_{j ∈ ℤ\{0}} Re(f̃(j))² K̃(j)`
+      to any finite `J ⊆ ℤ\{0}` — no period-`u` Poisson summation
+      required. -/
+  hEq3_ge : 2 / (uQ : ℝ) + 2 * (uQ : ℝ) ^ 2 * S_cos ≤ LHS1 + LHS2
+  /-- MV Eq.(4) output:  `u²·S_cos ≥ m_G²/S_G`. -/
+  hEq4 : (uQ : ℝ) ^ 2 * S_cos ≥ m_G ^ 2 / S_G
+
+/-- MV master inequality at the slack rationals for admissible `f`
+under the 3-scale kernel `K_ms`.  Specialises MV (2010) Eq. (6) by
+composing `MV_master_inequality_from_MV_lemmas` (algebraic chain of
+MV Eqs. (1)–(4)) with the two numerical axioms
+`K2_analytic_le_K2UpperQ` and `gain_analytic_ge_gainLowerQ`. -/
+theorem MV_master_inequality_for_extremiser
+    (f : ℝ → ℝ)
+    (_hf_nonneg : ∀ x, 0 ≤ f x)
+    (_hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (_hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (_h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f + 1 +
+      Real.sqrt (autoconvolution_ratio f - 1) * Real.sqrt ((K2UpperQ : ℝ) - 1)
+      ≥ 2 / (uQ : ℝ) + (gainLowerQ : ℝ) := by
+  -- Discharge the two kernel-specific numerical bounds from the axioms.
+  have h_K2_bound : K2_analytic ≤ (K2UpperQ : ℝ) := K2_analytic_le_K2UpperQ
+  have h_gain_bound : 2 * P.m_G ^ 2 / P.S_G ≥ (gainLowerQ : ℝ) := by
+    rw [← P.gain_eq]
+    exact gain_analytic_ge_gainLowerQ
+  -- Apply the wire-up from MV-Lemmas to slack rationals.
+  exact MV_master_inequality_from_MV_lemmas f
+    K2_analytic P.m_G P.S_G P.S_cos P.LHS1 P.LHS2
+    h_K2_bound P.K2_ge_1 h_gain_bound P.R_ge_1 P.S_G_pos
+    P.hEq1 P.hEq2 P.hEq3_ge P.hEq4
+
+/-- For every admissible `f` for which the MV Lemma 3.1 atomic
+primitives for `(f, K_ms)` exist (packaged as `ExtremiserPrimitives f`),
+the autoconvolution ratio satisfies `R(f) ≥ 1292/1000 = 1.292`. -/
+theorem autoconvolution_ratio_ge_1292_1000 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f ≥ (1292 / 1000 : ℝ) := by
+  have hMI :
+      autoconvolution_ratio f + 1 +
+        Real.sqrt (autoconvolution_ratio f - 1) * Real.sqrt ((K2UpperQ : ℝ) - 1)
+        ≥ 2 / (uQ : ℝ) + (gainLowerQ : ℝ) :=
+    MV_master_inequality_for_extremiser
+      f hf_nonneg hf_supp hf_int_pos h_conv_fin P
+  have h := master_inequality_M_lower
+              (gainLowerQ : ℝ) le_rfl
+              (autoconvolution_ratio f) hMI
+  have hMT : (MTargetQ : ℝ) = (1292 / 1000 : ℝ) := by
+    unfold MTargetQ; push_cast; ring
+  rw [hMT] at h
+  exact h
+
+/-- Decimal restatement: `R(f) ≥ 1.292`. -/
+theorem autoconvolution_ratio_ge_1_292 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    autoconvolution_ratio f ≥ (1.292 : ℝ) := by
+  have h := autoconvolution_ratio_ge_1292_1000
+              f hf_nonneg hf_supp hf_int_pos h_conv_fin P
+  have hEq : (1.292 : ℝ) = 1292 / 1000 := by norm_num
+  rw [hEq]
+  exact h
+
+/-- Display alias: `1292/1000 ≤ R(f)` for every admissible `f`
+    with a valid `ExtremiserPrimitives f` bundle. -/
+theorem C1a_ge_1292 (f : ℝ → ℝ)
+    (hf_nonneg : ∀ x, 0 ≤ f x)
+    (hf_supp : Function.support f ⊆ Set.Ioo (-(1/4 : ℝ)) (1/4))
+    (hf_int_pos : MeasureTheory.integral MeasureTheory.volume f > 0)
+    (h_conv_fin : MeasureTheory.eLpNorm
+      (MeasureTheory.convolution f f
+        (ContinuousLinearMap.mul ℝ ℝ) MeasureTheory.volume)
+      ⊤ MeasureTheory.volume ≠ ⊤)
+    (P : ExtremiserPrimitives f) :
+    (1292 : ℝ) / 1000 ≤ autoconvolution_ratio f :=
+  autoconvolution_ratio_ge_1292_1000 f hf_nonneg hf_supp hf_int_pos h_conv_fin P
+
+end Sidon.MultiScale

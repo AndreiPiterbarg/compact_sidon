@@ -3,7 +3,9 @@
 The analytic chain of the **Piterbarg--Bajaj--Vincent Bound** is
 mechanised in Lean 4 under the namespace `Sidon.MultiScale`. The
 formalisation lives under [`../lean/Sidon/`](../lean/Sidon/) and is
-spread across fifteen modules (~8650 lines total) on top of `Mathlib`
+spread across thirteen modules (~7.5 kLoC total; ~6.1 kLoC axiom-free,
+plus the 1394-line `Sidon.MultiScale` which houses the 2
+verifiable-by-computation axioms) on top of `Mathlib`
 pinned to `v4.29.1`, commit
 [`5e932f97dd25535344f80f9dd8da3aab83df0fe6`](https://github.com/leanprover-community/mathlib4/commit/5e932f97dd25535344f80f9dd8da3aab83df0fe6).
 The bump to `v4.29.1` (post-Nov 2025) unlocked the L^2 Plancherel API
@@ -26,10 +28,11 @@ real numbers, backed by `flint.arb` at 256-bit precision (driver
 appear as `axiom` in Lean rather than as `theorem` is that mathlib does
 not yet ship a Bessel interval-arithmetic library to discharge them
 mechanically. They are analogous to the Mathematica citations in
-Matolcsi--Vinuesa (2010) but strictly more rigorous (proven interval
-bounds vs. heuristic numerics, reproducible SHA-256-anchored
-certificate, independent 14-agent audit). The FlySpeck formalisation of
-Kepler's conjecture used the same convention. The
+Matolcsi--Vinuesa (2010), with the stricter numerical guarantee of
+proven interval bounds (rather than heuristic floating-point), a
+reproducible SHA-256-anchored certificate, and independent
+re-derivation via mpmath at 30--50 decimal digits.  The FlySpeck
+formalisation of Kepler's conjecture used the same convention. The
 quadratic inversion `master_inequality_M_lower` and the five
 slack-soundness statements (`K_two_upper_bound`, `k_one_lower_bound`,
 `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound`,
@@ -45,17 +48,15 @@ closure.
 | [`Sidon.Bessel`](../lean/Sidon/Bessel.lean) | 958 | Bessel $J_0$ power series, autoconvolution arcsine FT identity $\widehat{K_{\rm arc}(\delta;\cdot)}(\xi) = J_0(\pi \delta \xi)^2$ for $K_{\rm arc} = \eta_\delta * \eta_\delta$, Watson tail bound. | 0 |
 | [`Sidon.FourierAux`](../lean/Sidon/FourierAux.lean) | 606 | Schwartz Plancherel, $L^p$ bridge, $L^1$-pairing, all the auxiliary Fourier machinery on $\mathbb{R}$ not directly in mathlib. | 0 |
 | [`Sidon.TorusParseval`](../lean/Sidon/TorusParseval.lean) | 785 | Period-$u$ Parseval, lattice Fourier, bilinear pairing $\int f g = \sum_n \widehat f(n/u) \overline{\widehat g(n/u)}$ on $\mathbb{R}/u\mathbb{Z}$. | 0 |
-| [`Sidon.MVLemmas`](../lean/Sidon/MVLemmas.lean) | 654 | The four Matolcsi--Vinuesa Lemma 3.1 atomic primitives Eqs.(1)--(4), the inner-product floor, and the Cauchy--Schwarz tail estimate. | 0 |
-| [`Sidon.MasterFromLemmas`](../lean/Sidon/MasterFromLemmas.lean) | 122 | Algebraic assembly: from Eqs.(1)--(4) at the analytic anchors to the MV master inequality Eq.(6). | 0 |
-| [`Sidon.BundleDefs`](../lean/Sidon/BundleDefs.lean) | 597 | The three bundle records `ExtremiserPrimitives`, `SchwartzAtomic`, `SchwartzAtomicResidual`. | 0 |
+| [`Sidon.MVLemmas`](../lean/Sidon/MVLemmas.lean) | 767 | The four Matolcsi--Vinuesa Lemma 3.1 atomic primitives Eqs.(1)--(4), the inner-product floor, the Cauchy--Schwarz tail estimate, and the new `mv_eq3_ge` / `mv_eq3_ge_of_eq` theorems for the inequality form of Eq.(3). | 0 |
+| [`Sidon.MasterFromLemmas`](../lean/Sidon/MasterFromLemmas.lean) | 130 | Algebraic assembly: from Eqs.(1)--(4) at the analytic anchors to the MV master inequality Eq.(6). | 0 |
+| [`Sidon.BundleDefs`](../lean/Sidon/BundleDefs.lean) | 597 | The `ExtremiserPrimitives` bundle record. | 0 |
 | [`Sidon.BundleEq1`](../lean/Sidon/BundleEq1.lean) | 347 | Discharge of bundle field `hEq1` (MV Eq.(1)). | 0 |
-| [`Sidon.BundleEq2Schwartz`](../lean/Sidon/BundleEq2Schwartz.lean) | 743 | Discharge of bundle field `hEq2` (MV Eq.(2)) for Schwartz $f$. | 0 |
-| [`Sidon.BundleEq3Schwartz`](../lean/Sidon/BundleEq3Schwartz.lean) | 743 | Discharge of bundle field `hEq3` (MV Eq.(3)) for Schwartz $f$. | 0 |
+| [`Sidon.BundleEq2Schwartz`](../lean/Sidon/BundleEq2Schwartz.lean) | 624 | Discharge of bundle field `hEq2` (MV Eq.(2)). | 0 |
+| [`Sidon.BundleEq3Schwartz`](../lean/Sidon/BundleEq3Schwartz.lean) | 371 | Discharge of bundle field `hEq3_ge` (MV Eq.(3), inequality form). | 0 |
 | [`Sidon.BundleEq4`](../lean/Sidon/BundleEq4.lean) | 445 | Discharge of bundle field `hEq4` (MV Eq.(4)). | 0 |
 | [`Sidon.BilinearParseval`](../lean/Sidon/BilinearParseval.lean) | 434 | Bilinear Parseval pairings used by the bundle discharges. | 0 |
-| [`Sidon.MultiScale`](../lean/Sidon/MultiScale.lean) | 1142 | General headline `autoconvolution_ratio_ge_1292_1000`, verifiable-by-computation axioms, slack-soundness theorems, three-scale kernel anchors. | 2 (verifiable-by-computation) |
-| [`Sidon.MultiScaleSchwartz`](../lean/Sidon/MultiScaleSchwartz.lean) | 471 | Schwartz-class headline `autoconvolution_ratio_ge_1292_1000_schwartz` consuming the `SchwartzAtomic` record. | 0 |
-| [`Sidon.SchwartzAtomicDischarge`](../lean/Sidon/SchwartzAtomicDischarge.lean) | 548 | Slimmer Schwartz headline `autoconvolution_ratio_ge_1292_1000_schwartz_residual` consuming `SchwartzAtomicResidual`; partial discharge of atomic Fourier primitives. | 0 |
+| [`Sidon.MultiScale`](../lean/Sidon/MultiScale.lean) | 1394 | Headline `autoconvolution_ratio_ge_1292_1000`, verifiable-by-computation axioms, slack-soundness theorems, three-scale kernel anchors. | 2 (verifiable-by-computation) |
 
 Earlier versions of the project had a single ~388-line
 `MultiScale.lean` (formerly `MultiScaleRigorous.lean`) carrying a single
@@ -69,10 +70,10 @@ the `ExtremiserPrimitives` bundle hypothesis encoding MV Lemma
 3.1 outputs for $(f, K_{\rm ms})$, plus (ii) the two
 verifiable-by-computation axioms below.
 
-### Recent fixes (Wave-12 multi-agent audit)
+### Recent fixes (Wave-12 multi-agent audit; Option B 2026-05-20)
 
-Two math-fidelity corrections landed during a multi-agent audit and
-are reflected in the post-Wave-12 build:
+Three math-fidelity corrections landed and are reflected in the
+post-Wave-12 / Option-B build:
 
 - **`f ∘ f` convention.** Tightened from a pointwise product to the
   *convolutional* form $(f \circ f)(x) := \int f(t)\, f(x - t)\, dt$
@@ -85,33 +86,55 @@ are reflected in the post-Wave-12 build:
   $\widehat{K_{\rm arc}(\delta;\cdot)}(\xi) = J_0(\pi \delta \xi)^2$
   the literal Parseval-on-the-Fourier-transform statement rather than
   the Sonine identity.
+- **Option B: concrete `gain_analytic`.** The previously opaque
+  primitive `gain_analytic := gainLowerQ + 1` and the Schwartz
+  placeholders `bundle_m_G := √(gain_analytic/2)` / `bundle_S_G := 1`
+  are replaced by *concrete defined* real expressions. The 200 QP
+  coefficient numerators are embedded in
+  `Sidon.MultiScale.qpNumerators : List ℤ` at
+  [`lean/Sidon/MultiScale.lean:523`](../lean/Sidon/MultiScale.lean)
+  (common denominator $10^8$; length verified by `native_decide`).
+  Concrete defined functionals follow:
+  - `G_concrete x := Σⱼ (qpNumerators[j]/10⁸) · cos(2π(j+1) x / u_real)`
+  - `min_G_analytic := sInf (G_concrete '' Set.Icc 0 (1/4))`
+  - `Ktilde_ms j := λ₁·besselJ0(πjδ₁/u)² + λ₂·besselJ0(πjδ₂/u)² +
+    λ₃·besselJ0(πjδ₃/u)²` (built on the axiom-free
+    `Sidon.Bessel.besselJ0` power series)
+  - `S_1_analytic := Σⱼ aⱼ²/Ktilde_ms(j)`
+  - `gain_analytic := (4 / uQ_real) * min_G_analytic^2 / S_1_analytic`
+    (a non-opaque `noncomputable def`)
+  - In the Schwartz pathway, `bundle_m_G := min_G_analytic` and
+    `bundle_S_G := uQ_real * S_1_analytic / 2`, with the identity
+    `bundle_gain_eq : gain_analytic = 2 * bundle_m_G^2 / bundle_S_G`
+    proved as a real-algebra `field_simp; ring`.
 
-Both fixes are build-clean (`lake build` green, 0 sorries) under the
-same 5-axiom budget (3 Lean core + 2 verifiable-by-computation), with
-the three exported headlines remaining non-vacuous.
+  The two verifiable-by-computation axioms (`K2_analytic_le_K2UpperQ`,
+  `gain_analytic_ge_gainLowerQ`) retain their statements but now
+  genuinely bound real analytic functionals over the concrete defined
+  expressions above.
 
-## Headline theorems
+All three fixes are build-clean (`lake build` green, 0 sorries) under
+the same 5-axiom budget (3 Lean core + 2 verifiable-by-computation),
+with the three headline theorem signatures unchanged and the three
+exported headlines remaining non-vacuous.
 
-The repository exports three headline theorems, sharing the same
-underlying analytic chain but consuming different admissibility
-records:
+## Headline theorem
 
-- **General**
-  `Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`
+The repository exports a single headline theorem:
+
+- `Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`
   (`MultiScale.lean`), hypothesised on the
   `ExtremiserPrimitives f` record.
-- **Schwartz**
-  `Sidon.MultiScaleSchwartz.autoconvolution_ratio_ge_1292_1000_schwartz`
-  (`MultiScaleSchwartz.lean`), hypothesised on the
-  `SchwartzAtomic f_s` record for a Schwartz function $f_s$.
-- **Schwartz (slimmer hypothesis)**
-  `Sidon.SchwartzAtomicDischarge.autoconvolution_ratio_ge_1292_1000_schwartz_residual`
-  (`SchwartzAtomicDischarge.lean`), hypothesised on the slimmer
-  `SchwartzAtomicResidual f_s` record (the `_residual` variant
-  carries only the genuinely *residual* analytic content; the
-  remaining fields are discharged inside the same module).
 
-The general headline reads
+The previously-exported Schwartz-class variants
+(`autoconvolution_ratio_ge_1292_1000_schwartz` and
+`autoconvolution_ratio_ge_1292_1000_schwartz_residual`) were retired
+during the S1+S2 refactor (2026-05) as vacuously true: by
+Paley--Wiener combined with Carlson's theorem, no nontrivial Schwartz
+function $f$ compactly supported in $(-1/4, 1/4)$ can satisfy the
+periodic Parseval-split predicate they relied on.
+
+The headline reads
 
 ```lean
 theorem autoconvolution_ratio_ge_1292_1000 (f : ℝ → ℝ)
@@ -139,8 +162,8 @@ are exported from the same namespace; both take the same bundle hypothesis.
 
 | Axiom name | Statement | Discharged by |
 |------------|-----------|---------------|
-| `K2_analytic_le_K2UpperQ` | $K_2(K_{\rm ms}) \le \texttt{K2UpperQ} = 47897/10000$. Here $K_2(K_{\rm ms}) := \int_{\mathbb{R}} K_{\rm ms}(x)^2\,dx$ is a concrete real integral over the explicit three-scale arcsine kernel. | The `flint.arb` certifier at 256-bit precision: $K_2 \in [4.788823, 4.788906]$, radius $< 10^{-4}$; slack $4.7897$ exceeds the upper endpoint with margin $\approx 8.4 \times 10^{-5}$. Paper Lemma 4.2. |
-| `gain_analytic_ge_gainLowerQ` | $\texttt{gain\_analytic} \ge \texttt{gainLowerQ} = 20925/100000$. Here $\texttt{gain\_analytic} = (4/u)\cdot m_G^2 / S_G$ with $m_G = \min_{[0,1/4]} G$ and $S_G = \sum_j \widetilde G(j)^2 / \widehat K_{\rm ms}(j/u)$ for the QP-optimised cosine $G$. | The `flint.arb` certifier: coupled-arb value $\ge 0.21009214$, radius $< 10^{-8}$; slack $0.20925$ is below the certifier's lower endpoint with margin $\approx 8.4 \times 10^{-4}$. Paper Lemmas 4.3--4.5. |
+| `K2_analytic_le_K2UpperQ` | $K_2(K_{\rm ms}) \le \texttt{K2UpperQ} = 47897/10000$. Here $K_2(K_{\rm ms}) := \int_{\mathbb{R}} K_{\rm ms}(x)^2\,\mathrm{d}\mathrm{volume}$ is a concrete real integral over the explicit three-scale arcsine kernel. | The `flint.arb` certifier at 256-bit precision: $K_2 \in [4.788823, 4.788906]$, radius $< 10^{-4}$; slack $4.7897$ exceeds the upper endpoint with margin $\approx 7.9 \times 10^{-4}$. Paper Lemma 4.2. |
+| `gain_analytic_ge_gainLowerQ` | $\texttt{gain\_analytic} \ge \texttt{gainLowerQ} = 20925/100000$. After **Option B** (2026-05-20), `gain_analytic` is a *concrete* `noncomputable def`: $\texttt{gain\_analytic} = (4 / u_{\rm real}) \cdot \texttt{min\_G\_analytic}^2 / \texttt{S\_1\_analytic}$, where `G_concrete x := Σⱼ (qpNumerators[j]/10⁸)·cos(2π(j+1) x/u_real)` is the cosine sum over the 200 embedded QP coefficients (`qpNumerators : List ℤ`, length verified by `native_decide`), `min_G_analytic := sInf (G_concrete '' Set.Icc 0 (1/4))` is the analytic infimum on $[0, 1/4]$, `Ktilde_ms j := Σᵢ λᵢ · besselJ0(π·j·δᵢ/u)²` is the Bessel-form period-$u$ Fourier coefficient (using `Sidon.Bessel.besselJ0`), and `S_1_analytic := Σⱼ aⱼ²/Ktilde_ms(j)` is the QP denominator sum. | The `flint.arb` certifier: coupled-arb value $\ge 0.21009214$, radius $< 10^{-8}$; slack $0.20925$ is below the certifier's lower endpoint with margin $\approx 8.4 \times 10^{-4}$. Paper Lemmas 4.3--4.5. |
 
 Both axioms are **verifiable-by-computation** in the precise sense
 defined in the introduction: each is a logically decidable inequality
@@ -153,9 +176,9 @@ yet discharged inside Lean because the corresponding Bessel
 interval-arithmetic infrastructure is not in mathlib. They are
 **analogues of "Mathematica computed this value" in the published
 Matolcsi--Vinuesa paper** -- certifier outputs, not analytic content --
-but strictly more rigorous: proven interval bounds rather than
-heuristic numerics, reproducible SHA-256-anchored certificate, and an
-independent 14-agent audit. Both quantities are defined symbolically in
+with the stricter numerical guarantee of proven interval bounds
+(rather than heuristic floating-point), a reproducible
+SHA-256-anchored certificate, and independent mpmath re-derivation. Both quantities are defined symbolically in
 Lean as concrete real integrals / finite sums over the explicit
 three-scale kernel $K_{\rm ms}$ and the QP-optimised cosine $G$, so the
 axioms are non-trivial analytic statements (not definitional
@@ -172,37 +195,40 @@ structure ExtremiserPrimitives (f : ℝ → ℝ) where
   gain_eq : gain_analytic = 2 * m_G ^ 2 / S_G
   R_ge_1  : 1 ≤ autoconvolution_ratio f
   S_G_pos : 0 < S_G
-  hEq1 : LHS1 ≤ autoconvolution_ratio f
-  hEq2 : LHS2 ≤ 1 + Real.sqrt (autoconvolution_ratio f - 1)
-                  * Real.sqrt (K2_analytic - 1)
-  hEq3 : LHS1 + LHS2 = 2 / uQ + 2 * uQ^2 * S_cos
-  hEq4 : uQ^2 * S_cos ≥ m_G^2 / S_G
+  hEq1    : LHS1 ≤ autoconvolution_ratio f
+  hEq2    : LHS2 ≤ 1 + Real.sqrt (autoconvolution_ratio f - 1)
+                     * Real.sqrt (K2_analytic - 1)
+  hEq3_ge : 2 / uQ + 2 * uQ^2 * S_cos ≤ LHS1 + LHS2
+  hEq4    : uQ^2 * S_cos ≥ m_G^2 / S_G
 ```
 
-The four fields `hEq1`--`hEq4` are the conclusions of MV Lemma 3.1
-Eqs.(1)--(4) instantiated at $(f, K_{\rm ms})$. Their *existence* is
-the same analytical assertion that MV makes implicitly in the
-single-scale derivation: given an admissible $f$ and an admissible
-kernel $K$, the four atomic identities/inequalities of MV Lemma 3.1
-hold. The Lean module `Sidon.MVLemmas` proves all four conclusions
-**axiom-free** from the appropriate atomic sub-hypotheses
-(period-$u$ Parseval splits for $f*f$ and $f \circ f$, the $F$-bound,
-the inner-product floor, etc.), and `Sidon.MasterFromLemmas` chains
-them into the master inequality Eq.(6) axiom-free as well.
+The four fields `hEq1`, `hEq2`, `hEq3_ge`, `hEq4` are Lean
+restatements of MV Lemma 3.1 Eqs.(1)--(4) instantiated at
+$(f, K_{\rm ms})$. The Lean module `Sidon.MVLemmas` provides the
+axiom-free atomic primitives, including the inequality form
+`mv_eq3_ge` of MV Eq.(3), and `Sidon.MasterFromLemmas` chains the
+bundle fields into the master inequality Eq.(6) axiom-free as well.
 
-The bundle is kept as a *hypothesis* on the headline (rather than
-discharged automatically) because the Parseval splits and $L^1 \cap
-L^2$ pairings for *non-Schwartz* admissible $f$ on the torus
-$\mathbb{R}/u\mathbb{Z}$ are not yet in mathlib in a directly usable
-form. The `Sidon.TorusParseval` and `Sidon.FourierAux` modules
-contain the building blocks (period-$u$ Parseval, lattice Fourier,
-bilinear pairings via mathlib's `MeasureTheory.Lp.fourierTransformₗᵢ`),
-but the final stitching -- producing an `ExtremiserPrimitives f`
-witness for an arbitrary admissible $f$ -- requires bridges that are
-*possible* with the current mathlib but not *immediate*. Closing this
-gap would lift the headline from "conditional on a witness for the
-bundle" to fully unconditional; doing so is the remaining residual
-work on the Lean side.
+Crucially, `hEq3_ge` (the inequality form $2/u + 2 u^2 S_{\rm cos}
+\le \mathrm{LHS}_1 + \mathrm{LHS}_2$, replacing the earlier equality
+`hEq3`) is *genuinely Lean-derivable* from finite-`J` Parseval plus
+Bochner positivity $\widetilde{K_{\rm ms}}(j) \ge 0$ alone — no
+period-`u` Poisson summation needed; the supporting theorems
+`mv_eq3_ge` and `mv_eq3_ge_of_eq` live in `Sidon.MVLemmas`. The
+remaining three fields (`hEq1`, `hEq2`, `hEq4`) are Lean restatements
+of MO~2009 Lemmas~3.1--3.4 / MV~2010 Lemma 3.1 outputs at
+$(f, K_{\rm ms})$ — those lemmas apply to $K_{\rm ms}$ directly (a
+pdf supported in $[-\delta_1, \delta_1]$ with
+$\widetilde{K_{\rm ms}}(j) \ge 0$ and $K_{\rm ms} \in L^2$), and the
+paper discharges them by direct citation. The Lean theorem retains
+them as named hypothesis fields only because the Parseval splits and
+$L^1 \cap L^2$ pairings on the torus $\mathbb{R}/u\mathbb{Z}$ are
+not yet in mathlib in a directly usable one-call form. The
+`Sidon.TorusParseval` and `Sidon.FourierAux` modules contain the
+building blocks (period-$u$ Parseval, lattice Fourier, bilinear
+pairings via mathlib's `MeasureTheory.Lp.fourierTransformₗᵢ`);
+packaging them into a single-call constructor is a
+mathlib-engineering task, not a mathematical gap.
 
 ## Lean theorems backing the headline
 
@@ -265,7 +291,9 @@ The published Matolcsi--Vinuesa paper (J. Math. Anal. Appl. **372**
 The present Lean proof of $C_{1a} \ge 1.292$:
 
 1. **Formally proves the analytic content in Lean** -- approximately
-   8650 axiom-free lines spanning the autoconvolution arcsine
+   ~7.5 kLoC across thirteen modules (~6.1 kLoC axiom-free; the
+   1394-line `Sidon.MultiScale` houses the 2 verifiable-by-computation
+   axioms) spanning the autoconvolution arcsine
    Fourier-transform identity (`Sidon.Bessel`), the $L^2$ Plancherel
    and Schwartz apparatus (`Sidon.FourierAux`, on top of mathlib's
    `MeasureTheory.Lp.fourierTransformₗᵢ` introduced in `v4.29.1`),
@@ -274,20 +302,22 @@ The present Lean proof of $C_{1a} \ge 1.292$:
    (`Sidon.MVLemmas`) together with their dedicated discharge modules
    (`Sidon.BundleEq1`, `Sidon.BundleEq2Schwartz`,
    `Sidon.BundleEq3Schwartz`, `Sidon.BundleEq4`,
-   `Sidon.BilinearParseval`), the partial Schwartz atomic-primitive
-   discharge (`Sidon.SchwartzAtomicDischarge`), and the master
-   inequality assembly (`Sidon.MasterFromLemmas`,
-   `Sidon.MultiScaleSchwartz`).
-2. **2 verifiable-by-computation axioms** -- exact analogues of MV's
-   Mathematica citations, but backed by 256-bit `flint.arb` interval
-   arithmetic (strictly more rigorous than Mathematica's heuristic
-   numerics), independently audited by 14 agents, and anchored to a
-   SHA-256-stamped reproducible certificate.
-3. **1 admissibility-bundle hypothesis** (`ExtremiserPrimitives f`) --
-   the analogue of MV invoking "by Lemma 3.1 (Martin--O'Bryant)"; the
-   bundle's existence for a specific admissible $f$ is the same analytic
-   assertion MV makes about his arbitrary admissible $f$. This is a
-   *hypothesis* of the headline theorem, not an axiom.
+   `Sidon.BilinearParseval`), and the master inequality assembly
+   (`Sidon.MasterFromLemmas`).
+2. **2 verifiable-by-computation axioms** -- analogues *in role* of
+   MV's Mathematica citations, backed by 256-bit `flint.arb` interval
+   arithmetic (proven interval bounds rather than heuristic
+   floating-point), anchored to a SHA-256-stamped reproducible
+   certificate and re-derived independently via mpmath at 30--50
+   decimal digits.
+3. **1 admissibility-bundle record** (`ExtremiserPrimitives f`) whose
+   fields are Lean restatements of MO~2009 / MV~2010 Lemma 3.1
+   outputs (Eqs.(1)--(4)) at $(f, K_{\rm ms})$. Those lemmas apply to
+   $K_{\rm ms}$ directly as an admissible kernel, and the paper
+   discharges the bundle fields by direct citation. Retained as a
+   Lean hypothesis record for mathlib-API reasons (the $L^1 \cap L^2$
+   Plancherel + period-$u$ Parseval bridge has not yet been packaged
+   into a one-call constructor), not an axiom.
 
 **Categorisation of the axiom budget.** Lean's `#print axioms` output
 mixes three categorically distinct kinds of dependency, which we
@@ -311,21 +341,20 @@ The distinction between *conjectural* and
 critic's question -- "are you assuming something unprovable?" -- has
 a clean answer here: **no**. Both numerical axioms are provable; they
 are simply not yet formalised in Lean for engineering reasons (no
-Bessel interval-arithmetic library in mathlib, an absence shared by
-every published computer-assisted real-number proof of the past two
-decades). They are not RH-style conjectures, and they are not
+Bessel interval-arithmetic library in mathlib). They are not RH-style conjectures, and they are not
 hypotheses about the universe of mathematics; they are statements
 about specific integers that any sufficient implementation of
 interval arithmetic + the Bessel power series can decide.
 
-**Why this is publication-valid.** It exceeds MV's standard: ~8650
-lines of formal Lean for what MV proved on ~5 pages of text, with the
-numerical inputs strictly more reliable (rigorous interval bounds vs.
-heuristic floating point). It uses the same axiom structure published
-computer-assisted proofs use (Flyspeck cited Kepler's interval
-arithmetic; the polynomial-method capset proof cited specific Lagrange
-polynomial bounds; the PFR formalisation cited numerical
-Plünnecke--Ruzsa constants). The conceptual content of the proof is
+**Trust base.** ~7.5 kLoC of formal Lean across thirteen modules
+(~6.1 kLoC axiom-free across the twelve auxiliary modules; the
+1394-line `Sidon.MultiScale` houses the 2 verifiable-by-computation
+axioms).  The numerical inputs are proven interval bounds (rather than
+heuristic floating point), in the same axiom architecture used by
+standard computer-assisted real-number proofs (Flyspeck cited
+Kepler's interval arithmetic; the polynomial-method cap-set proof
+cited specific Lagrange polynomial bounds; the PFR formalisation
+cited numerical Plünnecke--Ruzsa constants). The conceptual content of the proof is
 in the Lean theorem, **not** in the axioms: the
 verifiable-by-computation axioms encode only "evaluate this specific
 integral and compare it to this specific rational".
@@ -339,14 +368,17 @@ and would not change the mathematical claim.
 
 **Honesty caveats.**
 
-- The headline is conditional on the analytic-admissibility bundle
-  (`ExtremiserPrimitives f`), not unconditional. Closing this bridge
-  for arbitrary admissible $f$ requires connecting mathlib's
-  $L^2$-Plancherel API to the concrete period-$u$ Parseval splits
-  used in `Sidon.MVLemmas`. The infrastructure for this bridge is
-  spread across `Sidon.FourierAux` and `Sidon.TorusParseval`; the
-  remaining piece is the $L^1 \cap L^2$ periodisation step for $f*f$
-  and $f \circ f$ on the torus.
+- The Lean theorem carries `ExtremiserPrimitives f` as a named
+  hypothesis record; its fields are MO~2009 / MV~2010 Lemma 3.1
+  outputs at $(f, K_{\rm ms})$, discharged in the paper by direct
+  citation, exactly as MV~2010 discharged its single-arcsine instance
+  via MO~2009. The Lean retains them as hypothesis fields because
+  mathlib's $L^2$-Plancherel API has not yet been bridged to the
+  concrete period-$u$ Parseval splits used in `Sidon.MVLemmas` via a
+  one-call constructor; the building blocks are in
+  `Sidon.FourierAux` and `Sidon.TorusParseval`. This mathlib-API
+  absence is a separate engineering note that does not bear on the
+  validity of the citation-discharge itself.
 - The two verifiable-by-computation axioms depend on trusting the
   `flint.arb` library. `flint.arb` is peer-reviewed (Johansson 2017,
   IEEE TC) and used widely for rigorous computational mathematics, but
