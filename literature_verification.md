@@ -126,6 +126,7 @@ in which only the kernel/multiplier quantities $K_2$ and $a$ appear. This $z_1$-
 
 **The three-scale kernel.** Let $\eta(x) := (2/\pi)\,(1-4x^2)^{-1/2}\,\mathbf{1}_{|x|<1/2}$ be the arcsine density of half-width $1/2$, and write the $\delta$-rescaled autoconvolution
 $$K_{\mathrm{arc}}(\delta; x) \;:=\; \delta^{-1}\,(\eta * \eta)(x/\delta).$$
+(Equivalently, with the paper's and Lean's $\delta$-scaled density $\eta_\delta(x) := \delta^{-1}(2/\pi)(1-(2x/\delta)^2)^{-1/2}\mathbf{1}_{|x|<\delta/2}$ supported on $(-\delta/2,\delta/2)$, one has $K_{\mathrm{arc}}(\delta;\cdot) = \eta_\delta*\eta_\delta$; the two presentations yield the identical kernel on $[-\delta,\delta]$.)
 Then $K_{\mathrm{arc}}(\delta; \cdot)$ is a probability density supported on $[-\delta,\delta]$ (since $\mathrm{supp}(\eta * \eta) = [-1, 1]$ and the rescaling contracts by $\delta$), and its continuous Fourier transform, under the convention $\widehat g(\xi) := \int_{\mathbb{R}} g(x) e^{-2\pi i x \xi}\,dx$, is $\widehat{K_{\mathrm{arc}}}(\delta;\xi) = J_0(\pi\delta\xi)^{2}\ge 0$. Any convex combination of such kernels is therefore Bochner-admissible. Matolcsi–Vinuesa used a single
 arcsine kernel. Here $K = K_{\mathrm{ms}}$ is a convex combination of
 **three**, with half-widths $(\delta_1,\delta_2,\delta_3) =
@@ -174,11 +175,16 @@ are excluded on both sides, so equality is admissible in the
 hypothesis. (ii) MO Lemma 2.1 is a statement about $L^{2}$ classes
 (both sides are unchanged under modification of $g_i$ on a
 Lebesgue-null set), so even though $K_{\mathrm{arc}}(\delta_i;\cdot)
-=\eta_{\delta_i}*\eta_{\delta_i}$ is continuous with closed support
-$[-\delta_i,\delta_i]$, it vanishes pointwise at $\pm\delta_i$
-(autoconvolution of indicator: empty intersection of supports at the
-boundary) and may be taken to represent its $L^{2}$ class as a
-function supported in the open interval $(-\delta_i,\delta_i)$;
+=\eta_{\delta_i}*\eta_{\delta_i}$ has closed support
+$[-\delta_i,\delta_i]$, it is continuous near and vanishes at the
+endpoints $\pm\delta_i$ (there the supports of the two arcsine factors
+$\eta_{\delta_i}\subseteq(-\delta_i/2,\delta_i/2)$ meet only at a
+single point, so the convolution integral is zero), and since
+$\{\pm\delta_i\}$ is Lebesgue-null it may in any case be taken to
+represent its $L^{2}$ class as a function supported in the open
+interval $(-\delta_i,\delta_i)$ (note $K_{\mathrm{arc}}$ is *not*
+globally continuous: it carries a logarithmic singularity at the
+origin, where $\int\eta_{\delta_i}^{2}=\infty$);
 the same applies to $K_{\mathrm{ms}}=\sum_i\lambda_i
 K_{\mathrm{arc}}(\delta_i;\cdot)$ on $(-\delta_1,\delta_1)$.
 With this $L^{2}$-class representative the hypothesis of MO Lemma
@@ -261,18 +267,29 @@ floating-point computation.
 
 **Mechanisation.** The analytic reduction — admissibility of
 $K_{\mathrm{ms}}$, the master inequality, the quadratic inversion,
-and the rational closing arithmetic — is mechanised in Lean 4 (13
-modules, $\approx 7513$ lines, `mathlib v4.29.1`, no `sorry`). The
-headline theorem `autoconvolution_ratio_ge_1292_1000` concludes
-`autoconvolution_ratio f ≥ 1292/1000`, where `autoconvolution_ratio`
-is the Lean definition of $R(f) = \lVert f*f\rVert_{\infty}/(\int
-f)^{2}$ in `Sidon.Defs`. Its dependency closure consists of: Lean's
-three logical axioms (`propext`, `Classical.choice`, `Quot.sound`);
-two numerical user axioms recording the certifier's outputs for $K_2$
-and $a$; and an analytic-primitives record `ExtremiserPrimitives f`
-whose fields are Lean restatements of the cited MV/MO results
-<a href="#MV-primitives">[MV-primitives]</a>
-<a href="#MO-primitives">[MO-primitives]</a>. The bundle has 13
+and the rational closing arithmetic — is mechanised in Lean 4
+(**30 modules, $\approx 15{,}465$ lines**: 13 core `Sidon/*.lean` at
+7658 lines plus 17 `Sidon/Constructor/*.lean` at 7915 lines, `mathlib
+v4.29.1`, no `sorry`). The formalisation exports two headlines, both
+concluding `autoconvolution_ratio f ≥ 1292/1000`, where
+`autoconvolution_ratio` is the Lean definition of $R(f) = \lVert
+f*f\rVert_{\infty}/(\int f)^{2}$ in `Sidon.Defs`:
+- The *conditional* `autoconvolution_ratio_ge_1292_1000` takes an
+  analytic-primitives record `ExtremiserPrimitives f` whose fields are
+  Lean restatements of the cited MV/MO results
+  <a href="#MV-primitives">[MV-primitives]</a>
+  <a href="#MO-primitives">[MO-primitives]</a>; its dependency closure
+  is Lean's three logical axioms (`propext`, `Classical.choice`,
+  `Quot.sound`) plus **two** numerical user axioms recording the
+  certifier's outputs for $K_2$ and $a$.
+- The *unconditional* `C1a_ge_1292_unconditional` takes only raw
+  admissibility hypotheses and *constructs* the bundle via
+  `ExtremiserPrimitives.of_admissible`; its dependency closure adds
+  **two further** numerical user axioms (`min_G_analytic_ge_minGLowerQ`
+  for $\min_{[0,1/4]} G \ge 998/1000$, and `K_ms_fourier_lattice_pos_active`
+  for $\widetilde{K_{\mathrm{ms}}}(j) > 0$ on $j\in\{1,\dots,200\}$),
+  for **four** numerical user axioms in total.
+The bundle has 13
 fields: five real parameters (`m_G`, `S_G`, `S_cos`, `LHS1`, `LHS2`),
 four numerical-sanity hypotheses (`K2_ge_1`, `R_ge_1`, `S_G_pos`,
 `gain_eq`), and the four MV Lemma 3.1 outputs at $(f, K_{\mathrm{ms}})$
@@ -282,7 +299,8 @@ backing modules `Sidon.MultiScaleSchwartz` / `Sidon.SchwartzAtomicDischarge`)
 were retired by the S1+S2 refactor when the Schwartz
 `ParsevalSplitSchwartz` predicate was shown to be vacuously satisfiable
 by Paley–Wiener + Carlson; only the general bundle survives. The
-slack-soundness statements, the quadratic inversion, and the
+slack-soundness statements, the quadratic inversion, the
+`of_admissible` constructor, and the
 assembly are ordinary Lean theorems <a href="#PBV-lean">[PBV-lean]</a>.
 The numerical anchors are reproducible from a SHA-256-anchored
 certificate and are cross-checked at 50 decimal digits by an `mpmath`
@@ -341,12 +359,16 @@ emit step writes both the JSON `coeffs_q` numerators and the Lean
 `audit_qp_coeffs.py` (sibling to `audit3_mpmath.py`) reparses the
 Lean `qpNumerators` list, the JSON `coeffs_q` array, and the
 certifier's in-memory rationals, asserting bit-identical equality
-across all three surfaces. The audit inventory remains exactly five
-axioms for all headlines (three Lean core + two numerical),
-zero `sorry`, build clean (`cd lean && lake build`). An additional
+across all three surfaces. The conditional headline reaches a
+five-axiom inventory (three Lean core + two numerical); the
+unconditional headline `C1a_ge_1292_unconditional` reaches seven
+(three Lean core + four numerical). Both build clean
+(`cd lean && lake build`) with zero `sorry`. An additional
 6-agent independent re-verification of the three-scale 1.292
-instance was performed on 2026-05-15, confirming the 5-axiom
-budget, build-green status, bit-for-bit reproducibility of the
+instance was performed on 2026-05-15, confirming the then-current
+5-axiom budget (the unconditional headline and its two further
+certifier axioms postdate that audit), build-green status,
+bit-for-bit reproducibility of the
 certificate, and `mpmath`-corroborated numerics (the earlier
 14-agent audit was on the 2-scale 1.28984 predecessor; its findings
 on the kernel / QP / master-inequality framework transport directly
@@ -364,7 +386,7 @@ strictly above it on three:
 | --------- | ------------------- | --------- |
 | $\mathcal{F}\to$ square-integrable reduction | Cited by reference to Schinzel–Schmidt 2002 Theorem 1 (MV §2; see <a href="#MV-reduction">[MV-reduction]</a>) | **Cited identically** to <a href="#SS2002">[SS2002]</a> Theorem 1 (see "Reduction to square-integrable $f$" above) |
 | MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 (period-$u$ Parseval, constant-plus-tail split, lattice $F$-bound, torus split for $f*f + f\circ f$) | Cited by reference, and *applied to admissible $f$* in MV's English-prose proof: *"Lemma 3.1. [Lemmas 3.1, 3.2, 3.3, 3.4 in [6]]"* (MV p. 3; see <a href="#MV-primitives">[MV-primitives]</a>) | **Cited identically** and applied directly to the admissible kernel $K_{\mathrm{ms}}$ (a pdf supported in $[-\delta_1,\delta_1]$ with $\widetilde{K_{\mathrm{ms}}}(j)\ge 0$ and $K_{\mathrm{ms}}\in L^{2}$ — the only hypotheses MO 2009 Lemmas 3.1–3.4 / MV 2010 Lemma 3.1 require). The Lean theorem encodes the resulting outputs at $(f, K_{\mathrm{ms}})$ as named hypothesis fields (`hEq1`, `hEq2`, `hEq3_ge`, `hEq4`) of the record `ExtremiserPrimitives f`, and the paper discharges those fields by direct citation to MO 2009 Lemma 3.3 / Lemma 3.2 applied to $K_{\mathrm{ms}}$, exactly as MV 2010 discharged its single-arcsine applications by citation to MO 2009. The verbatim MO/MV statements are recorded in <a href="#MO-primitives">[MO-primitives]</a> / <a href="#MV-primitives">[MV-primitives]</a>. Two distinct things must be kept apart: (a) the citation-discharge of MO/MV at $K_{\mathrm{ms}}$ is mathematical content, dispatched in the same way MV 2010 dispatched its own applications of MO 2009; (b) the absence of a packaged mathlib `v4.29.1` $L^{1}\cap L^{2}$ Plancherel + period-$u$ Parseval API in the form the bundle consumes is engineering (the building blocks live in `Sidon.TorusParseval` and `Sidon.FourierAux`), but irrelevant to the validity of (a). No new analytic content is introduced beyond what MV cites. |
-| Master inequality + $z_1$-absorption + quadratic inversion + slack soundness + kernel admissibility | Proved analytically in MV §3 (English-prose proofs) | **Strictly above MV**: formally proved in Lean (axiom-free outside the two numerical user axioms, ~7513 lines across `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`); 0 `sorry` |
+| Master inequality + $z_1$-absorption + quadratic inversion + slack soundness + kernel admissibility | Proved analytically in MV §3 (English-prose proofs) | **Strictly above MV**: formally proved in Lean (axiom-free outside the numerical user axioms — two for the conditional headline, four for the unconditional — across 30 modules / ~15,573 lines: the 13 core `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`, plus the 17 axiom-free `Sidon/Constructor/*` modules mechanising `of_admissible`); 0 `sorry` |
 | Numerical anchors ($K_2$, $a$, $S_1$, $m_G$, $k_1$) | Mathematica 6 / LOQO; values reported as decimals (MV p. 7); no public certificate; no independent re-verification documented | **Strictly above MV**: `flint.arb` interval arithmetic at 256-bit precision, outward-rounded to exact rationals; SHA-256-anchored certificate `multiscale_arcsine_1292.json`; cross-check at 50 decimal digits via `audit3_mpmath.py` (independent arbitrary-precision library, same mathematical formulas) |
 | Closing arithmetic | Numerical substitution (MV p. 7) | **Strictly above MV**: exact rational arithmetic, $\tau-\Phi(1292/1000)\ge 307/3190000\ge 9.6\times 10^{-5}$, machine-checked in Lean by `norm_num` |
 
@@ -386,7 +408,7 @@ Lean 4 (axiom-free, 0 `sorry`), whereas MV's counterparts are
 English-prose proofs.
 
 **Trust set.** Beyond Lean's logical axioms, the bound depends on
-exactly two items, of the same shape every published
+two *kinds* of input, of the same shape every published
 computer-assisted real-number proof uses (Flyspeck, PFR,
 Cohn–Elkies sphere-packing):
 
@@ -394,11 +416,18 @@ Cohn–Elkies sphere-packing):
   Lemma 3.1, applied to the admissible kernel $K_{\mathrm{ms}}$, and
   Schinzel–Schmidt 2002 Theorem 1 for the $\mathcal{F}\to L^{2}$
   reduction. Cited identically to MV 2010; any reader who accepts
-  MV 2010 on these citations accepts ours.
+  MV 2010 on these citations accepts ours. (For the conditional
+  headline these enter as the `ExtremiserPrimitives f` hypothesis; for
+  the unconditional headline they are mechanised axiom-free inside
+  `ExtremiserPrimitives.of_admissible`.)
 * *Numerical anchors* — $K_2$, $a$, and the supporting $S_1$, $m_G$,
   $k_1$, $w_{\min}$ for the new three-scale kernel and 200-mode $G$.
   These are **new computations** specific to the kernel/multiplier
-  pair, *not* facts contained in MV 2010. The two Lean axioms bind
+  pair, *not* facts contained in MV 2010. The Lean numerical axioms
+  (two for the conditional headline — $K_2$ and $a$; four for the
+  unconditional headline — additionally $\min G \ge 998/1000$ and the
+  lattice positivity $\widetilde{K_{\mathrm{ms}}}(j)>0$ on
+  $j\in\{1,\dots,200\}$) bind
   defined analytic functionals over the explicit kernel:
   `K2_analytic_le_K2UpperQ` asserts
   $\int_{\mathbb{R}} K_{\mathrm{ms}}^{2}\,d\mathrm{vol} \le 47897/10000$,
@@ -435,10 +464,12 @@ classical analysis + new computer-assisted numerics.
 
 ### Detailed accounting
 
-- **Analytic content: cited, not novel.** The headline takes an
+- **Analytic content: cited, not novel.** The conditional headline takes an
   analytic-primitives record (`ExtremiserPrimitives f`) whose fields are formal
   restatements of published, refereed results *evaluated at the
-  specific pair $(f, K_{\mathrm{ms}})$*: the period-$u$ torus split
+  specific pair $(f, K_{\mathrm{ms}})$* (the unconditional headline
+  instead *derives* these fields axiom-free inside
+  `ExtremiserPrimitives.of_admissible`): the period-$u$ torus split
   (MO 2009 Lemma 2.1; MV 2010 Eq.(3) / Lemma 3.1(3)); the
   constant-plus-tail Parseval split for $\int(f\circ f)\,K$ (MO 2009
   Lemma 3.2 proof; MV 2010 Lemma 3.3 proof); and the lattice
@@ -470,9 +501,13 @@ classical analysis + new computer-assisted numerics.
   packaged into a one-call constructor — and is irrelevant to the
   validity of (a). No analytic content beyond what MV 2010 cites is
   introduced.
-- **Numerical content: two `flint.arb` certificates.** Inside Lean,
+- **Numerical content: `flint.arb` certificates.** Inside Lean,
   $K_2 \le 47897/10000$ and $a \ge 20925/100000$ are user axioms
-  recording outputs of the Arb certifier; they are decidable
+  recording outputs of the Arb certifier (the two reached by the
+  conditional headline); the unconditional headline reaches two more,
+  $\min_{[0,1/4]} G \ge 998/1000$ and the lattice positivity
+  $\widetilde{K_{\mathrm{ms}}}(j)>0$ for $j\in\{1,\dots,200\}$. All are
+  decidable
   inequalities, established by the trusted external computation, and
   cross-checked at 50 decimal digits by `mpmath` (independent
   arbitrary-precision implementation; same mathematical formulas, so
@@ -543,8 +578,12 @@ classical analysis + new computer-assisted numerics.
 	  **loc:** `lower_bound_proof.tex`, Proposition "Strict failure at the rational witness" (`prop:fail`, lines 1029–1037; proof through line 1068).
 	  **quote:** "$\Phi(1292/1000) \le 66879/20000 = 3.34395 < 4267003/1276000 \le \tau$, with margin $\tau-\Phi(1292/1000) \ge 307/3190000 \ge 9.6\times10^{-5} > 0$." The Arb cell-search using the sharper refined inequality (which involves $k_1$) independently re-certifies $M_{\mathrm{cert}}\ge 1.29232$.
 	- <a id="PBV-lean"></a>**[PBV-lean]**
-	  **loc:** `lean/Sidon/MultiScale.lean`: numerical axioms `K2_analytic_le_K2UpperQ` at line 827 and `gain_analytic_ge_gainLowerQ` at line 855; `ExtremiserPrimitives` structure at line 1146; headline `autoconvolution_ratio_ge_1292_1000` at line 1339; slack-soundness theorems `K_two_upper_bound`, `k_one_lower_bound`, `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound` at lines 871–893; `autoconvolution_ratio` definition in `Sidon.Defs`. The previously exported Schwartz variants (`autoconvolution_ratio_ge_1292_1000_schwartz` and `_schwartz_residual`) and their backing modules (`Sidon.MultiScaleSchwartz` and `Sidon.SchwartzAtomicDischarge`) were retired by the S1+S2 refactor and no longer exist in the repository; only the general headline survives. (The file names `BundleEq2Schwartz.lean` and `BundleEq3Schwartz.lean` retain the `Schwartz` suffix from the pre-S1+S2 module layout, but their contents now serve the general bundle discharge for the headline; renaming is a deferred cosmetic.) `mathlib v4.29.1`, commit `5e932f97dd25535344f80f9dd8da3aab83df0fe6`.
-	  **quote:** The only kernel-specific user axioms are `K2_analytic_le_K2UpperQ` ($K_2 \le 47897/10000$) and `gain_analytic_ge_gainLowerQ` ($a \ge 20925/100000$). The general headline takes `(P : ExtremiserPrimitives f)` as a hypothesis and concludes `autoconvolution_ratio f ≥ 1292/1000`. The four MV Lemma 3.1 output fields `hEq1`, `hEq2`, `hEq3_ge`, `hEq4` of `ExtremiserPrimitives` are Lean restatements of MV 2010 Lemma 3.3 / MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 — see <a href="#MV-primitives">[MV-primitives]</a> and <a href="#MO-primitives">[MO-primitives]</a> for the verbatim source statements. The remaining bundle fields are five real parameters (`m_G`, `S_G`, `S_cos`, `LHS1`, `LHS2`) and four numerical-sanity hypotheses (`K2_ge_1`, `R_ge_1`, `S_G_pos`, `gain_eq`). The slack-soundness theorems are one-line `norm_num` checks.
+	  **loc (core module).** `lean/Sidon/MultiScale.lean`: numerical axioms `K2_analytic_le_K2UpperQ` at line 1001, `gain_analytic_ge_gainLowerQ` at line 1029, and `min_G_analytic_ge_minGLowerQ` at line 1068; `ExtremiserPrimitives` structure at line 1468; conditional headline `autoconvolution_ratio_ge_1292_1000` at line 1589; slack-soundness theorems `K_two_upper_bound`, `k_one_lower_bound`, `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound` at lines 1093–1115; `autoconvolution_ratio` definition in `Sidon.Defs`. (Line anchors verified against source at `mathlib v4.29.1`, commit `5e932f97dd25535344f80f9dd8da3aab83df0fe6`.)
+	  **loc (constructor chain).** The unconditional headline and the admissibility-to-bundle constructor live under `lean/Sidon/Constructor/` (17 axiom-free modules, 7915 LoC): `ExtremiserPrimitives.of_admissible` at `Constructor/Assembly.lean:108`; unconditional headline `C1a_ge_1292_unconditional` at `Constructor/Assembly.lean:239`; the fourth numerical axiom `K_ms_fourier_lattice_pos_active` at `Constructor/LatticePositivity.lean:187`. The whole formalisation totals 30 modules (~15.6 kLoC: 13 core `Sidon/*.lean` at 7658 LoC plus the 17 `Sidon/Constructor/*.lean` at 7915 LoC). The previously exported Schwartz variants (`autoconvolution_ratio_ge_1292_1000_schwartz` and `_schwartz_residual`) and their backing modules (`Sidon.MultiScaleSchwartz` and `Sidon.SchwartzAtomicDischarge`) were retired by the S1+S2 refactor and no longer exist in the repository. (The file names `BundleEq2Schwartz.lean` and `BundleEq3Schwartz.lean` retain the `Schwartz` suffix from the pre-S1+S2 module layout, but their contents now serve the general bundle discharge for the headline; renaming is a deferred cosmetic.)
+	  **axiom inventory (two headlines).** The formalisation exports two headlines with distinct dependency closures:
+	  • *Conditional* `autoconvolution_ratio_ge_1292_1000` takes `(P : ExtremiserPrimitives f)` as a hypothesis and concludes `autoconvolution_ratio f ≥ 1292/1000`; its user-axiom closure is exactly two kernel-specific facts, `K2_analytic_le_K2UpperQ` ($K_2 \le 47897/10000$) and `gain_analytic_ge_gainLowerQ` ($a \ge 20925/100000$).
+	  • *Unconditional* `C1a_ge_1292_unconditional` takes only raw admissibility hypotheses (`Integrable f`, `MemLp f 2`, $\mathrm{supp}\,f \subseteq (-1/4,1/4)$, $f\ge 0$, $\int f = 1$) and *constructs* the bundle via `ExtremiserPrimitives.of_admissible`; its user-axiom closure is four kernel-specific facts — the two above plus `min_G_analytic_ge_minGLowerQ` ($\min_{[0,1/4]} G \ge 998/1000$) and `K_ms_fourier_lattice_pos_active` ($\widetilde{K_{\mathrm{ms}}}(j) > 0$ for every $j\in\{1,\dots,200\}$). All four are logically decidable, `flint.arb`-backed at 256-bit precision, mpmath-corroborated, and SHA-256-anchored. Both closures additionally reach Lean's three core logical axioms (`propext`, `Classical.choice`, `Quot.sound`).
+	  The four MV Lemma 3.1 output fields `hEq1`, `hEq2`, `hEq3_ge`, `hEq4` of `ExtremiserPrimitives` are Lean restatements of MV 2010 Lemma 3.3 / MO 2009 Lemmas 2.1, 2.2, 3.2, 3.3 — see <a href="#MV-primitives">[MV-primitives]</a> and <a href="#MO-primitives">[MO-primitives]</a> for the verbatim source statements. For the conditional headline these fields are assumed; for the unconditional headline `of_admissible` discharges them axiom-free (modulo the two additional certifier axioms). The remaining bundle fields are five real parameters (`m_G`, `S_G`, `S_cos`, `LHS1`, `LHS2`) — bound to the concrete analytic functionals via five `*_eq` hypothesis fields (`m_G_eq`, `S_G_eq`, `S_cos_eq`, `LHS1_eq`, `LHS2_eq`), so the bundle forces the canonical $(f, K_{\mathrm{ms}})$ values rather than arbitrary reals — together with the numerical-sanity hypotheses (`K2_ge_1`, `R_ge_1`, `S_G_pos`, `gain_eq`). The slack-soundness theorems are one-line `norm_num` checks.
 	- <a id="PBV-cert"></a>**[PBV-cert]**
 	  **loc:** `delsarte_dual/grid_bound_alt_kernel/certificates/reference_anchors.json`, `multiscale_arcsine_1292.json`; `audit3_mpmath.py`; `README.md`.
 	  **quote:** `multiscale_arcsine_1292.json` has `sha256_of_body = 5fa9ae372b23d07f73f41d73c1740926115eb494b6ba3840551458ba8143a7c2` and `M_cert = 66167/51200` ($1.29232421875$). `reference_anchors.json` records the anchors ($k_1=0.9212465899364083$, $K_2\in[4.7888234212591545,\,4.7889051816332424]$, $S_1=29.8409064555132666$, $m_G=0.9999798743824747$, $a=0.2100921474866837$) and the kernel parameters (`deltas` $138/55/25\,/1000$, equivalently $69/500$, $11/200$, $1/40$; `lambdas` $85/10/5\,/100$, equivalently $17/20$, $1/10$, $1/20$; `u` $638/1000 = 319/500$; `n_coeffs` $200$; `prec_bits` $256$). `audit3_mpmath.py` recomputes $K_2$ and $a$ at 50 digits independently of `flint.arb`.

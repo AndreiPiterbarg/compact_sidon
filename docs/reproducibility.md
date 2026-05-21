@@ -116,7 +116,8 @@ lake env lean AxiomCheckTorus.lean     # torus-Parseval axiom closure
 
 The four per-module check files print the axiom dependency closure of
 their respective imports. After `lake build`, `#print axioms
-Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000` reports
+Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000` (the *conditional*
+headline, which assumes an `ExtremiserPrimitives f` bundle) reports
 
 ```
 'Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000' depends on axioms:
@@ -125,21 +126,37 @@ Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000` reports
    Sidon.MultiScale.gain_analytic_ge_gainLowerQ]
 ```
 
-Exactly **two** user axioms appear in the dependency closure, both
-*verifiable-by-computation* (i.e. rigorously certified numerical
-assertions): each is a logically decidable inequality about a specific
-real number, backed by `flint.arb` at 256-bit precision via the driver
-[`../delsarte_dual/grid_bound_alt_kernel/bisect_alt_kernel.py`](../delsarte_dual/grid_bound_alt_kernel/bisect_alt_kernel.py).
+Exactly **two** user axioms appear, both *verifiable-by-computation*.
+The *unconditional* headline `#print axioms
+Sidon.MultiScale.C1a_ge_1292_unconditional` (which constructs the bundle
+from raw admissibility via `ExtremiserPrimitives.of_admissible`) reports
+**four** user axioms:
+
+```
+'Sidon.MultiScale.C1a_ge_1292_unconditional' depends on axioms:
+  [propext, Classical.choice, Quot.sound,
+   Sidon.MultiScale.K2_analytic_le_K2UpperQ,
+   Sidon.MultiScale.gain_analytic_ge_gainLowerQ,
+   Sidon.MultiScale.min_G_analytic_ge_minGLowerQ,
+   Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active]
+```
+
+All four are *verifiable-by-computation* (i.e. rigorously certified
+numerical assertions): each is a logically decidable inequality about a
+specific real number, backed by `flint.arb` at 256-bit precision via the
+driver
+[`../delsarte_dual/grid_bound_alt_kernel/bisect_alt_kernel.py`](../delsarte_dual/grid_bound_alt_kernel/bisect_alt_kernel.py)
+and mpmath-corroborated.
 They appear as `axiom` rather than `theorem` only because mathlib does
 not yet ship a Bessel interval-arithmetic library; the FlySpeck
 formalisation of Kepler's conjecture used the same convention.
 
-- `K2_analytic_le_K2UpperQ`: $K_2(K_{\rm ms}) := \int K_{\rm ms}^2 \le
+- `K2_analytic_le_K2UpperQ` (both headlines): $K_2(K_{\rm ms}) := \int K_{\rm ms}^2 \le
   47897/10000$. Analogue of "Mathematica computed $K_2 \approx 4.788$"
   in MV 2010, but backed by `flint.arb` at 256-bit precision (paper
   Lemma 4.2). The integrand $K_{\rm ms}^2$ is the explicit three-scale
   arcsine autoconvolution.
-- `gain_analytic_ge_gainLowerQ`: $\texttt{gain\_analytic} =
+- `gain_analytic_ge_gainLowerQ` (both headlines): $\texttt{gain\_analytic} =
   (4/u_{\rm real}) \cdot \texttt{min\_G\_analytic}^2 /
   \texttt{S\_1\_analytic} \ge 20925/100000$. The RHS is a *concrete
   defined* `noncomputable def` (post-Option-B, 2026-05-20) built from
@@ -150,6 +167,17 @@ formalisation of Kepler's conjecture used the same convention.
   `Ktilde_ms j := Σᵢ λᵢ · besselJ0(πjδᵢ/u)²` built on
   `Sidon.Bessel.besselJ0`. Analogue of MV's Mathematica citation of $a$,
   certifier-coupled in arb (paper Lemmas 4.3--4.5).
+- `min_G_analytic_ge_minGLowerQ` (unconditional headline only):
+  $\texttt{min\_G\_analytic} \ge \texttt{minGLowerQ} = 998/1000$, i.e.
+  $\min_{[0,1/4]} G \ge 0.998$ (32768-cell Taylor branch-and-bound;
+  paper Lemma 4.3). It enters only the unconditional closure, where the
+  constructor `of_admissible` (rather than a consumer-supplied bundle)
+  must establish the multiplier floor.
+- `Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active`
+  (unconditional headline only): $\widetilde{K_{\rm ms}}(j) > 0$ for
+  every $j \in \{1, \dots, 200\}$ (so the QP denominators in $S_1$ are
+  finite; certifier minimum $\ge 2.08 \times 10^{-4}$ at $j = 147$,
+  paper Lemma 4.6).
 
 #### Cross-binding the 200 QP coefficients
 
@@ -168,18 +196,26 @@ python audit_qp_coeffs.py
 after either source is regenerated; exit code `0` iff the 200
 integer numerators are bit-identical in both files.
 
-In addition to these two axioms, the headline theorem carries an
+The *conditional* headline carries, in addition to its two axioms, an
 **analytic admissibility-bundle record** `ExtremiserPrimitives f`
 whose fields are Lean restatements of MO~2009 Lemmas~3.1--3.4 /
 MV~2010 Lemma 3.1 outputs (Eqs.(1)--(4)) at the specific pair
 $(f, K_{\rm ms})$. Those lemmas apply to $K_{\rm ms}$ directly
 (a pdf supported in $[-\delta_1, \delta_1]$ with
 $\widetilde{K_{\rm ms}}(j) \ge 0$ and $K_{\rm ms} \in L^2$), and the
-paper discharges the bundle fields by direct citation. The Lean
-theorem retains them as named hypothesis fields only because the
-$L^1 \cap L^2$ Plancherel + period-$u$ Parseval bridge that
-`Sidon.TorusParseval` and `Sidon.FourierAux` are built around has not
-yet been packaged into a one-line mathlib call.
+paper discharges the bundle fields by direct citation; the conditional
+Lean theorem retains them as named hypothesis fields. The *unconditional*
+headline removes this hypothesis: the bundle is *constructed* axiom-free
+from raw admissibility by `ExtremiserPrimitives.of_admissible` (in
+`Sidon.Constructor.Assembly`), which mechanises the $L^1 \cap L^2$
+Plancherel + period-$u$ Parseval bridge built around
+`Sidon.TorusParseval`, `Sidon.FourierAux`, and the 17-module
+`Sidon.Constructor.*` chain. This establishes $C_{1a} \ge 1.292$ to at
+least the rigour of the accepted MV 2010 proof of $C_{1a} \ge 1.2748$,
+strengthened by the axiom-free mechanisation of the analytic content and
+arb-backed, mpmath-corroborated numerics; the honest caveat is that the
+numerical axioms remain computer-assisted and the verification to date is
+rigorous AI-agent self-audit rather than third-party referee review.
 
 The previous macro axiom `MV_master_inequality_for_extremiser` is
 **now a Lean theorem** (post-Wave-12 restructuring); its
@@ -192,8 +228,9 @@ statements (`K_two_upper_bound`, `k_one_lower_bound`,
 `S_one_upper_bound`, `min_G_lower_bound`, `gain_lower_bound`) are also
 Lean *theorems* -- none of them contributes an axiom to the dependency
 closure. See [`formalization.md`](formalization.md) for the axiom
-statements, the theorem statements, and the module layout (thirteen
-modules totalling roughly 7.5 kLoC). The Schwartz-class headline
+statements, the theorem statements, and the module layout (30 modules
+totalling ~15.6 kLoC: 13 core `Sidon/*.lean` plus 17
+`Sidon/Constructor/*.lean`). The Schwartz-class headline
 variants previously listed here
 (`autoconvolution_ratio_ge_1292_1000_schwartz` and
 `autoconvolution_ratio_ge_1292_1000_schwartz_residual`) were retired

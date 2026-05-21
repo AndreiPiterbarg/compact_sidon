@@ -8,6 +8,19 @@ master inequality). The fourteen checks below are independent and
 local: each can be carried out without reading the others, and each
 returns a binary verdict (CONFIRM / FLAG) on a single claim.
 
+The bound is established to at least the rigour of the accepted
+Matolcsi--Vinuesa 2010 proof of $C_{1a} \ge 1.2748$: MV combine formal
+analytic lemmas, Mathematica numerics, and algebra; this work matches or
+strengthens each layer (analytic content cited to MO 2009 / MV 2010 at
+the admissible kernel $K_{\rm ms}$ and additionally mechanised
+axiom-free in Lean for the unconditional headline; numerics of the same
+kind as MV's Mathematica citations but arb-backed at 256-bit and
+mpmath-corroborated; assembly exact-rational with positive margin
+$307/3190000$). Honest caveat: the numerical axioms (two for the
+conditional headline, four for the unconditional) remain
+computer-assisted, and these checks are a rigorous AI-agent self-audit,
+not third-party referee review.
+
 Authoritative artefacts:
 
 | Artefact | Path |
@@ -167,22 +180,37 @@ the certificate's $S_1 \le 29.841$.
 ### 10. Lean module sanity
 
 `lake build Sidon` returns exit code zero with no `sorry` warnings,
-across all thirteen Lean modules under `lean/Sidon/` (`Defs`, `Bessel`,
+across all **30 modules (~15.6 kLoC)**: the 13 core modules under
+`lean/Sidon/` (`Defs`, `Bessel`,
 `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`,
 `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`,
-`BundleEq4`, `BilinearParseval`, `MultiScale`; ~7.5 kLoC total on top
+`BundleEq4`, `BilinearParseval`, `MultiScale`; 7658 LoC) and the 17
+modules under `lean/Sidon/Constructor/` (7915 LoC), on top
 of `mathlib` pinned to `v4.29.1` / commit
-`5e932f97dd25535344f80f9dd8da3aab83df0fe6`). All modules are
-axiom-free except `MultiScale`, which declares exactly **two
-verifiable-by-computation axioms** (rigorously certified numerical
-assertions) in the headline's dependency closure:
+`5e932f97dd25535344f80f9dd8da3aab83df0fe6`. The formalisation exports
+**two headlines** with distinct axiom budgets:
 
-- `K2_analytic_le_K2UpperQ` -- the analytic functional
+- *Conditional* `autoconvolution_ratio_ge_1292_1000` (assumes an
+  `ExtremiserPrimitives f` bundle): exactly **two verifiable-by-computation
+  axioms**, both declared in `Sidon.MultiScale`.
+- *Unconditional* `C1a_ge_1292_unconditional` (in
+  `Sidon.Constructor.Assembly`; constructs the bundle from raw
+  admissibility via `ExtremiserPrimitives.of_admissible`): **four
+  verifiable-by-computation axioms** — the two above plus
+  `min_G_analytic_ge_minGLowerQ` (`Sidon.MultiScale`) and
+  `K_ms_fourier_lattice_pos_active`
+  (`Sidon.Constructor.LatticePositivity`).
+
+All modules are axiom-free except `Sidon.MultiScale` and
+`Sidon.Constructor.LatticePositivity`, which together declare the four
+axioms in the headlines' dependency closures:
+
+- `K2_analytic_le_K2UpperQ` (both headlines) -- the analytic functional
   $K_2(K_{\rm ms}) := \int K_{\rm ms}(x)^2\,\mathrm{d}\mathrm{volume}$
   is at most $\texttt{K2UpperQ} = 47897/10000$; verified by `flint.arb`
   at 256-bit precision (analogue of MV 2010's Mathematica citation of
   $K_2$).
-- `gain_analytic_ge_gainLowerQ` -- the *concrete defined* analytic
+- `gain_analytic_ge_gainLowerQ` (both headlines) -- the *concrete defined* analytic
   gain $\texttt{gain\_analytic} := (4 / u_{\rm real}) \cdot
   \texttt{min\_G\_analytic}^2 / \texttt{S\_1\_analytic}$ is at least
   $\texttt{gainLowerQ} = 20925/100000$. After **Option B** (2026-05-20)
@@ -195,17 +223,24 @@ assertions) in the headline's dependency closure:
   2010's Mathematica citation of $a$). Cross-binding of the 200
   coefficients between the JSON certificate and the Lean embedding
   is checked by the sibling script `audit_qp_coeffs.py`.
+- `min_G_analytic_ge_minGLowerQ` (unconditional headline only) --
+  $\texttt{min\_G\_analytic} \ge \texttt{minGLowerQ} = 998/1000$
+  ($\min_{[0,1/4]} G \ge 0.998$; 32768-cell Taylor B&B).
+- `K_ms_fourier_lattice_pos_active` (unconditional headline only) --
+  $\widetilde{K_{\rm ms}}(j) > 0$ for every $j \in \{1,\dots,200\}$
+  (certifier minimum $\ge 2.08 \times 10^{-4}$).
 
 The previous macro axiom `MV_master_inequality_for_extremiser` is
 now a Lean *theorem*, derived from the two verifiable-by-computation
 axioms plus the analytic admissibility-bundle record
-`ExtremiserPrimitives f` that the headline takes as its fifth
+`ExtremiserPrimitives f` that the conditional headline takes as its fifth
 argument. The bundle fields are Lean restatements of MO~2009 /
 MV~2010 Lemma 3.1 outputs (Eqs.(1)--(4)) at the pair $(f, K_{\rm ms})$,
 discharged in the paper by direct citation (those lemmas apply to
-$K_{\rm ms}$ directly). They are retained as Lean hypothesis fields
-only because the corresponding mathlib bridge has not yet been
-packaged into a one-call constructor.
+$K_{\rm ms}$ directly). For the conditional headline they are retained
+as Lean hypothesis fields only because the corresponding mathlib bridge
+had not yet been packaged into a one-call constructor; the unconditional
+headline now supplies exactly that constructor (`of_admissible`).
 
 The quadratic inversion `master_inequality_M_lower`, the
 slack-monotonicity lift `MV_master_via_slack_monotonicity`, the
@@ -216,7 +251,9 @@ five slack-soundness statements (`K_two_upper_bound`,
 `gain_lower_bound`) are Lean *theorems*. The `#print axioms`
 listing for `autoconvolution_ratio_ge_1292_1000` reports the two
 verifiable-by-computation user axioms plus Lean's three core logical
-axioms (`propext`, `Classical.choice`, `Quot.sound`).
+axioms (`propext`, `Classical.choice`, `Quot.sound`); the listing for
+`C1a_ge_1292_unconditional` reports the four verifiable-by-computation
+axioms plus the same three core logical axioms.
 
 ### 11. Reproducibility and certificate hash
 

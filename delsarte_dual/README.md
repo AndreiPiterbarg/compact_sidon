@@ -19,8 +19,11 @@ the published-vs-unaudited prior-bounds discussion). The accompanying
 writeup *A New Lower Bound for the Supremum of Autoconvolutions* is
 at the repository root in
 [`lower_bound_proof.pdf`](../lower_bound_proof.pdf); the Lean 4
-formalisation of the same statement is at
-[`lean/Sidon/MultiScale.lean`](../lean/Sidon/MultiScale.lean).
+formalisation of the same statement is under
+[`lean/Sidon/`](../lean/Sidon/) — the conditional headline in
+[`MultiScale.lean`](../lean/Sidon/MultiScale.lean) and the unconditional
+headline `C1a_ge_1292_unconditional` in
+[`Constructor/Assembly.lean`](../lean/Sidon/Constructor/Assembly.lean).
 
 ## Pipeline
 
@@ -151,13 +154,39 @@ Exit code `0` on success; `1` on any failure.
 | Headline rational       | `1292/1000` (used in the paper and Lean)|
 
 These are the values quoted by the writeup and by the slack rationals
-in `lean/Sidon/MultiScale.lean`; the module's two verifiable-by-computation
-user axioms (`K2_analytic_le_K2UpperQ` and `gain_analytic_ge_gainLowerQ`)
-substitute these rational slacks for the analytic `K_2` and gain
-`(4/u)·min_G²/S_1`.  (`MV_master_inequality_for_extremiser` is a Lean
-*theorem* assembled from those two axioms plus the `ExtremiserPrimitives f`
-bundle, not itself an axiom.)  The values are reproduced exactly by the
-production driver above, and recomputed independently by `certify.py`.
+in `lean/Sidon/MultiScale.lean`. The Lean formalisation exports two
+headlines, which differ only in how the analytic admissibility primitives
+are supplied:
+
+  * `autoconvolution_ratio_ge_1292_1000` (conditional) takes an
+    `ExtremiserPrimitives f` bundle as a hypothesis; its dependency
+    closure adds exactly **two** verifiable-by-computation user axioms
+    (`K2_analytic_le_K2UpperQ` and `gain_analytic_ge_gainLowerQ`), which
+    substitute these rational slacks for the analytic `K_2` and gain
+    `(4/u)·min_G²/S_1`.
+  * `C1a_ge_1292_unconditional` (unconditional) carries only raw
+    admissibility hypotheses (`Integrable f`, `MemLp f 2`,
+    `supp f ⊆ (-1/4, 1/4)`, `f ≥ 0`, `∫ f = 1`) and *constructs* the
+    bundle via `ExtremiserPrimitives.of_admissible`; its dependency
+    closure adds **four** verifiable-by-computation axioms — the two
+    above plus `min_G_analytic_ge_minGLowerQ` (`min G ≥ 998/1000`) and
+    `K_ms_fourier_lattice_pos_active` (`K̃_ms(j) > 0` for every
+    `j ∈ [1, 200]`).
+
+All four axioms are logically decidable inequalities about specific real
+numbers, certified in `flint.arb` at 256-bit precision and
+mpmath-corroborated. (`MV_master_inequality_for_extremiser` is a Lean
+*theorem* assembled from those axioms plus the bundle, not itself an
+axiom.) The values are reproduced exactly by the production driver above,
+and recomputed independently by `certify.py`.
+
+This establishes `C_{1a} ≥ 1.292` to at least the rigour of
+Matolcsi–Vinuesa 2010 (`C_{1a} ≥ 1.2748`, accepted): the analytic
+content is proven (cited to MO 2009 / MV 2010 at the admissible kernel
+`K_ms`, and additionally mechanised axiom-free in Lean), the numerics are
+the same kind as MV's Mathematica citations but arb-backed at 256-bit and
+mpmath-corroborated, and the closing assembly is exact rational arithmetic
+with a positive margin `307/3190000`.
 
 ## Tests
 

@@ -57,12 +57,18 @@ two user).
 | `Sidon/BundleEq3Schwartz.lean` | 371 | Discharge of bundle field `hEq3_ge` (MV Eq.(3), inequality form). |
 | `Sidon/BundleEq4.lean` | 445 | Discharge of bundle field `hEq4` (MV Eq.(4)). |
 | `Sidon/BilinearParseval.lean` | 434 | Bilinear Parseval pairings used by the bundle discharges. |
-| `Sidon/MultiScale.lean` | 1394 | Headline + verifiable-by-computation axioms + admissibility bundle. |
+| `Sidon/MultiScale.lean` | 1648 | Conditional headline + 3 verifiable-by-computation axioms (K2, gain, min_G) + admissibility bundle. |
 | `AxiomCheck{BundleDefs,Fourier,MV,Torus}.lean` | — | Per-module axiom inventories. |
 | `lakefile.lean`, `lake-manifest.json`, `lean-toolchain` | — | Lake build configuration, Mathlib lock, pinned toolchain. |
 
-All twelve auxiliary modules are axiom-free; the 1394-line
-`Sidon.MultiScale` houses the two verifiable-by-computation axioms.
+The twelve auxiliary core modules are axiom-free; the 1648-line
+`Sidon.MultiScale` houses three of the four verifiable-by-computation
+axioms (K2, gain, min_G).  Beyond these 13 core modules, the
+`Sidon/Constructor/` layer (17 modules, 7915 LoC, all axiom-free except
+`LatticePositivity`, which declares the fourth axiom
+`K_ms_fourier_lattice_pos_active`) *constructs* the admissibility bundle
+and proves the **unconditional** headline (below): 30 modules /
+~15.6 kLoC in total.
 Earlier exploratory modules (legacy monolithic proof, Algorithm /
 CoarseCascade drafts, single-scale and 2-scale Cascade variants,
 alternative-kernel directions) have been moved to `../archive/lean/`.
@@ -87,11 +93,28 @@ Equivalent restatements `autoconvolution_ratio_ge_1_292` (decimal form)
 and `C1a_ge_1292` (`1292/1000 ≤ autoconvolution_ratio f`) are exported
 from the same namespace.
 
+The headline above is **conditional**: it takes an `ExtremiserPrimitives f`
+hypothesis record (below).  The **unconditional** headline
+`Sidon.MultiScale.C1a_ge_1292_unconditional` (in
+`Sidon/Constructor/Assembly.lean`) takes ONLY admissibility —
+`Integrable f`, `MemLp f 2`, `Function.support f ⊆ Set.Ioo (-(1/4)) (1/4)`,
+`∀ x, 0 ≤ f x`, `∫ f = 1` — and *constructs* the bundle via
+`ExtremiserPrimitives.of_admissible`, carrying no analytic hypothesis.
+It reaches **four** verifiable-by-computation axioms (the two below plus
+`min_G_analytic_ge_minGLowerQ` and
+`Sidon.Constructor.LatticePositivity.K_ms_fourier_lattice_pos_active`).
+
 ## Axiom inventory
 
 Beyond Lean's three core axioms (`Classical.choice`, `propext`,
-`Quot.sound`), the headline reaches exactly **two user axioms**, both
-declared in `Sidon/MultiScale.lean`:
+`Quot.sound`), the **conditional** headline reaches exactly **two user
+axioms** (declared in `Sidon/MultiScale.lean`); the **unconditional**
+headline additionally reaches `min_G_analytic_ge_minGLowerQ`
+(`min_{[0,1/4]} G ≥ 998/1000`, in `Sidon/MultiScale.lean`) and
+`K_ms_fourier_lattice_pos_active` (`∀ j ∈ [1,200], K̃_ms(j) > 0`, in
+`Sidon/Constructor/LatticePositivity.lean`) — four in total.  All four
+are logically decidable, `flint.arb`-backed at 256-bit, and
+independently mpmath-corroborated.  The two common to both headlines:
 
 | Axiom | Statement |
 |---|---|
@@ -146,10 +169,27 @@ The paper discharges `hEq1`, `hEq2`, `hEq4` by direct citation; the
 inequality form `hEq3_ge` (which replaced the earlier equality `hEq3`)
 is genuinely Lean-derivable from finite-`J` Parseval + Bochner
 positivity alone (`Sidon.MVLemmas.mv_eq3_ge` and `mv_eq3_ge_of_eq`).
-The bundle is retained as a named hypothesis only because mathlib
-lacks a one-call $L^1 \cap L^2$ Plancherel + period-$u$ Parseval
-constructor in the form `Sidon.MVLemmas` consumes — an engineering
-note, not a logical gap.
+In the **conditional** headline the bundle is a hypothesis (discharged
+in the paper by direct citation, exactly as MV~2010 did at single
+arcsine).  It is now also **constructed unconditionally** in
+`Sidon/Constructor/`: `ExtremiserPrimitives.of_admissible` builds the
+record from raw admissibility, yielding `C1a_ge_1292_unconditional`.
+The period-$u$ Parseval pairing (MO~2009 Lemma~2.1) and the
+$L^1 \cap L^2$ machinery — formerly only-a-hypothesis because mathlib
+lacked them — are now proven axiom-free
+(`Constructor.PoissonSampling`, `MOLemma21`, `YoungConvolution`,
+`Eq2Period1`, `CauchySchwarzFloor`).
+
+**Rigor relative to Matolcsi–Vinuesa.**  This establishes
+$C_{1a} \ge 1.292$ to at least the rigor of MV~2010 (the accepted proof
+of $C_{1a} \ge 1.2748$): the analytic content is proven — by citation
+to MO~2009 / MV~2010 applied to $K_{\rm ms}$ as MV did, and now also
+mechanized axiom-free in Lean — and the numerical content is the same
+*kind* of computer-checked fact as MV's Mathematica citations, but
+backed by `flint.arb` interval arithmetic at 256-bit (rigorous, not
+heuristic) and mpmath-corroborated.  The four numerical axioms remain
+(computer-assisted rigor, not a fully kernel-checked numeric proof);
+verification is by rigorous self-audit, not third-party referee review.
 
 ## Slack-soundness theorems
 
