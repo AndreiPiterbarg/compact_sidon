@@ -151,19 +151,29 @@ The five resulting functionals are evaluated rigorously in
 no-$z_1$ quadratic master inequality, applied to the rounded rational
 anchors, yields strict failure at $M=1292/1000$ with margin
 $\tau-\Phi(M)\ge 9.6\times 10^{-5}$.  The analytic reduction is
-formalized in Lean~4 across $13$ modules ($\approx 7500$ lines)
-rooted at \texttt{lean/Sidon/MultiScale.lean}; the headline theorem
-\texttt{autoconvolution\_ratio\_ge\_1292\_1000} reaches Lean's three
-core axioms together with exactly two numerical user axioms recording
-the certifier's outputs at the rational slacks (the $L^2$ integral
-of $\Kms$ and the gain ratio $(4/u)\,m_G^{\,2}/S_1$; see
-Section~\ref{subsec:proof-lean}). The quadratic inversion and the
-slack-soundness statements are Lean theorems.  The Lean headline
-takes an \texttt{ExtremiserPrimitives}\,$f$ hypothesis record
-encoding the outputs of MO~2009 Lemmas~3.1--3.4 / MV~2010
-Lemma~3.1 at $(f,\Kms)$; the paper discharges those record fields
-by direct citation, exactly as MV~2010 cited MO~2009 for the
-single-arcsine instance.
+formalized in Lean~4 across $30$ modules ($\approx 15.5$~thousand
+lines) rooted at \texttt{lean/Sidon/MultiScale.lean}, with two
+machine-checked headline theorems.  A \emph{conditional} headline
+\texttt{autoconvolution\_ratio\_ge\_1292\_1000} takes an
+\texttt{ExtremiserPrimitives}\,$f$ hypothesis record encoding the
+outputs of MO~2009 Lemmas~3.1--3.4 / MV~2010 Lemma~3.1 at
+$(f,\Kms)$ --- which the paper discharges by direct citation, exactly
+as MV~2010 cited MO~2009 for the single-arcsine instance --- and
+reaches Lean's three core axioms together with exactly two numerical
+user axioms recording the certifier's outputs at the rational slacks
+(the $L^2$ integral of $\Kms$ and the gain ratio $(4/u)\,m_G^{\,2}/S_1$).
+A second, \emph{unconditional} headline
+\texttt{C1a\_ge\_1292\_unconditional} strengthens this: it takes only
+the admissibility hypotheses on $f$ (nonnegativity, support in
+$(-1/4,1/4)$, $L^1\cap L^2$, unit mass) and constructs the bundle
+internally via \texttt{ExtremiserPrimitives.of\_admissible}, so no
+hypothesis record is carried.  Its dependency closure reaches the
+same three core axioms together with four numerical user axioms (the
+two above, plus the certified lower bound $m_G\ge 998/1000$ and the
+active-set lattice positivity $\widetilde{\Kms}(j)>0$ for
+$1\le j\le 200$).  The quadratic inversion and the slack-soundness
+statements are Lean theorems throughout; see
+Section~\ref{subsec:proof-lean}.
 \end{abstract}
 
 % ======================================================================
@@ -266,17 +276,18 @@ real-number results (cf.\ Flyspeck for Kepler).
 Independently, the entire analytic reduction --- the master
 inequality, its inversion, and the admissibility of the three-scale
 kernel --- is mechanized in the Lean~4 proof
-assistant~\cite{Lean,Mathlib} ($13$ modules, $\approx 7500$ lines, no
-\texttt{sorry}).  The machine-checked headline theorem rests only on
-Lean's three logical axioms together with exactly two explicitly
-identified numerical inputs: decidable inequalities about concrete
-real analytic expressions inside Lean --- the $L^2$ integral of the
-three-scale kernel $\Kms$, and the gain ratio $(4/u)\,m_G^{\,2}/S_1$
-formed from the embedded $200$ rational QP coefficients and the
-closed-form Bessel-based periodic Fourier coefficients of $\Kms$ ---
-that play the role of the ``Mathematica computed this value''
-citations in~\cite{MV10}, here backed by certified interval
-arithmetic rather than heuristic numerics.
+assistant~\cite{Lean,Mathlib} ($30$ modules, $\approx 15.5$~thousand
+lines, no \texttt{sorry}).  The mechanization provides two
+machine-checked headline theorems.  The \emph{conditional} headline
+rests only on Lean's three logical axioms together with exactly two
+explicitly identified numerical inputs: decidable inequalities about
+concrete real analytic expressions inside Lean --- the $L^2$ integral
+of the three-scale kernel $\Kms$, and the gain ratio
+$(4/u)\,m_G^{\,2}/S_1$ formed from the embedded $200$ rational QP
+coefficients and the closed-form Bessel-based periodic Fourier
+coefficients of $\Kms$ --- that play the role of the ``Mathematica
+computed this value'' citations in~\cite{MV10}, here backed by
+certified interval arithmetic rather than heuristic numerics.
 
 The standard Fourier-analytic facts of MO~2009 Lemmas~3.1--3.4 /
 MV~2010 Lemma~3.1 are applied directly to the admissible
@@ -284,10 +295,29 @@ kernel~$\Kms$ (a pdf supported in $[-\delta_1,\delta_1]$ with
 nonnegative periodic Fourier coefficients and $\Kms\in L^2$); the
 paper discharges those outputs at $(f,\Kms)$ by direct citation,
 exactly as MV~2010 cited MO~2009 for the single-arcsine application.
-The Lean formalization retains them as named hypothesis fields
-because mathlib~v4.29.1 does not yet expose a one-call $L^1\cap L^2$
-Plancherel + period-$u$ Parseval constructor in the form consumed
-(Section~\ref{subsec:proof-lean}).
+The conditional headline carries those facts as the named fields of
+an \texttt{ExtremiserPrimitives}\,$f$ record.  The mechanization then
+goes one step further than the paper-level citation: a dedicated
+\texttt{Sidon.Constructor} layer ($17$ axiom-free modules) constructs
+this record for \emph{any} admissible $f$ --- mechanizing the $L^1$
+convolution Fourier identity, $\Kms\in L^2$ via the Young estimate
+$L^{4/3}\!\star L^{4/3}\!\to L^2$, a period-$u$ Poisson sampling
+lemma (generalizing mathlib's period-$1$/continuous version),
+MO~2009 Lemma~2.1 in period-$u$ Parseval form, the period-$1$
+Parseval identity for $f\circ f$, and the Cauchy--Schwarz floor.  The
+resulting \emph{unconditional} headline
+\texttt{C1a\_ge\_1292\_unconditional} takes only the admissibility
+hypotheses on $f$ and discharges the bundle internally via
+\texttt{ExtremiserPrimitives.of\_admissible}, removing the hypothesis
+record entirely (Section~\ref{subsec:proof-lean}).  It thereby
+establishes $C_{1a}\ge 1.292$ to at least the rigor of
+Matolcsi--Vinuesa~\cite{MV10}: the analytic content is both cited (as
+MV did) and now mechanized in Lean, the assembly is carried out in
+exact rational arithmetic, and the only inputs taken on trust are
+four computer-checked numerical facts of the same \emph{kind} as
+MV's Mathematica citations, but verified in \texttt{flint.arb}
+interval arithmetic at $256$-bit precision (rigorous, not heuristic)
+and corroborated independently in \texttt{mpmath}.
 
 \paragraph{Roadmap.}
 Section~\ref{sec:mv} recalls the Matolcsi--Vinuesa master inequality
@@ -578,11 +608,14 @@ pair $(f,K)$:
 \item $\displaystyle\int_{\R}(f*f)(x)\,K(x)\,dx \;\le\; \|f*f\|_{\Linf}$.
 \item $\displaystyle\int_{\R}(f\circ f)(x)\,K(x)\,dx \;\le\;
        1 + \sqrt{\|f*f\|_{\Linf}-1}\,\sqrt{K_2-1}$.
-\item $\displaystyle\frac{2}{u} \;+\; 2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
+\item $\displaystyle\frac{2}{u} \;+\; 2u\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
        \;\le\;
        \int_{\R}\bigl((f*f)(x)+(f\circ f)(x)\bigr)K(x)\,dx$,
-       where $u=1/2+\delta_{\max}$ and $\widetilde{f}(j),\widetilde{K}(j)$
-       are the period-$u$ Fourier coefficients (see
+       where $u=1/2+\delta_{\max}$,
+       $\widetilde{f}(j):=\tfrac1u\int_{-u/2}^{u/2}f(x)e^{-2\pi ijx/u}\,dx$
+       is the (period-$u$ averaged) Fourier coefficient of $f$, and
+       $\widetilde{K}(j):=\widehat{K}(j/u)$ as in
+       Definition~\ref{def:bochner} (see
        Remark~\ref{rem:eq3-inequality}).
 \item For every even, real-valued, $u$-periodic trigonometric polynomial
        $G$ with $\widetilde{G}(0)=0$ and $\min_{x\in[0,1/4]}G(x)\ge m_G>0$,
@@ -616,17 +649,25 @@ Each identity uses $K$ only through (K1)--(K4):
        followed by the $z_1$-absorption Cauchy--Schwarz step
        $\sqrt{ac}+\sqrt{bd}\le\sqrt{(a+b)(c+d)}$ of
        Theorem~\ref{thm:mv-master}.  Both steps use $K$ only through
-       $\widetilde{K}(j)\ge 0$ (K4) and $\|K\|_{2}^{2}<\infty$ (a
-       consequence of (K1), (K3), and~$K\in L^{\infty}_{\rm loc}$ on
-       the compact support).
+       $\widetilde{K}(j)\ge 0$ (K4) and the finiteness of the energy
+       $K_2=\|K\|_{2}^{2}$ of Definition~\ref{def:bochner}.  For a
+       convex combination of $L^{2}$ kernels the latter follows from
+       Minkowski's inequality; for the specific three-scale $\Kms$ it
+       is verified on the Fourier side via Plancherel in
+       Lemma~\ref{lem:Kms-L2}.  (We do \emph{not} use
+       $K\in L^{\infty}_{\rm loc}$: the arcsine autoconvolution is
+       unbounded at the origin.)
 \item (3) is the $\ge$-direction of the torus Parseval identity
        \[
          \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
-         \;=\;\frac{2}{u}+2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
+         \;=\;\frac{2}{u}+2u\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
        \]
        which combines the torus Parseval split for $(f*f)+(f\circ f)$
-       against $K$, the constant-term mass $\widetilde{K}(0)=1/u$
-       (from (K3)), and the Fourier expansion of the tail.  We retain
+       against $K$, the constant term
+       $2u\,(\operatorname{Re}\widetilde{f}(0))^{2}\widetilde{K}(0)=2/u$
+       (from $\widetilde{f}(0)=\tfrac1u\int f=\tfrac1u$ and
+       $\widetilde{K}(0)=\widehat{K}(0)=\int K=1$ by (K3)), and the
+       Fourier expansion of the tail.  We retain
        only the inequality direction; see
        Remark~\ref{rem:eq3-inequality} for why the $\ge$-direction
        alone suffices and follows from $\widetilde{K}(j)\ge 0$ (K4)
@@ -654,7 +695,8 @@ Each identity uses $K$ only through (K1)--(K4):
        \]
        (MO~2009 Lemma~2.1, applied to the pairing of $f$, supported in
        $(-1/4,1/4)$, against $G$).  The $j=0$ term is
-       $\operatorname{Re}\widetilde{f}(0)\,\widetilde{G}(0)=(\int f)\,\widetilde{G}(0)$,
+       $u\operatorname{Re}\widetilde{f}(0)\,\widetilde{G}(0)=(\int f)\,\widetilde{G}(0)$
+       (using $\widetilde{f}(0)=\tfrac1u\int f$),
        which vanishes because the cosine multiplier
        $G(x)=\sum_{j=1}^{N}a_j\cos(2\pi jx/u)$ of
        Definition~\ref{def:multiplier} has no constant term, i.e.
@@ -689,7 +731,7 @@ MO~2009 Lemma~3.3 / MV~2010 Lemma~3.3 state item~(3) as an
 \emph{equality},
 \[
   \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
-  \;=\;\frac{2}{u}+2u^{2}\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
+  \;=\;\frac{2}{u}+2u\sum_{j\ne 0}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j),
 \]
 and the master inequality of Theorem~\ref{thm:mv-master} chains
 against this only through the lower bound on the left-hand side, i.e.
@@ -702,7 +744,7 @@ every term of the tail sum is nonnegative, so for any finite
 $J\subseteq\Z\setminus\{0\}$ the truncated identity
 \[
   \int_{\R}\bigl((f*f)+(f\circ f)\bigr)K\,dx
-  \;\ge\;\frac{2}{u}+2u^{2}\sum_{j\in J}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
+  \;\ge\;\frac{2}{u}+2u\sum_{j\in J}\bigl(\operatorname{Re}\widetilde{f}(j)\bigr)^{2}\widetilde{K}(j)
 \]
 follows from finite-$J$ Parseval and Bochner positivity alone, with
 the full sum recovered by monotone convergence; no period-$u$ Poisson
@@ -738,10 +780,13 @@ representatives.  Lemma~2.1 is a statement about $L^2$ equivalence
 classes: its bilinear pairing is unchanged when either factor is
 modified on a Lebesgue-null set~\cite[\S 2.1]{Folland}.  Now
 $K_{\mathrm{ms}}=\sum_i\lambda_i\eta_{\delta_i}*\eta_{\delta_i}$ is
-continuous and vanishes pointwise at $\pm\delta_{\max}$ (the
-autoconvolution of an indicator has empty support-overlap at the
-boundary), so it represents the same $L^2$ class as a function
-supported in the \emph{open} interval $(-\delta_{\max},\delta_{\max})$;
+continuous near $\pm\delta_{\max}$ and vanishes there --- near each
+endpoint the supports of the two arcsine factors
+$\eta_{\delta_i}\subseteq(-\delta_i/2,\delta_i/2)$ meet only at a
+single point, so the convolution integral is zero --- and in any case
+$\{\pm\delta_{\max}\}$ is Lebesgue-null, so $K_{\mathrm{ms}}$
+represents the same $L^2$ class as a function supported in the
+\emph{open} interval $(-\delta_{\max},\delta_{\max})$;
 likewise $f\in L^2$ may be taken supported in the open
 $(-1/4,1/4)$.  For these representatives
 $\alpha_1+\alpha_2<u$ holds with strict inequality on the (open)
@@ -900,16 +945,27 @@ $\|\Kms\|_{L^{2}(\R)}
 \begin{proof}
 By Minkowski's inequality on $L^{2}(\R)$ applied to the finite
 combination $\Kms=\sum_i\lambda_i(\eta_{\delta_i}*\eta_{\delta_i})$,
-$\|\Kms\|_{2}\le\sum_i\lambda_i\,\|\eta_{\delta_i}*\eta_{\delta_i}\|_{2}$.
-Each autoconvolution $\eta_{\delta_i}*\eta_{\delta_i}$ is supported on
-$[-\delta_i,\delta_i]$, and its closed form on
-$(-\delta_i,\delta_i)\setminus\{0\}$ involves complete elliptic
-integrals~\cite[\S 10.9.4]{DLMF} which are bounded away from the
-endpoints; explicitly $\eta_{\delta_i}*\eta_{\delta_i}$ lies in
-$L^{2}([-\delta_i,\delta_i])$, since the only singularities of
-$\eta_{\delta_i}$ are integrable arcsine endpoint singularities and
-their convolution removes one order of singularity.  Hence the
-right-hand side is finite.
+$\|\Kms\|_{2}\le\sum_i\lambda_i\,\|\eta_{\delta_i}*\eta_{\delta_i}\|_{2}$,
+so it suffices that each single-scale autoconvolution lies in
+$L^{2}(\R)$.  We argue on the Fourier side, where the singularity is
+invisible.  By the Mehler--Sonine identity~\eqref{eq:sonine},
+$\widehat{\eta_{\delta_i}*\eta_{\delta_i}}(\xi)=J_0(\pi\delta_i\xi)^{2}$,
+so by Plancherel and the substitution $t=\delta_i\xi$,
+\[
+  \|\eta_{\delta_i}*\eta_{\delta_i}\|_{2}^{2}
+  \;=\;\int_{\R}J_0(\pi\delta_i\xi)^{4}\,d\xi
+  \;=\;\frac{1}{\delta_i}\int_{\R}J_0(\pi t)^{4}\,dt.
+\]
+The Watson envelope $|J_0(z)|\le\sqrt{2/(\pi z)}$ for $z\ge 1$ gives
+$J_0(\pi t)^{4}=O(t^{-2})$ as $|t|\to\infty$, while $J_0(\pi t)^{4}\le 1$
+on $[-1,1]$; hence the integral converges and each autoconvolution is
+in $L^{2}(\R)$, so the right-hand side is finite.  We emphasize that
+$\eta_{\delta_i}*\eta_{\delta_i}$ is \emph{not} bounded: it carries a
+logarithmic singularity at the \emph{origin} (where
+$(\eta_{\delta_i}*\eta_{\delta_i})(0)=\int\eta_{\delta_i}^{2}=\infty$),
+not at the endpoints.  Square-integrability is genuine---$\log^{2}$ is
+locally integrable---but is established here via Plancherel, not via
+any local boundedness of $\Kms$.
 \end{proof}
 
 \begin{lemma}[Bochner positivity of $\widehat{\Kms}$]
@@ -1238,19 +1294,28 @@ gives $C_{1a}\ge 1292/1000=1.292$.\qedhere
 
 \subsection{Lean Formalization}\label{subsec:proof-lean}
 
-The analytic chain above is mechanized in Lean~4 across $13$ modules
-totalling $\approx 7500$ lines of code rooted at
-\texttt{lean/Sidon/MultiScale.lean}, which builds cleanly under
-Mathlib~\cite{Mathlib,Lean} with zero \texttt{sorry} tactics and
-produces the headline theorem
-\texttt{autoconvolution\_ratio\_ge\_1292\_1000}.  The module layout
-factors the proof into:
+The analytic chain above is mechanized in Lean~4 across $30$ modules
+totalling $\approx 15.5$~thousand lines of code, which build cleanly
+under Mathlib~\cite{Mathlib,Lean} with zero \texttt{sorry} tactics.
+The formalization is organized in two layers.  The \emph{core} layer
+($13$ modules, rooted at \texttt{lean/Sidon/MultiScale.lean}) factors
+the analytic reduction into
 \texttt{Sidon.\{Defs, Bessel, FourierAux, TorusParseval, MVLemmas,
 MasterFromLemmas, BundleDefs, BundleEq1, BundleEq2Schwartz,
-BundleEq3Schwartz, BundleEq4, BilinearParseval, MultiScale\}}.
-The headline theorem reaches exactly \emph{two} numerical user axioms
-in its dependency closure (alongside the three Lean core axioms
-\texttt{propext}, \texttt{Classical.choice}, \texttt{Quot.sound}):
+BundleEq3Schwartz, BundleEq4, BilinearParseval, MultiScale\}} and
+produces the conditional headline theorem
+\texttt{autoconvolution\_ratio\_ge\_1292\_1000}.  A \emph{constructor}
+layer (\texttt{Sidon.Constructor.\{$\,\ldots\,$\}}, $17$ further
+modules, all axiom-free) then assembles the unconditional headline
+\texttt{C1a\_ge\_1292\_unconditional}.  We describe the two headlines
+and their axiom budgets in turn.
+
+\paragraph{Conditional headline (bundle as hypothesis).}
+The theorem \texttt{autoconvolution\_ratio\_ge\_1292\_1000} carries an
+\texttt{ExtremiserPrimitives}\,$f$ hypothesis record and reaches
+exactly \emph{two} numerical user axioms in its dependency closure
+(alongside the three Lean core axioms \texttt{propext},
+\texttt{Classical.choice}, \texttt{Quot.sound}):
 \begin{itemize}[leftmargin=2em]
 \item \texttt{K2\_analytic\_le\_K2UpperQ}: the certified upper bound
 $K_2(\Kms)\le\texttt{K2UpperQ}=47897/10000$ from
@@ -1284,6 +1349,45 @@ composed from the four MV-Lemma-3.1 atomic conclusions formalized in
 \texttt{Sidon.MVLemmas}); slack-monotonicity then lifts it to the
 rational anchors used in the strict-failure step.
 
+\paragraph{Unconditional headline (bundle constructed).}
+The constructor layer \texttt{Sidon.Constructor} mechanizes the
+construction of the \texttt{ExtremiserPrimitives}\,$f$ record from raw
+admissibility, so that the bundle is no longer assumed but
+\emph{built}.  Its $17$ modules are axiom-free and supply, for any
+admissible $f$: the $L^1$ convolution Fourier identity, the
+membership $\Kms\in L^2$ via the Young estimate
+$L^{4/3}\!\star L^{4/3}\!\to L^2$, a period-$u$ Poisson sampling lemma
+(generalizing mathlib's period-$1$/continuous version), MO~2009
+Lemma~2.1 in period-$u$ Parseval form, the period-$1$ Parseval
+identity for $f\circ f$, and the discrete Cauchy--Schwarz floor of
+\eqref{eq:inner-product-floor}.  These are stitched into the bundle by
+\texttt{ExtremiserPrimitives.of\_admissible}, and feeding the result
+into the conditional headline yields the unconditional theorem
+\texttt{C1a\_ge\_1292\_unconditional}.  It takes \emph{only} the
+admissibility hypotheses --- $f\in L^1\cap L^2$, $\supp f\subseteq
+(-1/4,1/4)$, $f\ge 0$, $\int f=1$ --- and carries no hypothesis record.
+Its dependency closure reaches the same three Lean core axioms
+together with \emph{four} numerical user axioms: the two above, plus
+\begin{itemize}[leftmargin=2em]
+\item \texttt{min\_G\_analytic\_ge\_minGLowerQ}: the certified bound
+$m_G=\inf_{x\in[0,1/4]}G_{\rm concrete}(x)\ge 998/1000$ from
+Lemma~\ref{lem:mG} (a numerical input that the conditional headline
+instead absorbs through the bundle's gain field); and
+\item \texttt{K\_ms\_fourier\_lattice\_pos\_active}: the certified
+active-set positivity $\widetilde{\Kms}(j)>0$ for every integer
+$j\in[1,200]$, which licenses the division by $\widetilde{\Kms}(j)$ in
+$S_1$ on the Lean side.
+\end{itemize}
+All four are certifier outputs of the same form --- ``\texttt{flint.arb}
+evaluated this functional'' --- decidable in principle by any
+sufficient interval-arithmetic implementation.  Because the
+constructor layer is axiom-free, the unconditional headline is a
+strict strengthening of the conditional one: it reaches the same
+mathematical conclusion $C_{1a}\ge 1292/1000$ with the analytic
+bundle now \emph{proved} in Lean for every admissible $f$ rather than
+\emph{assumed}, at the cost only of the two additional decidable
+numerical facts.
+
 \paragraph{Sound definitions of \texorpdfstring{$f\circ f$}{f circ f}
 and \texorpdfstring{$\Karc$}{K\_arc}.}
 The Lean formalization defines the convolutional autocorrelation as
@@ -1297,17 +1401,21 @@ throughout Sections~\ref{sec:mv}--\ref{sec:kernel} of the present
 paper and the Python certifier.
 
 \paragraph{Theorem statements.}
-The headline theorem
+The conditional headline theorem
 \texttt{autoconvolution\_ratio\_ge\_1292\_1000} carries a record
 \texttt{ExtremiserPrimitives f} whose fields are Lean restatements of
 the outputs of MO~2009 Lemmas~3.1--3.4 / MV~2010 Lemma~3.1 at the
 pair $(f,\Kms)$; those lemmas apply to~$\Kms$ directly (as a pdf
 supported in $[-\delta_1,\delta_1]$ with $\widetilde{\Kms}(j)\ge 0$
 and $\Kms\in L^2$), and the paper discharges the bundle fields by
-direct citation. The Lean theorem retains them as hypothesis fields
-only because mathlib~v4.29.1 does not yet expose a reusable $L^1\cap
-L^2$ Plancherel + period-$u$ Parseval API in the form the bundle
-consumes.  The bundle's $m_G$ and $S_G$ fields are reals constrained
+direct citation, exactly as MV~2010 cited MO~2009 at single arcsine.
+The unconditional headline \texttt{C1a\_ge\_1292\_unconditional}
+removes even the named record: the constructor layer described above
+builds it from raw admissibility, so the field-by-field
+$L^1\cap L^2$ Plancherel and period-$u$ Parseval content (for which
+mathlib~v4.29.1 exposes no single-call API) is supplied by the
+purpose-built \texttt{Sidon.Constructor} modules rather than assumed.
+The bundle's $m_G$ and $S_G$ fields are reals constrained
 by the gain identity $\texttt{gain\_analytic}=2\,m_G^{\,2}/S_G$
 (field \texttt{gain\_eq}); the bundle's third inequality field
 \texttt{hEq3\_ge} (replacing an earlier equality form \texttt{hEq3})
@@ -1320,6 +1428,29 @@ A Schwartz-class specialisation that previously bypassed the
 Paley--Wiener combined with Carlson's theorem prevents any
 nontrivial Schwartz $f$ from being compactly supported in
 $(-1/4,1/4)$, so the Schwartz headline had no nontrivial witness.
+
+\paragraph{Rigor relative to Matolcsi--Vinuesa.}
+Taken together, the two headlines establish $C_{1a}\ge 1.292$ to at
+least the standard of rigor of Matolcsi--Vinuesa~\cite{MV10}, and in
+several respects beyond it.  The analytic content is discharged both
+by direct citation to MO~2009 / MV~2010 applied to $\Kms$ (as MV did
+at single arcsine) \emph{and}, in the unconditional headline,
+mechanically constructed in Lean for every admissible $f$.  The
+numerical content is the same \emph{kind} of computer-checked input
+as MV's Mathematica citations, but produced by \texttt{flint.arb}
+midpoint--radius interval arithmetic at $256$-bit
+precision~\cite{Flint} (rigorous guaranteed enclosures, not heuristic
+floating point) and independently corroborated in \texttt{mpmath}.
+The final assembly is carried out in exact rational arithmetic with a
+strictly positive closing margin: the master inequality's true
+threshold is $M_*=1.29203$, so the rational headline target
+$1.292$ is a safe round-down, and the strict-failure margin
+$\tau-\Phi(1292/1000)\ge 9.6\times 10^{-5}$ of
+Proposition~\ref{prop:fail} is verified rationally.  We retain the
+honest caveat that four computer-checked numerical axioms remain in
+the unconditional headline (two in the conditional one): the result
+is computer-assisted in the standard sense (cf.\ Flyspeck for
+Kepler~\cite{Flint}), not a pure-kernel hand proof.
 
 Six further statements are Lean \emph{theorems}: the algebraic
 inversion \texttt{master\_inequality\_M\_lower} (corresponding to
