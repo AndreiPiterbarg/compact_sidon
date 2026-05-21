@@ -134,7 +134,7 @@ $$2 z_1^{2} k_1 + \sqrt{(M-1-2 z_1^{4})(K_2-1-2 k_1^{2})} \;\le\; \sqrt{(M-1)(K_
 
 Combining the lemma with Eq.(10) yields the $z_1$-free master inequality
 
-$$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{\ast}$$
+$$M + 1 + \sqrt{(M-1)(K_2-1)} \;\ge\; \frac{2}{u} + a, \tag{*}$$
 
 in which only the kernel/multiplier quantities $K_2$ and $a$ appear. This $z_1$-absorption is the one analytic step in the present work beyond MV 2010; the displayed proof is the entire derivation. The corresponding Lean theorem is in `Sidon.MasterFromLemmas`.
 
