@@ -51,20 +51,20 @@ two user).
 | `Sidon/TorusParseval.lean` | 785 | Period-$u$ Parseval, lattice Fourier, bilinear pairing. |
 | `Sidon/MVLemmas.lean` | 767 | MV Lemma 3.1 Eqs.(1)–(4) + inner-product floor + `mv_eq3_ge` / `mv_eq3_ge_of_eq`. |
 | `Sidon/MasterFromLemmas.lean` | 130 | Algebraic assembly Eqs.(1)–(4) ⇒ Eq.(6). |
-| `Sidon/BundleDefs.lean` | 597 | `ExtremiserPrimitives` record. |
+| `Sidon/BundleDefs.lean` | 488 | `ExtremiserPrimitives` record. |
 | `Sidon/BundleEq1.lean` | 347 | Discharge of bundle field `hEq1` (MV Eq.(1)). |
 | `Sidon/BundleEq2Schwartz.lean` | 624 | Discharge of bundle field `hEq2` (MV Eq.(2)). |
 | `Sidon/BundleEq3Schwartz.lean` | 371 | Discharge of bundle field `hEq3_ge` (MV Eq.(3), inequality form). |
 | `Sidon/BundleEq4.lean` | 445 | Discharge of bundle field `hEq4` (MV Eq.(4)). |
 | `Sidon/BilinearParseval.lean` | 434 | Bilinear Parseval pairings used by the bundle discharges. |
-| `Sidon/MultiScale.lean` | 1648 | Conditional headline + 3 verifiable-by-computation axioms (K2, gain, min_G) + admissibility bundle. |
+| `Sidon/MultiScale.lean` | 1645 | Conditional headline + 3 verifiable-by-computation axioms (K2, gain, min_G) + admissibility bundle. |
 | `AxiomCheck{BundleDefs,Fourier,MV,Torus}.lean` | — | Per-module axiom inventories. |
 | `lakefile.lean`, `lake-manifest.json`, `lean-toolchain` | — | Lake build configuration, Mathlib lock, pinned toolchain. |
 
-The twelve auxiliary core modules are axiom-free; the 1648-line
+The twelve auxiliary core modules are axiom-free; the 1645-line
 `Sidon.MultiScale` houses three of the four verifiable-by-computation
 axioms (K2, gain, min_G).  Beyond these 13 core modules, the
-`Sidon/Constructor/` layer (17 modules, 7915 LoC, all axiom-free except
+`Sidon/Constructor/` layer (17 modules, 7922 LoC, all axiom-free except
 `LatticePositivity`, which declares the fourth axiom
 `K_ms_fourier_lattice_pos_active`) *constructs* the admissibility bundle
 and proves the **unconditional** headline (below): 30 modules /

@@ -153,7 +153,7 @@ the bundle from raw admissibility (4 verifiable-by-computation axioms).
 
 1. **Formally proves the analytic content in Lean.** Approximately
    ~15.6 kLoC across **30 modules**: the 13 core `Sidon/*.lean`
-   modules (7658 LoC; `Sidon.Defs`,
+   modules (7655 LoC; `Sidon.Defs`,
    `Sidon.Bessel`, `Sidon.FourierAux`, `Sidon.TorusParseval`,
    `Sidon.MVLemmas`, `Sidon.MasterFromLemmas`, `Sidon.BundleDefs`,
    `Sidon.BundleEq1`, `Sidon.BundleEq2Schwartz`,
@@ -167,7 +167,7 @@ the bundle from raw admissibility (4 verifiable-by-computation axioms).
    Lemma 3.1 atomic primitives (Eqs.(1)--(4)) together with their
    dedicated discharge modules, the bilinear Parseval pairings, and
    the algebraic assembly of the master inequality; plus the 17
-   axiom-free `Sidon/Constructor/*.lean` modules (7915 LoC) that
+   axiom-free `Sidon/Constructor/*.lean` modules (7922 LoC) that
    mechanise the `ExtremiserPrimitives.of_admissible` constructor for
    the unconditional headline ($L^1$ convolution Fourier identity,
    $K_{\rm ms} \in L^2$ via Young's inequality, period-$u$ Poisson
@@ -246,9 +246,9 @@ sufficient implementation of interval arithmetic and the Bessel
 power series can decide.
 
 **Trust base.** ~15.6 kLoC of formal Lean across 30 modules (13 core
-`Sidon/*.lean`, 7658 LoC, axiom-free bar the verifiable-by-computation
-axioms housed in the 1648-line `Sidon.MultiScale`; plus 17 axiom-free
-`Sidon/Constructor/*.lean`, 7915 LoC, modulo the single
+`Sidon/*.lean`, 7655 LoC, axiom-free bar the verifiable-by-computation
+axioms housed in the 1645-line `Sidon.MultiScale`; plus 17 axiom-free
+`Sidon/Constructor/*.lean`, 7922 LoC, modulo the single
 `K_ms_fourier_lattice_pos_active` axiom in `LatticePositivity`).  The
 axiom architecture is standard for computer-assisted
 real-number proofs (Flyspeck cited Kepler's interval arithmetic;

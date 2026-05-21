@@ -10,7 +10,7 @@
 > `flint.arb` at 256-bit precision and mechanized in Lean 4 across
 > **30 modules (~15.6 kLoC** on top of mathlib `v4.29.1`): 13 core
 > `lean/Sidon/*.lean` (7655 LoC) plus 17 `lean/Sidon/Constructor/*.lean`
-> (7913 LoC, all analytic content, axiom-free except
+> (7922 LoC, all analytic content, axiom-free except
 > `LatticePositivity`). There are **two headline theorems**, both
 > `lake build` green with 0 `sorry`:
 > the **conditional** `Sidon.MultiScale.autoconvolution_ratio_ge_1292_1000`,
@@ -146,7 +146,7 @@ floor used in the published statement and in the Lean axiom.
 
 The analytic chain is mechanized in
 [`lean/Sidon/`](lean/Sidon/) across **30 modules totalling
-~15.6 kLoC** (13 core, 7655 LoC; 17 `Constructor/`, 7913 LoC) on top
+~15.6 kLoC** (13 core, 7655 LoC; 17 `Constructor/`, 7922 LoC) on top
 of Mathlib pinned to `v4.29.1`, commit
 [`5e932f97dd25535344f80f9dd8da3aab83df0fe6`](https://github.com/leanprover-community/mathlib4/commit/5e932f97dd25535344f80f9dd8da3aab83df0fe6).
 The `v4.29.1` bump (post-Nov 2025) unlocked the $L^2$-Plancherel API
@@ -196,7 +196,7 @@ two vacuously-true Schwartz-class headline variants and the
 compactly supported in `(-1/4, 1/4)` can satisfy
 `ParsevalSplitSchwartz`), reducing the core module count from fifteen to
 thirteen. Subsequently the **17-module `Sidon.Constructor.*` layer**
-(7913 LoC) was added to *construct* the `ExtremiserPrimitives` bundle
+(7922 LoC) was added to *construct* the `ExtremiserPrimitives` bundle
 from raw admissibility, bringing the total to **30 modules / ~15.6 kLoC**
 and adding the **unconditional** headline `C1a_ge_1292_unconditional`
 alongside the original conditional one.
@@ -232,7 +232,7 @@ exported from the same namespace, and the unconditional
 | [`Sidon.BundleEq4`](lean/Sidon/BundleEq4.lean) | 445 | Discharge of bundle field `hEq4` (MV Eq.(4)). | 0 |
 | [`Sidon.BilinearParseval`](lean/Sidon/BilinearParseval.lean) | 434 | Bilinear Parseval pairings used by the bundle discharges. | 0 |
 | [`Sidon.MultiScale`](lean/Sidon/MultiScale.lean) | 1645 | Conditional headline + admissibility bundle + 3 numerical axioms (K2, gain, min_G). | 3 (verifiable-by-computation) |
-| [`Sidon.Constructor.*`](lean/Sidon/Constructor/) (17 modules) | 7915 | Bundle constructor `of_admissible`, unconditional headline `C1a_ge_1292_unconditional`, all supporting analytic infrastructure. | 1 (`K_ms_fourier_lattice_pos_active`, in `LatticePositivity`) |
+| [`Sidon.Constructor.*`](lean/Sidon/Constructor/) (17 modules) | 7922 | Bundle constructor `of_admissible`, unconditional headline `C1a_ge_1292_unconditional`, all supporting analytic infrastructure. | 1 (`K_ms_fourier_lattice_pos_active`, in `LatticePositivity`) |
 
 (`MultiScale.lean` declares three numerical axioms; only two —
 `K2_analytic_le_K2UpperQ`, `gain_analytic_ge_gainLowerQ` — are reached
@@ -414,7 +414,7 @@ assumed**: the record is produced by
 Eqs.(1)--(4) fields (plus the positivity fields) directly from the
 admissibility hypotheses and the sanctioned numerical axioms. Building
 it required a new **`lean/Sidon/Constructor/`** module layer (17 files,
-7913 LoC, all axiom-free except `LatticePositivity`): the
+7922 LoC, all axiom-free except `LatticePositivity`): the
 $L^1 \cap L^2$ convolution Fourier identity (`ConvFourier`),
 `MemLp K_ms 2` via a three-function Hölder/Young estimate
 $L^{4/3}\star L^{4/3}\to L^2$ (`KernelL2`, `YoungConvolution`), a
@@ -581,7 +581,7 @@ compact_sidon/
 │   ├── Sidon/BundleEq4.lean          # Discharge of hEq4 (MV Eq.(4)) (445, 0 axioms)
 │   ├── Sidon/BilinearParseval.lean   # Bilinear Parseval pairings (434, 0 axioms)
 │   ├── Sidon/MultiScale.lean         # Conditional headline, 3 numerical axioms K2/gain/min_G (1645 lines)
-│   ├── Sidon/Constructor/            # 17 modules (7913 LoC): of_admissible + unconditional headline
+│   ├── Sidon/Constructor/            # 17 modules (7922 LoC): of_admissible + unconditional headline
 │   │                                 #   + analytic infra; axiom-free except LatticePositivity
 │   │                                 #   (4th axiom K_ms_fourier_lattice_pos_active)
 │   ├── Sidon.lean                    # Top-level module entry

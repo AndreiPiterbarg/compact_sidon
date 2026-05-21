@@ -184,8 +184,8 @@ across all **30 modules (~15.6 kLoC)**: the 13 core modules under
 `lean/Sidon/` (`Defs`, `Bessel`,
 `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`,
 `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`,
-`BundleEq4`, `BilinearParseval`, `MultiScale`; 7658 LoC) and the 17
-modules under `lean/Sidon/Constructor/` (7915 LoC), on top
+`BundleEq4`, `BilinearParseval`, `MultiScale`; 7655 LoC) and the 17
+modules under `lean/Sidon/Constructor/` (7922 LoC), on top
 of `mathlib` pinned to `v4.29.1` / commit
 `5e932f97dd25535344f80f9dd8da3aab83df0fe6`. The formalisation exports
 **two headlines** with distinct axiom budgets:

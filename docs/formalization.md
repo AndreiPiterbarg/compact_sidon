@@ -7,7 +7,7 @@ spread across **30 modules (~15.6 kLoC total)**: the core
 `lean/Sidon/*.lean` chain (13 modules, 7655 LoC; the 1645-line
 `Sidon.MultiScale` houses the headline assembly and the
 verifiable-by-computation axioms, the remaining 12 are axiom-free) and
-the `lean/Sidon/Constructor/*.lean` chain (17 modules, 7915 LoC,
+the `lean/Sidon/Constructor/*.lean` chain (17 modules, 7922 LoC,
 axiom-free) that mechanises the admissibility-to-bundle constructor. The
 whole sits on top of `Mathlib`
 pinned to `v4.29.1`, commit
@@ -95,7 +95,7 @@ third-party referee review.
 | [`Sidon.MultiScale`](../lean/Sidon/MultiScale.lean) | 1645 | Conditional headline `autoconvolution_ratio_ge_1292_1000`, the two bundle-headline verifiable-by-computation axioms (`K2_analytic_le_K2UpperQ`, `gain_analytic_ge_gainLowerQ`) plus `min_G_analytic_ge_minGLowerQ` (used only by the unconditional headline), slack-soundness theorems, three-scale kernel anchors. | 3 (verifiable-by-computation; only 2 enter the conditional headline) |
 
 The 13 core modules above total 7655 LoC. In addition, the
-`lean/Sidon/Constructor/*.lean` chain (17 modules, 7913 LoC, all
+`lean/Sidon/Constructor/*.lean` chain (17 modules, 7922 LoC, all
 axiom-free except for the single `K_ms_fourier_lattice_pos_active`
 verifiable-by-computation axiom in `LatticePositivity`) mechanises the
 `ExtremiserPrimitives.of_admissible` constructor that powers the
@@ -375,8 +375,8 @@ The present Lean proof of $C_{1a} \ge 1.292$:
 1. **Formally proves the analytic content in Lean** -- approximately
    ~15.6 kLoC across 30 modules (the 13 core `Sidon/*.lean` modules,
    7655 LoC, all axiom-free bar the verifiable-by-computation axioms in
-   the 1648-line `Sidon.MultiScale`; plus the 17 axiom-free
-   `Sidon/Constructor/*.lean` modules, 7915 LoC) spanning the
+   the 1645-line `Sidon.MultiScale`; plus the 17 axiom-free
+   `Sidon/Constructor/*.lean` modules, 7922 LoC) spanning the
    autoconvolution arcsine
    Fourier-transform identity (`Sidon.Bessel`), the $L^2$ Plancherel
    and Schwartz apparatus (`Sidon.FourierAux`, on top of mathlib's
@@ -448,8 +448,8 @@ interval arithmetic + the Bessel power series can decide.
 
 **Trust base.** ~15.6 kLoC of formal Lean across 30 modules (13 core
 `Sidon/*.lean`, 7655 LoC, axiom-free bar the verifiable-by-computation
-axioms housed in the 1648-line `Sidon.MultiScale`; plus 17 axiom-free
-`Sidon/Constructor/*.lean`, 7915 LoC, modulo the single
+axioms housed in the 1645-line `Sidon.MultiScale`; plus 17 axiom-free
+`Sidon/Constructor/*.lean`, 7922 LoC, modulo the single
 `K_ms_fourier_lattice_pos_active` axiom in `LatticePositivity`).  The
 numerical inputs are proven interval bounds (rather than
 heuristic floating point), in the same axiom architecture used by

@@ -25,8 +25,8 @@ By homogeneity one may normalize $\int f = 1$, in which case $C_{1a} = \inf_f \|
 | [`delsarte_dual/grid_bound/`](delsarte_dual/grid_bound/) | The Matolcsi-Vinuesa machinery in `flint.arb`: cell-search certifier, master inequality, Taylor branch-and-bound for $\min G$, independent verifier. |
 | [`delsarte_dual/grid_bound_alt_kernel/`](delsarte_dual/grid_bound_alt_kernel/) | The multi-scale arcsine kernel, the QP for $G$, and the certifier driver `bisect_alt_kernel.py`. |
 | [`delsarte_dual/grid_bound_alt_kernel/certificates/`](delsarte_dual/grid_bound_alt_kernel/certificates/) | `reference_anchors.json` (canonical anchors); a fresh run emits `multiscale_arcsine_1292.json` here. |
-| [`lean/Sidon/`](lean/Sidon/) | The Lean 4 formalization. Thirteen *core* modules (7658 LoC): `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`; all axiom-free except `MultiScale` (which declares the conditional headline and three verifiable-by-computation axioms: `K2_analytic_le_K2UpperQ`, `gain_analytic_ge_gainLowerQ`, `min_G_analytic_ge_minGLowerQ`). |
-| [`lean/Sidon/Constructor/`](lean/Sidon/Constructor/) | The bundle constructor `ExtremiserPrimitives.of_admissible` and the unconditional headline `C1a_ge_1292_unconditional` (17 modules, 7915 LoC: `ConvFourier`, `KernelFacts`, `KernelL2`, `YoungConvolution`, `FieldsEasy`, `FieldsParseval`, `FieldEq4`, `Eq2Split`, `Eq2Period1`, `MOLemma21`, `PeriodUParseval`, `PoissonSampling`, `PoissonSummable`, `CauchySchwarzFloor`, `Glue`, `LatticePositivity`, `Assembly`). All axiom-free except `LatticePositivity`, which declares the fourth axiom `K_ms_fourier_lattice_pos_active`. |
+| [`lean/Sidon/`](lean/Sidon/) | The Lean 4 formalization. Thirteen *core* modules (7655 LoC): `Defs`, `Bessel`, `FourierAux`, `TorusParseval`, `MVLemmas`, `MasterFromLemmas`, `BundleDefs`, `BundleEq1`, `BundleEq2Schwartz`, `BundleEq3Schwartz`, `BundleEq4`, `BilinearParseval`, `MultiScale`; all axiom-free except `MultiScale` (which declares the conditional headline and three verifiable-by-computation axioms: `K2_analytic_le_K2UpperQ`, `gain_analytic_ge_gainLowerQ`, `min_G_analytic_ge_minGLowerQ`). |
+| [`lean/Sidon/Constructor/`](lean/Sidon/Constructor/) | The bundle constructor `ExtremiserPrimitives.of_admissible` and the unconditional headline `C1a_ge_1292_unconditional` (17 modules, 7922 LoC: `ConvFourier`, `KernelFacts`, `KernelL2`, `YoungConvolution`, `FieldsEasy`, `FieldsParseval`, `FieldEq4`, `Eq2Split`, `Eq2Period1`, `MOLemma21`, `PeriodUParseval`, `PoissonSampling`, `PoissonSummable`, `CauchySchwarzFloor`, `Glue`, `LatticePositivity`, `Assembly`). All axiom-free except `LatticePositivity`, which declares the fourth axiom `K_ms_fourier_lattice_pos_active`. |
 | [`tests/`](tests/) | `pytest` suite covering kernel admissibility, Bochner positivity, the QP solver, and the single-scale baseline. |
 | [`docs/`](docs/) | Secondary documentation: proof outline, reproducibility, formalization notes, audit specification, attempts archive. |
 
@@ -71,7 +71,7 @@ at commit `5e932f97dd25535344f80f9dd8da3aab83df0fe6`: the 13 *core*
 modules `Sidon.{Defs, Bessel, FourierAux, TorusParseval, MVLemmas,
 MasterFromLemmas, BundleDefs, BundleEq1, BundleEq2Schwartz,
 BundleEq3Schwartz, BundleEq4, BilinearParseval, MultiScale}`
-(7658 LoC) plus the 17 `Sidon.Constructor.*` modules (7915 LoC);
+(7655 LoC) plus the 17 `Sidon.Constructor.*` modules (7922 LoC);
 ~15.6 kLoC total. All modules are axiom-free except `MultiScale`
 (which declares three numerical axioms — `K2_analytic_le_K2UpperQ`,
 `gain_analytic_ge_gainLowerQ`, `min_G_analytic_ge_minGLowerQ`) and
@@ -164,7 +164,7 @@ The three architectural layers:
    Parseval, the four MV Lemma 3.1 atomic primitives (Eqs.(1)--(4))
    with their dedicated discharge modules, the bilinear Parseval
    identity, and the algebraic assembly of the master inequality;
-   PLUS the entire 17-module `Sidon.Constructor.*` layer (7915 LoC,
+   PLUS the entire 17-module `Sidon.Constructor.*` layer (7922 LoC,
    axiom-free except `LatticePositivity`) that *constructs* the
    MV-Lemma-3.1 bundle for any admissible $f$. The MV-paper analytic
    layer is thus mechanized in Lean, not merely assumed.
@@ -282,7 +282,7 @@ green with 0 `sorry`:
   kernel-checked numeric proof.
 
 The constructor and its supporting analytic infrastructure live in a new
-**`lean/Sidon/Constructor/`** module layer (17 files, 7915 LoC, all
+**`lean/Sidon/Constructor/`** module layer (17 files, 7922 LoC, all
 axiom-free except `LatticePositivity` which declares the one new axiom):
 `ConvFourier`, `KernelFacts`, `KernelL2`, `YoungConvolution`,
 `FieldsEasy`, `FieldsParseval`, `FieldEq4`, `Eq2Split`, `Eq2Period1`,
