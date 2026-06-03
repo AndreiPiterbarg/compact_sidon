@@ -108,8 +108,10 @@ the arb enclosure $[4.788823, 4.788906]$.
 ### 3. Watson tail bound
 
 The certifier uses $|J_0(z)|^2 \le 2/(\pi z)$ for $z \ge 1$ to bound the
-$K_2$ tail past $\xi = T = 10^5$, giving $\text{tail} \le (8/\pi^2)
-\cdot C^2 / T$ with $C = \sum_i \lambda_i / \delta_i$. Confirm Watson
+$K_2$ tail past $\xi = T = 10^5$, giving $\text{tail} \le (8/\pi^4)
+\cdot C^2 / T$ with $C = \sum_i \lambda_i / \delta_i$ (each of the two
+Bessel factors contributes $|J_0(\pi\delta_i\xi)|^2 \le 2/(\pi^2\delta_i\xi)$,
+so the product carries $\pi^4$, not $\pi^2$). Confirm Watson
 1944, §7.21 (cf. NIST DLMF 10.14.1); verify that the smallest argument
 $\pi \delta_3 T \approx 7854$ exceeds the validity threshold; verify the
 arithmetic.
