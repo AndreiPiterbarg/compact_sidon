@@ -85,6 +85,8 @@ cloninger-steinerberger/cpu/data/
 *.stackdump
 *.bak
 
+audit.md
+
 # LaTeX build artefacts (keep .tex / .pdf / .bib / figures only)
 *.aux
 *.bbl
