@@ -24,6 +24,18 @@ Headline theorems.
     nonnegative-`L¹` constant `C₁ₐ` reduces to the `L²` class by the
     Schinzel–Schmidt 2002 step-function reduction — the identical step
     Matolcsi–Vinuesa 2010 invoke (their reference [4], §2).
+  * `Sidon.Constructor.C1a_ge_1292_L1`
+    (in `Sidon.Constructor.L1Reduction`) — the FULLY unconditional
+    headline over the full nonnegative `L¹` class, with NO `MemLp f 2`
+    hypothesis: for admissible `L¹ f` (nonneg, supported in `(-1/4,1/4)`,
+    `∫f = 1`), `ENNReal.ofReal (1292/1000) ≤ eLpNorm (f ⋆ f) ⊤`.  The
+    `MemLp f 2` step is discharged *in Lean* by the Schinzel–Schmidt
+    truncation `fₙ = min (f, n)` (no longer a paper citation).  The
+    conclusion is stated in `ℝ≥0∞` because `autoconvolution_ratio` uses
+    `(⊤).toReal = 0`, so `R(f) ≥ 1.292` is literally false for the
+    (admissible, `L¹`, non-`L²`) functions with `‖f⋆f‖_∞ = ∞`; the
+    `ℝ≥0∞` form is the correct `C₁ₐ ≥ 1.292` over the full class.
+    Same axiom budget as `C1a_ge_1292_unconditional` (trio + 4 numerical).
 
 Axioms.    The bundle headline `autoconvolution_ratio_ge_1292_1000`
            reaches exactly **two** numerical-only user axioms in its
@@ -84,3 +96,4 @@ import Sidon.Constructor.CauchySchwarzFloor
 import Sidon.Constructor.Assembly
 import Sidon.Constructor.LatticePositivity
 import Sidon.Constructor.PoissonSummable
+import Sidon.Constructor.L1Reduction
